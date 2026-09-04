@@ -70,8 +70,16 @@ if [ "${1:-}" = --with-core ]; then
     COREVER=$("$XRAY" version 2>/dev/null | awk 'NR==1{print $2}')
     [ -n "$COREVER" ] || COREVER=0
     C="$STAGE/core"
-    install -d "$C/DEBIAN" "$C/opt/xray-proxy/bin"
+    install -d "$C/DEBIAN" "$C/opt/xray-proxy/bin" "$C/usr/share/doc/xray-gateway-core"
     install -m 755 "$XRAY" "$C/opt/xray-proxy/bin/xray"
+    install -m 644 "$ROOT/packaging/copyright.core" \
+                   "$C/usr/share/doc/xray-gateway-core/copyright"
+    printf 'xray-gateway-core (%s) stable; urgency=medium\n\n  * Upstream Xray-core release %s, repackaged unmodified.\n\n -- Boris Kaganovich <bkaganovich@gmail.com>  %s\n' \
+        "$COREVER" "$COREVER" "$(LC_ALL=C date -R)" |
+        gzip -9nc > "$C/usr/share/doc/xray-gateway-core/changelog.gz"
+    ( cd "$C" && find . -type f ! -path './DEBIAN/*' -printf '%P\0' \
+      | sort -z | xargs -0 md5sum > DEBIAN/md5sums )
+    chmod 644 "$C/DEBIAN/md5sums"
     CSIZE=$(du -sk "$C" | cut -f1)
     sed -e "s/@COREVER@/$COREVER/" -e "s/@ARCH@/$ARCH/" -e "s/@SIZE@/$CSIZE/" \
         "$ROOT/packaging/templates/control.core" > "$C/DEBIAN/control"

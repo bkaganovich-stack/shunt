@@ -1,0 +1,17 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Xray-core
+Source: https://github.com/XTLS/Xray-core
+
+Files: opt/xray-proxy/bin/xray
+Copyright: 2020 The Xray-core authors
+License: MPL-2.0
+Comment: The unmodified upstream release binary. It is statically linked, as
+ Go binaries are; lintian's statically-linked-binary tag is expected here.
+
+License: MPL-2.0
+ This Source Code Form is subject to the terms of the Mozilla Public License,
+ v. 2.0. If a copy of the MPL was not distributed with this file, You can
+ obtain one at https://mozilla.org/MPL/2.0/.
+ .
+ On Debian systems the full text of the Mozilla Public License version 2.0 can
+ be found in /usr/share/common-licenses/MPL-2.0.
