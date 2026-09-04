@@ -55,7 +55,14 @@ case "$1" in
         # rewrite firewall and routing tables, which must not happen behind the
         # administrator's back during a package install.
         for u in $UNITS; do
-            [ -f "/lib/systemd/system/$u" ] && systemctl enable "$u" >/dev/null 2>&1 || true
+            [ -f "/lib/systemd/system/$u" ] || continue
+            case "$u" in
+                *.timer)
+                    # "enable" alone only schedules a timer from the next boot;
+                    # --now arms it immediately.
+                    systemctl enable --now "$u" >/dev/null 2>&1 || true ;;
+                *)  systemctl enable "$u" >/dev/null 2>&1 || true ;;
+            esac
         done
         systemctl start xray-web.service >/dev/null 2>&1 || true
         echo "xray-gateway: web interface on port 80. Routing services are enabled"
@@ -64,13 +71,17 @@ case "$1" in
     else
         # ── upgrade: restart only what was already running ───────────────────
         for u in $UNITS; do
-            case "$u" in *.timer) continue;; esac
-            if systemctl is-active --quiet "$u" 2>/dev/null; then
-                systemctl restart "$u" >/dev/null 2>&1 || true
-            fi
+            case "$u" in
+                *.timer)
+                    # A timer added by a newer version has to be armed here;
+                    # existing ones are already running and left alone.
+                    systemctl is-enabled --quiet "$u" 2>/dev/null || \
+                        systemctl enable --now "$u" >/dev/null 2>&1 || true ;;
+                *)  if systemctl is-active --quiet "$u" 2>/dev/null; then
+                        systemctl restart "$u" >/dev/null 2>&1 || true
+                    fi ;;
+            esac
         done
-        systemctl is-enabled --quiet xray-geoupdate.timer 2>/dev/null || \
-            systemctl enable --now xray-geoupdate.timer >/dev/null 2>&1 || true
     fi
 
     # ── rule sets: required at runtime, too volatile to ship in the package ───

@@ -4,8 +4,7 @@ Section: net
 Priority: optional
 Architecture: all
 Maintainer: Boris Kaganovich <bkaganovich@gmail.com>
-Depends: python3 (>= 3.11), python3-fastapi, python3-uvicorn, python3-pydantic,
- iproute2, iptables, curl, ca-certificates, procps
+Depends: python3 (>= 3.10), python3-fastapi, python3-uvicorn (>= 0.23.1), python3-pydantic, python3-multipart, iproute2, iptables, curl, ca-certificates, procps
 Recommends: xray-gateway-core, sing-box, dnsmasq-base
 Suggests: adguardvpn-cli, fptn-client
 Installed-Size: @SIZE@

@@ -7,7 +7,10 @@ case "$1" in
     # Configuration, database and logs are the administrator's data and are
     # only destroyed on an explicit purge.
     rm -rf /opt/xray-proxy/config /opt/xray-proxy/logs
-    rmdir /opt/xray-proxy 2>/dev/null || true
+    # bin/ is created by our postinst but owned by xray-gateway-core, so dpkg
+    # will not clear it. Remove it only while empty, which leaves the core
+    # package's binary alone when that package is still installed.
+    rmdir /opt/xray-proxy/bin /opt/xray-proxy 2>/dev/null || true
     ;;
 esac
 exit 0

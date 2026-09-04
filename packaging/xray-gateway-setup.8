@@ -1,0 +1,55 @@
+.TH XRAY-GATEWAY-SETUP 8 "2026-09-04" "xray-gateway 1.7.0" "System Administration"
+.SH NAME
+xray\-gateway\-setup \- detect the network layout for xray\-gateway
+.SH SYNOPSIS
+.B xray\-gateway\-setup
+.RI [ --detect-only " | " --dry-run ]
+.SH DESCRIPTION
+Works out how the gateway is wired into the network and records the result in
+.IR /opt/xray-proxy/config/network.conf ,
+which
+.BR iptables.sh (8)
+and the routing scripts read.
+.PP
+Two layouts are recognised:
+.TP
+.B inline
+Two network ports: the gateway sits between the ISP and the router.
+.B WAN_IF
+faces the ISP and is where the gateway masquerades;
+.B LAN_IF
+faces the router and receives forwarded traffic. Here
+.B ROUTER_IP
+holds the gateway's own address on the LAN link, because downstream the gateway
+.I is
+the router.
+.TP
+.B loop
+One network port: the gateway sits inside the router's LAN and the router
+performs the final NAT.
+.B ROUTER_IP
+holds the address of that upstream router.
+.PP
+The port carrying the default route is taken as the WAN side. For the LAN side
+the first other physical port with a carrier is used, wired ports being
+preferred over wireless ones, which on this hardware serve as out-of-band
+management. When more than one candidate exists the choice is reported so it can
+be checked.
+.SH OPTIONS
+.TP
+.B \-\-detect\-only
+Write the file only if no configuration exists yet; leave an existing one alone.
+Used by the package's post-installation script.
+.TP
+.B \-\-dry\-run
+Report what would be detected and written, and change nothing.
+.SH FILES
+.TP
+.I /opt/xray-proxy/config/network.conf
+Layout and interface names. Safe to edit by hand; restart
+.B xray-proxy
+afterwards.
+.SH EXIT STATUS
+Non-zero if no physical network interface could be found.
+.SH SEE ALSO
+.BR systemctl (1)

@@ -25,17 +25,25 @@ install -d "$P/DEBIAN" "$P/opt/xray-proxy/web/static" "$P/opt/xray-proxy/scripts
            "$P/lib/systemd/system" "$P/usr/sbin" "$P/usr/share/doc/xray-gateway"
 
 install -m 644 "$ROOT"/src/web/*.py            "$P/opt/xray-proxy/web/"
+# main.py carries a shebang, so it gets the matching exec bit. The alternative
+# -- stripping the shebang -- would alter the file, and keeping the packaged
+# copy byte-identical to what is deployed is worth more than one dead line.
+chmod 755 "$P/opt/xray-proxy/web/main.py"
 cp -r "$ROOT"/src/web/static/.                 "$P/opt/xray-proxy/web/static/"
-install -m 644 "$ROOT"/src/doh_proxy.py "$ROOT"/src/doh_proxy_ns.py "$P/opt/xray-proxy/"
+# These carry a shebang and are meant to be runnable, so they get exec bits.
+install -m 755 "$ROOT"/src/doh_proxy.py "$ROOT"/src/doh_proxy_ns.py "$P/opt/xray-proxy/"
 for f in "$ROOT"/src/scripts/*; do install -m 755 "$f" "$P/opt/xray-proxy/scripts/"; done
 # The FPTN egress script drops privileges and edits a network namespace; it is
 # root-only on the live system and stays that way in the package.
 chmod 750 "$P/opt/xray-proxy/scripts/fptn-egress.sh"
 install -m 644 "$ROOT"/systemd/*.service "$ROOT"/systemd/*.timer "$P/lib/systemd/system/"
 install -m 755 "$ROOT/packaging/xray-gateway-setup" "$P/usr/sbin/"
+install -d "$P/usr/share/man/man8"
+gzip -9nc "$ROOT/packaging/xray-gateway-setup.8" > "$P/usr/share/man/man8/xray-gateway-setup.8.gz"
 install -m 644 "$ROOT/README.md"            "$P/usr/share/doc/xray-gateway/"
 install -m 644 "$ROOT/packaging/copyright"   "$P/usr/share/doc/xray-gateway/copyright"
-gzip -9nc "$ROOT/debian-changelog" > "$P/usr/share/doc/xray-gateway/changelog.Debian.gz"
+# A native package (no Debian revision in the version) names it changelog.gz.
+gzip -9nc "$ROOT/debian-changelog" > "$P/usr/share/doc/xray-gateway/changelog.gz"
 # Strip build-host litter: byte-compiled caches, editor backups, and the
 # AppleDouble sidecars macOS leaves behind when files are copied through it.
 find "$P/opt" -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
