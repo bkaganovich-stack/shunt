@@ -1,0 +1,12 @@
+xray-gateway (1.7.0) stable; urgency=medium
+
+  * First packaged release. Previously installed by copying files into
+    /opt/xray-proxy with install.sh.
+  * Split the xray-core binary into xray-gateway-core so the core can be
+    updated on its own.
+  * geoip/geosite rule sets are downloaded after installation and refreshed
+    weekly by xray-geoupdate.timer instead of being shipped in the package.
+  * Network detection moved out of install.sh into xray-gateway-setup, which
+    now recognises the inline layout and records WAN_IF and TOPOLOGY.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 04 Sep 2026 23:48:58 +0300

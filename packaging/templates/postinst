@@ -1,0 +1,84 @@
+#!/bin/sh
+# postinst — xray-gateway
+set -e
+
+BASE=/opt/xray-proxy
+UNITS="xray-proxy.service xray-web.service xray-dohproxy.service xray-health.service
+       xray-agwatch.service xray-agwatch.timer xray-mgmt-ap.service
+       xray-first-boot.service fptn-egress.service xray-geoupdate.timer"
+
+case "$1" in
+  configure)
+    # ── runtime directories the application expects but does not own ──────────
+    mkdir -p "$BASE/config/snapshots" "$BASE/logs" "$BASE/bin"
+    chmod 755 "$BASE/config" "$BASE/logs" "$BASE/bin"
+
+    # ── sing-box runs under its own account (sing-box.service has User=) ──────
+    if ! getent passwd sing-box >/dev/null 2>&1; then
+        adduser --system --group --no-create-home --home /nonexistent \
+                --shell /usr/sbin/nologin sing-box >/dev/null 2>&1 || true
+    fi
+
+    # ── migrate admin-placed units that would shadow the packaged ones ────────
+    # Only units byte-identical to ours are removed; anything the admin edited
+    # is left alone and reported, because /etc wins over /lib.
+    shadowed=""
+    for u in $UNITS; do
+        old="/etc/systemd/system/$u"; new="/lib/systemd/system/$u"
+        [ -f "$old" ] && [ -f "$new" ] || continue
+        if cmp -s "$old" "$new"; then
+            rm -f "$old"
+        else
+            shadowed="$shadowed $u"
+        fi
+    done
+    if [ -n "$shadowed" ]; then
+        echo "xray-gateway: locally modified units in /etc/systemd/system take" >&2
+        echo "  precedence over the packaged copies and were left untouched:" >&2
+        for u in $shadowed; do echo "    $u" >&2; done
+        echo "  Compare them with /lib/systemd/system and remove yours to adopt" >&2
+        echo "  the packaged versions." >&2
+    fi
+
+    # ── network detection: only on a box that has never been configured ───────
+    if [ ! -f "$BASE/config/network.conf" ]; then
+        /usr/sbin/xray-gateway-setup --detect-only || \
+            echo "xray-gateway: network detection failed; run xray-gateway-setup by hand" >&2
+    fi
+
+    systemctl daemon-reload >/dev/null 2>&1 || true
+
+    if [ -z "$2" ]; then
+        # ── first install ────────────────────────────────────────────────────
+        # The management interface is enabled and started so the box can be
+        # configured. The routing services are enabled but NOT started: they
+        # rewrite firewall and routing tables, which must not happen behind the
+        # administrator's back during a package install.
+        for u in $UNITS; do
+            [ -f "/lib/systemd/system/$u" ] && systemctl enable "$u" >/dev/null 2>&1 || true
+        done
+        systemctl start xray-web.service >/dev/null 2>&1 || true
+        echo "xray-gateway: web interface on port 80. Routing services are enabled"
+        echo "  but not started — review the configuration, then run:"
+        echo "    systemctl start xray-proxy sing-box"
+    else
+        # ── upgrade: restart only what was already running ───────────────────
+        for u in $UNITS; do
+            case "$u" in *.timer) continue;; esac
+            if systemctl is-active --quiet "$u" 2>/dev/null; then
+                systemctl restart "$u" >/dev/null 2>&1 || true
+            fi
+        done
+        systemctl is-enabled --quiet xray-geoupdate.timer 2>/dev/null || \
+            systemctl enable --now xray-geoupdate.timer >/dev/null 2>&1 || true
+    fi
+
+    # ── rule sets: required at runtime, too volatile to ship in the package ───
+    if [ ! -s "$BASE/config/geosite.dat" ] || [ ! -s "$BASE/config/geoip.dat" ]; then
+        echo "xray-gateway: downloading geoip/geosite rule sets…"
+        "$BASE/scripts/update-geo.sh" || \
+            echo "xray-gateway: download failed; run $BASE/scripts/update-geo.sh once online" >&2
+    fi
+    ;;
+esac
+exit 0

@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# xray-gateway-setup — work out the network layout and record it in
+# config/network.conf, which iptables.sh and the routing scripts source.
+#
+# Two layouts are supported, matching iptables.sh:
+#   loop   — one NIC; the gateway sits inside the router's LAN and the router
+#            performs the final NAT.
+#   inline — two NICs; the gateway sits between the ISP and the router. WAN_IF
+#            faces the ISP and is where the gateway MASQUERADEs, LAN_IF faces
+#            the router and receives forwarded traffic.
+set -euo pipefail
+
+BASE=/opt/xray-proxy
+NET_CONF="$BASE/config/network.conf"
+DETECT_ONLY=0; DRY_RUN=0
+case "${1:-}" in
+    --detect-only) DETECT_ONLY=1 ;;   # write only if nothing is configured yet
+    --dry-run)     DRY_RUN=1 ;;       # report what would be written, touch nothing
+    "" ) ;;
+    *) echo "usage: $0 [--detect-only|--dry-run]" >&2; exit 2 ;;
+esac
+
+[ "$(id -u)" = 0 ] || { echo "must run as root" >&2; exit 1; }
+
+if [ "$DETECT_ONLY" = 1 ] && [ -f "$NET_CONF" ]; then
+    echo "$NET_CONF already exists — left unchanged"
+    exit 0
+fi
+
+# Physical interfaces only: anything with a device symlink, excluding the
+# virtual interfaces the gateway itself creates (tun, veth, bridges).
+phys() {
+    local n
+    for d in /sys/class/net/*/device; do
+        [ -e "$d" ] || continue
+        n=$(basename "$(dirname "$d")")
+        case "$n" in lo|tun*|veth*|br-*|docker*|fptn*) continue;; esac
+        echo "$n"
+    done
+}
+
+DEFAULT_IF=$(ip route show default 2>/dev/null |
+             awk 'NR==1{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')
+ROUTER_IP=$(ip route show default 2>/dev/null | awk 'NR==1{print $3}')
+
+# Candidates for the second, router-facing port: a physical interface that is
+# not the default route and has a carrier. Requiring a carrier avoids picking
+# an unplugged spare port. Wired ports are preferred over wireless ones, which
+# on this class of hardware serve as out-of-band management rather than as the
+# LAN link — without that preference the choice depends on enumeration order.
+WIRED=""; WIRELESS=""
+for n in $(phys); do
+    [ "$n" = "$DEFAULT_IF" ] && continue
+    [ "$(cat "/sys/class/net/$n/carrier" 2>/dev/null || echo 0)" = 1 ] || continue
+    if [ -e "/sys/class/net/$n/wireless" ] || [ -e "/sys/class/net/$n/phy80211" ]; then
+        WIRELESS="$WIRELESS $n"
+    else
+        WIRED="$WIRED $n"
+    fi
+done
+CANDIDATES="$WIRED$WIRELESS"
+SECOND=$(echo "$WIRED" | awk '{print $1}')
+[ -n "$SECOND" ] || SECOND=$(echo "$WIRELESS" | awk '{print $1}')
+
+if [ -n "$DEFAULT_IF" ] && [ -n "$SECOND" ]; then
+    TOPOLOGY=inline; WAN_IF="$DEFAULT_IF"; LAN_IF="$SECOND"
+elif [ -n "$DEFAULT_IF" ]; then
+    TOPOLOGY=loop;   WAN_IF="";           LAN_IF="$DEFAULT_IF"
+else
+    # No default route yet (a freshly imaged box). Fall back to the first
+    # physical interface with a carrier so there is something to edit.
+    for n in $(phys); do
+        [ "$(cat "/sys/class/net/$n/carrier" 2>/dev/null || echo 0)" = 1 ] && { LAN_IF=$n; break; }
+    done
+    LAN_IF="${LAN_IF:-$(phys | head -1)}"
+    TOPOLOGY=loop; WAN_IF=""
+fi
+
+[ -n "${LAN_IF:-}" ] || { echo "cannot detect any physical interface" >&2; exit 1; }
+
+# ROUTER_IP means different things in the two layouts, matching what
+# apply_topology.py writes and what main.py expects:
+#   loop   — the upstream router the gateway sits behind.
+#   inline — the gateway's OWN address on the LAN link, because there the
+#            gateway *is* the router for everything downstream.
+if [ "$TOPOLOGY" = inline ]; then
+    ROUTER_IP=$(ip -4 -o addr show "$LAN_IF" 2>/dev/null |
+                awk '{split($4,a,"/"); print a[1]; exit}')
+    if [ -z "$ROUTER_IP" ]; then
+        echo "note: $LAN_IF has no IPv4 address yet, so the gateway's own LAN" >&2
+        echo "      address is unknown; ROUTER_IP left empty — set it in" >&2
+        echo "      $NET_CONF once the LAN link is addressed." >&2
+    fi
+else
+    [ -n "$ROUTER_IP" ] || ROUTER_IP=192.168.50.1
+fi
+
+echo "Topology      : $TOPOLOGY"
+[ -n "$WAN_IF" ] && echo "WAN interface : $WAN_IF (to the ISP)"
+echo "LAN interface : $LAN_IF"
+if [ "$TOPOLOGY" = inline ]; then
+    echo "Gateway LAN ip: ${ROUTER_IP:-<unset>}   (recorded as ROUTER_IP)"
+else
+    echo "Router IP     : $ROUTER_IP"
+fi
+if [ -n "$CANDIDATES" ] && [ "$(echo "$CANDIDATES" | wc -w)" -gt 1 ]; then
+    echo "note: more than one candidate for the LAN port ($CANDIDATES);" >&2
+    echo "      picked $LAN_IF — check $NET_CONF before starting xray-proxy." >&2
+fi
+
+if [ "$DRY_RUN" = 1 ]; then
+    echo "(dry run — $NET_CONF not written)"
+    exit 0
+fi
+
+mkdir -p "$BASE/config"
+{
+    echo "# Written by xray-gateway-setup on $(date -u '+%Y-%m-%d %H:%M UTC')"
+    echo "# Edit by hand if these are wrong, then restart xray-proxy."
+    echo "TOPOLOGY=$TOPOLOGY"
+    [ -n "$WAN_IF" ] && echo "WAN_IF=$WAN_IF"
+    echo "LAN_IF=$LAN_IF"
+    [ -n "$ROUTER_IP" ] && echo "ROUTER_IP=$ROUTER_IP"
+} > "$NET_CONF"
+echo "wrote $NET_CONF"

@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+case "$1" in
+  remove) systemctl daemon-reload >/dev/null 2>&1 || true ;;
+  purge)
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    # Configuration, database and logs are the administrator's data and are
+    # only destroyed on an explicit purge.
+    rm -rf /opt/xray-proxy/config /opt/xray-proxy/logs
+    rmdir /opt/xray-proxy 2>/dev/null || true
+    ;;
+esac
+exit 0

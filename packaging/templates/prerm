@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+UNITS="xray-proxy.service xray-web.service xray-dohproxy.service xray-health.service
+       xray-agwatch.service xray-agwatch.timer xray-mgmt-ap.service
+       xray-first-boot.service fptn-egress.service xray-geoupdate.timer"
+case "$1" in
+  remove)
+    for u in $UNITS; do
+        systemctl stop "$u" >/dev/null 2>&1 || true
+        systemctl disable "$u" >/dev/null 2>&1 || true
+    done
+    # Stopping xray-proxy already runs "iptables.sh down" via ExecStopPost.
+    # This second call covers the case where the service was not running but
+    # rules were left behind by a crash; the script is idempotent.
+    [ -x /opt/xray-proxy/scripts/iptables.sh ] && \
+        /opt/xray-proxy/scripts/iptables.sh down >/dev/null 2>&1 || true
+    ;;
+esac
+exit 0

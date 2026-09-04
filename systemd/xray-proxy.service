@@ -1,0 +1,23 @@
+[Unit]
+Description=Xray Transparent Proxy Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=XRAY_LOCATION_ASSET=/opt/xray-proxy/config
+ExecStartPre=/opt/xray-proxy/scripts/iptables.sh up
+ExecStart=/opt/xray-proxy/bin/xray run -config /opt/xray-proxy/config/xray.json
+ExecStopPost=/opt/xray-proxy/scripts/iptables.sh down
+Restart=on-failure
+RestartSec=5
+# Increased from 65535: a busy home gateway with 100K+ connections/day and
+# long-lived TLS/QUIC sessions exhausted 65535 FDs after ~3 days causing
+# "accept4: too many open files" and complete loss of connectivity.
+LimitNOFILE=1048576
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

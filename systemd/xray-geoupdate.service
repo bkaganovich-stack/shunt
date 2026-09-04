@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh xray-gateway geoip/geosite rule sets
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/xray-proxy/scripts/update-geo.sh
+ExecStartPost=/bin/sh -c 'systemctl is-active --quiet xray-proxy.service && systemctl restart xray-proxy.service || true'
