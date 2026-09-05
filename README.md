@@ -33,8 +33,14 @@ the router performs the final NAT.
 ## Installing
 
 ```
+shasum -a 256 -c SHA256SUMS
 sudo apt install ./xray-gateway_1.7.1_all.deb ./xray-gateway-core_*.deb
 ```
+
+Installing the two `.deb` files directly is the supported route. `apt` resolves
+their dependencies from the Ubuntu archive the same way it would from a
+repository. `packaging/mkrepo.sh` can turn the same files into a signed APT
+repository later, if the packages ever need to reach more than one machine.
 
 The Python dependencies come from the Ubuntu archive. `sing-box` is not in the
 archive and is installed separately from upstream; the gateway starts without it
