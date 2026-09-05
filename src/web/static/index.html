@@ -550,6 +550,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <span class="ico">🖥️</span> Терминал</div>
       <div class="nav-link" onclick="toggleTheme()">
         <span class="ico">◐</span> <span id="theme-label">Светлая тема</span></div>
+      <div class="nav-link" onclick="toggleLang()" data-i18n-skip>
+        <span class="ico">🌐</span> <span id="lang-label">English</span></div>
       <div class="nav-link" id="nav-showall" onclick="toggleAllSections()"
            style="opacity:.55;font-size:12px;margin-top:4px">
         <span class="ico">⋯</span> <span id="nav-showall-label">Показать все разделы</span></div>
@@ -2448,7 +2450,7 @@ async function applyTopology() {
   const body = topoSelected === 'inline'
     ? { topology: 'inline', wan_if: wan?.name, lan_if: lan?.name, wan_mac: wanMac }
     : { topology: 'loop', lan_if: (topoIfaces.find(i => i.active)?.name) || lan?.name };
-  if (!confirm(`Переключить топологию на «${TOPO_INFO[topoSelected].name}»?\n\nСетевая конфигурация изменится. Следуйте инструкции по перекоммутации. При неудаче — автооткат.`)) return;
+  if (!confirm(t(`Переключить топологию на «${TOPO_INFO[topoSelected].name}»?\n\nСетевая конфигурация изменится. Следуйте инструкции по перекоммутации. При неудаче — автооткат.`))) return;
   const r = await api('POST', '/api/network/topology', body);
   if (!r) return;
   if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.detail || 'Ошибка запуска', false); return; }
@@ -2569,7 +2571,7 @@ async function applyIfaceSwitch() {
   const msg = netifLinkMap[netifSelected]
     ? `Переключить шлюз на интерфейс ${netifSelected}?\n\nСвязь прервётся на 5–10 секунд. При недоступности роутера в течение 45 секунд произойдёт автоматический откат.`
     : `Переключить шлюз на интерфейс ${netifSelected}?\n\nНа нём сейчас нет кабеля. После нажатия ОК у вас будет 90 секунд, чтобы переткнуть кабель из текущего порта в новый. Если кабель не появится или роутер останется недоступен — конфигурация откатится автоматически (верните кабель в старый порт).`;
-  if (!confirm(msg)) return;
+  if (!confirm(t(msg))) return;
   const r = await api('POST', '/api/network/interface', { name: netifSelected });
   if (!r) return;
   if (!r.ok) {
@@ -2659,7 +2661,7 @@ async function changePw() {
   } else toast(r?.error || 'Ошибка', false);
 }
 async function factoryReset() {
-  if (!confirm('Сбросить все настройки к заводским? Это действие нельзя отменить.')) return;
+  if (!confirm(t('Сбросить все настройки к заводским? Это действие нельзя отменить.'))) return;
   const r = await apiJ('POST', '/api/factory-reset');
   if (r?.ok) { toast('Настройки сброшены. Перезайдите.'); setTimeout(doLogout, 1500); }
   else toast('Ошибка', false);
@@ -2794,7 +2796,7 @@ async function loadSnapshots() {
 }
 
 async function restoreSnapshot(id) {
-  if (!confirm(`Откатить к снапшоту ${id}?\nТекущая конфигурация будет сохранена в новый снапшот.`)) return;
+  if (!confirm(t(`Откатить к снапшоту ${id}?\nТекущая конфигурация будет сохранена в новый снапшот.`))) return;
   const r = await apiJ('POST', `/api/snapshots/restore/${id}`);
   if (r?.ok) {
     toast('Откат выполнен'); refreshStatus(); loadSnapshots();
@@ -3008,7 +3010,7 @@ async function toggleVpn(id, enable) {
 }
 
 async function deleteVpn(id) {
-  if (!confirm('Удалить VPN сервер?')) return;
+  if (!confirm(t('Удалить VPN сервер?'))) return;
   const r = await apiJ('DELETE', `/api/vpn-servers/${id}`);
   if (r?.ok) { loadVpnServers(); refreshStatus(); toast('Сервер удалён'); }
   else toast(r?.error || 'Ошибка', false);
@@ -3047,7 +3049,7 @@ async function pasteKey() {
 }
 async function applyKey() { addVpnServer(); }
 async function deleteKey() {
-  if (!confirm('Удалить все VPN серверы?')) return;
+  if (!confirm(t('Удалить все VPN серверы?'))) return;
   const r = await apiJ('DELETE', '/api/vpn-key');
   if (r?.ok) { loadVpnServers(); refreshStatus(); toast('VPN ключ удалён'); }
 }
@@ -3498,7 +3500,7 @@ async function saveGroup() {
 }
 
 async function deleteGroup(id) {
-  if (!confirm('Удалить группу?')) return;
+  if (!confirm(t('Удалить группу?'))) return;
   const r = await apiJ('DELETE', `/api/groups/${id}`);
   if (r?.ok) { loadGroups(); toast('Группа удалена'); }
   else toast(r?.error || 'Ошибка', false);
@@ -3572,7 +3574,7 @@ async function toggleSub(id, enable) {
 }
 
 async function deleteSub(id) {
-  if (!confirm('Удалить подписку и все её правила?')) return;
+  if (!confirm(t('Удалить подписку и все её правила?'))) return;
   const r = await apiJ('DELETE', `/api/subscriptions/${id}`);
   if (r?.ok) { loadSubscriptions(); toast('Подписка удалена'); }
   else toast(r?.error || 'Ошибка', false);
@@ -3909,7 +3911,7 @@ async function toggleTask(id, enable) {
 }
 
 async function deleteTask(id) {
-  if (!confirm('Удалить задачу?')) return;
+  if (!confirm(t('Удалить задачу?'))) return;
   const r = await apiJ('DELETE', `/api/scheduler/${id}`);
   if (r?.ok) { loadScheduler(); toast('Задача удалена'); }
   else toast(r?.error || 'Ошибка', false);
@@ -3965,7 +3967,7 @@ function renderUpdatesContent(r) {
 }
 
 async function doUpdateXray(tag) {
-  if (!confirm(`Обновить xray-core до v${tag}?\n\nПеред обновлением будет создан снапшот. При ошибке можно откатиться через раздел «Настройки».`)) return;
+  if (!confirm(t(`Обновить xray-core до v${tag}?\n\nПеред обновлением будет создан снапшот. При ошибке можно откатиться через раздел «Настройки».`))) return;
   const r = await apiJ('POST', '/api/updates/xray-core');
   if (r?.ok) {
     toast(`xray-core обновлён: ${r.message}`); loadUpdateHistory(); checkUpdates();
@@ -3993,7 +3995,7 @@ async function loadUpdateHistory() {
 
 // ─── Apple CDN override ───────────────────────────────────────────────────────
 async function restartServices() {
-  if (!confirm('Перезапустить службы шлюза?\n\nСеть прервётся примерно на 10 секунд.')) return;
+  if (!confirm(t('Перезапустить службы шлюза?\n\nСеть прервётся примерно на 10 секунд.'))) return;
   const r = document.getElementById('sysact-result');
   if (r) r.textContent = 'перезапускаю, ~10 секунд…';
   await apiJ('POST', '/api/system/restart-services', { confirm: true });
@@ -4001,9 +4003,9 @@ async function restartServices() {
 }
 
 async function rebootGateway() {
-  if (!confirm('Перезагрузить шлюз целиком?\n\nСеть пропадёт примерно на минуту.\n' +
-               'Обычно достаточно перезапуска служб — попробуйте сначала его.')) return;
-  if (!confirm('Точно перезагрузить? Это дольше и рискованнее перезапуска служб.')) return;
+  if (!confirm(t('Перезагрузить шлюз целиком?\n\nСеть пропадёт примерно на минуту.\n' +
+               'Обычно достаточно перезапуска служб — попробуйте сначала его.'))) return;
+  if (!confirm(t('Точно перезагрузить? Это дольше и рискованнее перезапуска служб.'))) return;
   const r = document.getElementById('sysact-result');
   if (r) r.textContent = 'перезагружаю, шлюз вернётся через минуту…';
   await apiJ('POST', '/api/system/reboot', { confirm: true });
@@ -4203,6 +4205,202 @@ function termSetStatus(msg, color) {
   let r = null;
   try { r = await apiJ('GET', '/api/auth-check'); } catch (e) { /* network down */ }
   if (r?.ok) showApp(); else showLogin();
+})();
+</script>
+<script>
+/* ─────────────────────────────────────────────────────────────────────────────
+   Interface language.
+
+   The page is one hand-written HTML file with no build step, so there are no
+   message ids to mark up. Translation therefore happens on the DOM: the walker
+   below replaces text nodes and human-facing attributes using a dictionary
+   keyed by the Russian source string.
+
+   Russian is what the markup already contains, so it needs no dictionary and
+   cannot regress: a missing entry leaves the Russian text in place rather than
+   producing a blank. Switching back restores the exact original text, which is
+   remembered per node rather than re-derived.
+   ───────────────────────────────────────────────────────────────────────────── */
+const I18N = {
+  lang: 'ru',
+  dict: null,
+  patterns: null,
+  origText: new WeakMap(),   // text node  -> original nodeValue
+  origAttr: new WeakMap(),   // element    -> Map(attribute -> original value)
+};
+
+const I18N_ATTRS = ['data-tip', 'title', 'placeholder', 'aria-label', 'alt'];
+// Nothing inside these is prose, and neither are their attributes.
+const I18N_SKIP_TAGS = new Set(['SCRIPT', 'STYLE']);
+// Here the *content* is not prose -- it is preformatted output or what the user
+// typed -- but the attributes still are, a textarea's placeholder above all, so
+// only the text inside is left alone.
+const I18N_SKIP_TEXT_IN = 'pre, textarea';
+// <code> is deliberately in neither list: inline it holds human-readable values
+// such as default credentials, and a command example is safe regardless, since
+// only exact dictionary entries are ever substituted.
+
+async function i18nLoad(lang) {
+  if (lang === 'ru' || I18N.dict) return true;
+  try {
+    const r = await fetch('/static/locales/' + lang + '.json', { cache: 'no-cache' });
+    if (!r.ok) return false;
+    const j = await r.json();
+    I18N.dict = j.strings;
+    // Phrases built with a substitution cannot be looked up whole, so they are
+    // matched by pattern instead. Order matters: the first match wins, so the
+    // more specific pattern has to come first. The optional third element lists
+    // capture groups whose own text is translatable -- a routing profile name
+    // dropped into "In effect: ...", for instance.
+    I18N.patterns = (j.patterns || [])
+      .map(([rx, rep, groups]) => [new RegExp(rx), rep, groups || null]);
+    return true;
+  } catch (e) { return false; }
+}
+
+function i18nTranslate(s) {
+  if (!I18N.dict) return null;
+  if (Object.prototype.hasOwnProperty.call(I18N.dict, s)) return I18N.dict[s];
+  for (const [rx, rep, groups] of I18N.patterns) {
+    const m = s.match(rx);
+    if (!m) continue;
+    if (!groups) return s.replace(rx, rep);
+    // Translate the named groups first, then splice them into the template
+    // directly, since a replacement string cannot call back into the dictionary.
+    let out = rep;
+    for (let i = 1; i < m.length; i++) {
+      let v = m[i] === undefined ? '' : m[i];
+      if (groups.includes(i)) {
+        const inner = i18nTranslate(v.replace(/\s+/g, ' ').trim());
+        if (inner !== null) v = inner;
+      }
+      out = out.split('$' + i).join(v);
+    }
+    return out;
+  }
+  return null;
+}
+
+/* Available to code that builds a string outside the DOM -- a confirm() dialog,
+   for instance -- where the walker never sees it. */
+function t(s) {
+  if (I18N.lang === 'ru') return s;
+  const r = i18nTranslate(String(s).replace(/\s+/g, ' ').trim());
+  return r === null ? s : r;
+}
+
+/* Writing a value identical to the one already there still produces a mutation
+   record, which would feed straight back into the observer, so every write in
+   this file is guarded by a comparison first. */
+function i18nSetText(node, v) { if (node.nodeValue !== v) node.nodeValue = v; }
+
+function i18nText(node) {
+  const had = I18N.origText.has(node);
+  const raw = had ? I18N.origText.get(node) : node.nodeValue;
+  if (I18N.lang === 'ru') { if (had) i18nSetText(node, raw); return; }
+  // Surrounding whitespace is kept as it was: it can be the only thing
+  // separating this node from an adjacent inline element.
+  const m = raw.match(/^(\s*)([\s\S]*?)(\s*)$/);
+  const core = m[2].replace(/\s+/g, ' ');
+  if (!core) return;
+  const tr = i18nTranslate(core);
+  if (tr === null) return;
+  if (!had) I18N.origText.set(node, raw);
+  i18nSetText(node, m[1] + tr + m[3]);
+}
+
+function i18nAttrs(el) {
+  let saved = I18N.origAttr.get(el);
+  for (const a of I18N_ATTRS) {
+    if (!el.hasAttribute(a)) continue;
+    const had = saved && saved.has(a);
+    const raw = had ? saved.get(a) : el.getAttribute(a);
+    if (I18N.lang === 'ru') {
+      if (had && el.getAttribute(a) !== raw) el.setAttribute(a, raw);
+      continue;
+    }
+    const tr = i18nTranslate(raw.replace(/\s+/g, ' ').trim());
+    if (tr === null) continue;
+    if (!had) {
+      if (!saved) { saved = new Map(); I18N.origAttr.set(el, saved); }
+      saved.set(a, raw);
+    }
+    if (el.getAttribute(a) !== tr) el.setAttribute(a, tr);
+  }
+}
+
+function i18nWalk(root) {
+  if (root.nodeType === Node.TEXT_NODE) { i18nText(root); return; }
+  if (root.nodeType !== Node.ELEMENT_NODE) return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode(n) {
+      if (n.nodeType === Node.ELEMENT_NODE) {
+        if (I18N_SKIP_TAGS.has(n.tagName) || n.hasAttribute('data-i18n-skip'))
+          return NodeFilter.FILTER_REJECT;   // rejects the whole subtree
+        return NodeFilter.FILTER_ACCEPT;
+      }
+      // A text node whose container holds preformatted or typed-in text.
+      return n.parentElement && n.parentElement.closest(I18N_SKIP_TEXT_IN)
+        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  if (root.nodeType === Node.ELEMENT_NODE) i18nAttrs(root);
+  let n;
+  while ((n = w.nextNode())) {
+    if (n.nodeType === Node.TEXT_NODE) i18nText(n);
+    else i18nAttrs(n);
+  }
+}
+
+function i18nApply() {
+  // Detached while we write, so the observer never sees our own edits. The
+  // guard above is not enough on its own: mutation records are delivered
+  // asynchronously, by which time any in-progress flag has been cleared again.
+  i18nObserveOff();
+  try { i18nWalk(document.body); } finally { i18nObserveOn(); }
+  document.documentElement.setAttribute('lang', I18N.lang);
+  const lbl = document.getElementById('lang-label');
+  if (lbl) lbl.textContent = I18N.lang === 'ru' ? 'English' : 'Русский';
+}
+
+/* Most of the interface is rendered by JavaScript after the fact, so newly
+   inserted markup has to be translated as it appears rather than once at load. */
+const I18N_OBSERVER = new MutationObserver(muts => {
+  if (I18N.lang === 'ru') return;
+  i18nObserveOff();
+  try {
+    for (const m of muts) {
+      if (m.type === 'characterData') i18nText(m.target);
+      else for (const n of m.addedNodes) i18nWalk(n);
+    }
+  } finally { i18nObserveOn(); }
+});
+
+function i18nObserveOff() {
+  I18N_OBSERVER.disconnect();
+}
+
+function i18nObserveOn() {
+  // Anything queued while detached is ours; drop it rather than replay it.
+  I18N_OBSERVER.takeRecords();
+  document.body && I18N_OBSERVER.observe(document.body,
+    { childList: true, subtree: true, characterData: true });
+}
+
+async function setLang(lang) {
+  if (lang !== 'ru' && !(await i18nLoad(lang))) return;   // keep Russian on failure
+  I18N.lang = lang;
+  try { localStorage.setItem('ui-lang', lang); } catch (e) {}
+  i18nApply();
+}
+
+function toggleLang() { setLang(I18N.lang === 'ru' ? 'en' : 'ru'); }
+
+(async () => {
+  let saved = 'ru';
+  try { saved = localStorage.getItem('ui-lang') || 'ru'; } catch (e) {}
+  if (saved !== 'ru') await setLang(saved); else i18nApply();
+  i18nObserveOn();
 })();
 </script>
 </body>

@@ -67,13 +67,25 @@ SUBST = re.compile(r"\$\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}")
 SENTINEL = "\x00"
 
 
-def js_templates(html: str) -> list[str]:
-    """Template literals from inline <script> blocks, with substitutions masked."""
+# String literals of all three kinds. Backticks may carry substitutions;
+# quoted literals may carry escapes. Both end up in the page as text, either as
+# markup that is assigned to innerHTML or as a message shown to the user.
+LITERALS = re.compile(
+    r"`([^`]*)`"
+    r"|'((?:[^'\\\n]|\\.)*)'"
+    r'|"((?:[^"\\\n]|\\.)*)"'
+)
+
+
+def js_literals(html: str) -> list[str]:
+    """Every string literal from inline <script> blocks, substitutions masked."""
     out = []
     for block in re.finditer(r"<script\b[^>]*>(.*?)</script>", html, re.S):
-        for lit in re.finditer(r"`([^`]*)`", block.group(1)):
-            body = lit.group(1)
-            if CYRILLIC.search(body):
+        for lit in LITERALS.finditer(block.group(1)):
+            body = next((g for g in lit.groups() if g is not None), "")
+            if body and CYRILLIC.search(body):
+                # \n in a quoted literal is a newline once the page runs.
+                body = body.replace("\\n", "\n").replace("\\t", "\t")
                 out.append(SUBST.sub(SENTINEL, body))
     return out
 
@@ -89,7 +101,7 @@ def main() -> int:
     # runtime walker translates it too -- but only if the phrases are collected
     # here as well.
     d = Collector()
-    for tpl in js_templates(html):
+    for tpl in js_literals(html):
         d.feed(tpl)
         d.close()
         d.stack.clear()
