@@ -488,6 +488,9 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
              onkeydown="if(event.key==='Enter')doLogin()"></div>
     <div id="l-err" style="color:var(--red);font-size:13px;margin-bottom:12px;display:none"></div>
     <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Войти →</button>
+    <div class="login-lang" onclick="toggleLang()" data-i18n-skip
+         style="margin-top:14px;text-align:center;font-size:12px;opacity:.6;cursor:pointer">
+      🌐 <span id="lang-label-login">English</span></div>
   </div>
 </div>
 
@@ -4359,8 +4362,14 @@ function i18nApply() {
   i18nObserveOff();
   try { i18nWalk(document.body); } finally { i18nObserveOn(); }
   document.documentElement.setAttribute('lang', I18N.lang);
-  const lbl = document.getElementById('lang-label');
-  if (lbl) lbl.textContent = I18N.lang === 'ru' ? 'English' : 'Русский';
+  // The switcher appears twice: in the sidebar, and on the login screen, which
+  // is shown before the sidebar exists -- without it the language could not be
+  // changed until after signing in.
+  const other = I18N.lang === 'ru' ? 'English' : 'Русский';
+  for (const id of ['lang-label', 'lang-label-login']) {
+    const lbl = document.getElementById(id);
+    if (lbl) lbl.textContent = other;
+  }
 }
 
 /* Most of the interface is rendered by JavaScript after the fact, so newly
