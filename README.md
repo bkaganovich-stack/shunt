@@ -71,6 +71,15 @@ They are about 92 MB and go stale, so they are downloaded after installation
 rather than shipped in the package, and `shunt-geoupdate.timer` refreshes them
 weekly.
 
+## Tests
+
+```
+python3 -m pytest tests/ -q
+```
+
+They redirect every path in the module to a temporary directory, so they can be
+run on any machine without touching a real installation.
+
 ## Building
 
 ```

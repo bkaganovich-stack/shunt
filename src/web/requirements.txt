@@ -1,0 +1,6 @@
+# For running the application outside a Debian package. The .deb declares the
+# same dependencies as apt packages; python-multipart is required because the
+# settings-import endpoint accepts a file upload.
+fastapi>=0.104.0
+uvicorn[standard]>=0.23.1
+python-multipart>=0.0.6

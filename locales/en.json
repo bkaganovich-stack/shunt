@@ -360,7 +360,6 @@
   "Опционально": "Optional",
   "имя пользователя": "username",
   "пароль": "password",
-  "напр. 00:00:5e:00:53:00": "e.g. 00:00:5e:00:53:00",
   "Отдельный провайдер и протокол. Включается автоматически, только если AdGuard недоступен.": "A separate provider and protocol. It comes up automatically, and only when AdGuard is unavailable.",
   "— при смене глобального профиля устройство автоматически следует ему · остальные варианты — явное переопределение для конкретного устройства, глобальный профиль игнорируется · ⚡ цветная метка «Действует» — признак явного переопределения": "— the device follows the global profile whenever it changes · the other options are an explicit per-device override, and the global profile is then ignored · ⚡ the coloured In effect badge marks an explicit override",
   "Активный": "Active",
@@ -616,7 +615,8 @@
   "Слушать только на адресе шлюза в домашней сети, не на стороне провайдера.": "Listen only on the gateway's address in the home network, not on the ISP side.",
   "Рекомендуется, если прокси доступен не только домашним устройствам.": "Recommended when the proxy is reachable by more than the home devices.",
   "Перезапуск служб занимает около десяти секунд и снимает большинство сбоев: маршрутизация и туннель поднимаются заново, настройки не меняются. Полная перезагрузка дольше и оставляет сеть без связи примерно на минуту — начинайте с перезапуска.": "Restarting the services takes about ten seconds and clears most failures: routing and the tunnel come back up and no setting changes. A full reboot is slower and leaves the network down for about a minute — start with the restart.",
-  "Переключение в inline из интерфейса отключено: схемы требуют разной коммутации кабелей, а автоматический возврат из inline в loop невозможен — при неудаче шлюз останется без сети. Inline настраивается вручную из консоли.": "Switching to inline from the interface is disabled: the two layouts need different cabling, and there is no automatic way back from inline to loop — a failed attempt leaves the gateway with no network. Set inline up by hand from the console."
+  "Переключение в inline из интерфейса отключено: схемы требуют разной коммутации кабелей, а автоматический возврат из inline в loop невозможен — при неудаче шлюз останется без сети. Inline настраивается вручную из консоли.": "Switching to inline from the interface is disabled: the two layouts need different cabling, and there is no automatic way back from inline to loop — a failed attempt leaves the gateway with no network. Set inline up by hand from the console.",
+  "напр. 00:00:5E:00:53:00": "e.g. 00:00:5E:00:53:00"
  },
  "patterns": [
   [
