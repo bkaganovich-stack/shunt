@@ -1,105 +1,106 @@
 # Shunt
 
-A transparent split-routing gateway for a home network. Traffic is routed by
-destination: domestic sites go out directly, foreign ones through a tunnel.
-Nothing has to be installed on the devices behind it, so televisions, consoles
-and guest hardware are covered along with the phones and laptops.
+Shunt chooses, for every connection, whether it leaves your home network
+directly or through a tunnel. Domestic and local destinations go out direct;
+blocked and foreign ones take the tunnel. There is nothing to switch on or off.
 
-Shunt is a box on the wire, not an application: it sits either between the ISP
-and the router or inside the router's LAN. It combines xray-core in TPROXY mode,
-sing-box, dnsmasq and a DNS-over-HTTPS proxy under one web interface on port 80,
-in Russian or English.
+It runs on a spare always-on mini-PC placed on the network path, so nothing is
+installed on any device. Phones, laptops, TVs, consoles, guest hardware and IoT
+gear are covered alike — including everything that cannot run a VPN client at
+all. Set it up once, and nobody in the household configures anything again.
 
-The name is the electrical and railway sense of the word: a shunt diverts part
-of a flow onto another path. The tunnel is one such path, and which traffic
-takes it is the whole point of the product.
+Built and run in Russia, where both of the obvious settings are wrong. Tunnel
+everything and domestic banking and government sites stop working, because they
+refuse foreign exit IPs — and everything gets slower. Tunnel nothing and many
+foreign services are unreachable. The useful setting is neither on nor off, but
+per destination.
 
-## Interface language
+Self-hosted. Debian or Ubuntu, managed from one web interface.
 
-Russian is what the markup contains and is the default; English is a dictionary
-applied to the DOM at runtime, loaded from `static/locales/en.json` the first
-time it is needed. The switcher sits at the bottom of the sidebar and on the
-login screen, and the choice is remembered per browser. A phrase with no entry
-stays Russian rather than going blank, so a gap in the dictionary degrades
-gracefully. To revise a translation, edit `locales/en.json` -- no rebuild of the
-page is involved. `tools/i18n_extract.py` regenerates the list of translatable
-strings after the interface changes.
+## Install
 
-## Layouts
+You need Debian or Ubuntu, python3 3.10 or newer, and any small always-on x86
+machine with one or two network ports.
 
-**inline** — the gateway sits between the ISP and the router. `WAN_IF` faces the
-ISP and is where the gateway MASQUERADEs; `LAN_IF` faces the router.
-
-**loop** — a single network port; the gateway sits inside the router's LAN and
-the router performs the final NAT.
-
-`shunt-setup` works out which layout applies and records it in
-`/opt/shunt/config/network.conf`.
-
-## Installing
+Both packages are on the [Releases](https://github.com/bkaganovich-stack/shunt/releases)
+page:
 
 ```
 shasum -a 256 -c SHA256SUMS
 sudo apt install ./shunt_2.0.0_all.deb ./shunt-xray_*.deb
 ```
 
-Installing the two `.deb` files directly is the supported route. `apt` resolves
-their dependencies from the Ubuntu archive the same way it would from a
-repository. `packaging/mkrepo.sh` can turn the same files into a signed APT
-repository later, if the packages ever need to reach more than one machine.
+`apt` resolves the rest from the distribution archive. `sing-box` is not in the
+archive and is installed separately from upstream; without it everything works
+except the SOCKS proxy features. The geo rule sets are another 92 MB and go
+stale, so they download after installation and refresh weekly on a timer.
 
-The Python dependencies come from the Ubuntu archive. `sing-box` is not in the
-archive and is installed separately from upstream; the gateway starts without it
-but the SOCKS proxy features stay unavailable.
+## After installing
 
-On first install the management interface starts on port 80. The routing
-services are enabled but **deliberately not started** — they rewrite firewall
-and routing tables, which should not happen unattended during a package
-install. Review the detected layout, then:
+The management interface comes up on port 80, at `http://<box-ip>/`.
+
+The routing services are enabled but deliberately not started. They rewrite
+firewall and routing tables, which should not happen unattended during a package
+install. Review the layout the setup tool detected, then start them:
 
 ```
 sudo systemctl start shunt sing-box
 ```
 
-On upgrade, only the services that were already running are restarted.
+## Wiring
 
-## Rule sets
+The setup tool works out which of the two layouts applies.
 
-`geoip.dat` and `geosite.dat` come from
-[runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat).
-They are about 92 MB and go stale, so they are downloaded after installation
-rather than shipped in the package, and `shunt-geoupdate.timer` refreshes them
-weekly.
+- **inline** — the box sits between the ISP and the router. Two network ports.
+- **loop** — a single port. The box sits inside the router's LAN and the router
+  does the final NAT.
 
-## Tests
+## Routing policy
+
+- Geo databases (geoip/geosite) plus your own rules. Your rules win.
+- Global profiles: blocked-only, everything-except-domestic, all traffic, or
+  direct with the tunnel unused.
+- Per-device and per-group policy. A device either follows the global profile or
+  carries an explicit override. Devices are discovered from the ARP table.
+
+## Egress and failover
+
+The tunnel provider is pluggable; today that means AdGuard VPN as primary and
+FPTN as backup. If the primary goes quiet for about three minutes, Shunt fails
+over; if both are down it routes directly and restores your profile once a
+tunnel answers again.
+
+## Failing safe
+
+Changing routing on a live network can lock you out of it, so:
+
+- a configuration snapshot is taken before every change;
+- if the proxy core fails to start, the change rolls back;
+- switching topology or network port rolls back if the router becomes
+  unreachable.
+
+## Web interface
+
+Russian or English, switchable at runtime. Mostly you will use the device list
+with its per-device policy, the dashboard with live CPU, memory, disk and
+throughput graphs, and the DNS page — dnsmasq with a DNS-over-HTTPS upstream,
+split-DNS for domestic domains, and DNS-level ad and malware blocking.
+
+Also there: traffic analytics, logs, a live connections table, a SOCKS proxy for
+sending one application through the tunnel, a terminal, a scheduler, webhook
+notifications, and configuration export/import.
+
+## Reference
+
+Built on xray-core in TPROXY mode, sing-box, dnsmasq and a small
+DNS-over-HTTPS proxy. The core is replaceable, which is why it ships as its own
+package. Installs to `/opt/shunt` with `shunt-*` systemd units. Rule sets come
+from [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat).
 
 ```
-python3 -m pytest tests/ -q
+./packaging/build.sh          # build the packages; needs only dpkg-dev
+python3 -m pytest tests/ -q   # 150 tests, redirected to a temp directory
 ```
 
-They redirect every path in the module to a temporary directory, so they can be
-run on any machine without touching a real installation.
-
-## Building
-
-```
-./packaging/build.sh                          # shunt
-./packaging/build.sh --with-core /path/to/xray  # and shunt-xray
-```
-
-Needs only `dpkg-dev`, so it builds on the gateway itself. Output goes to
-`dist/`. The package version is read from `VERSION` in `src/web/main.py`, so
-there is one place to bump.
-
-## Layout on disk
-
-| Path | Owned by | Contents |
-|---|---|---|
-| `/opt/shunt/web`, `/scripts` | package | application and helper scripts |
-| `/opt/shunt/config` | administrator | settings, database, rule sets |
-| `/opt/shunt/bin/xray` | `shunt-xray` | the proxy core |
-| `/lib/systemd/system` | package | units |
-| `/usr/sbin/shunt-setup` | package | network detection |
-
-Removing the package stops the services and withdraws the firewall rules but
-leaves `config/` alone. `apt purge` deletes it.
+Formerly `xray-gateway`, renamed at 2.0.0 because that name promoted one
+replaceable component into the name of the whole product.
