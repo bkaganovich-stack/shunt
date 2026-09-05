@@ -616,9 +616,10 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="card">
           <div class="card-title">Управление шлюзом</div>
           <div class="text-muted" style="font-size:13px;margin-bottom:14px">
-            Перезапуск служб решает почти всё и занимает около десяти секунд.
-            Полная перезагрузка дольше и рискованнее — из наших разборов она не помогла ни разу,
-            а однажды сама сломала маршрутизацию. Начинайте с первой кнопки.
+            Перезапуск служб занимает около десяти секунд и снимает большинство сбоев:
+            маршрутизация и туннель поднимаются заново, настройки не меняются. Полная
+            перезагрузка дольше и оставляет сеть без связи примерно на минуту —
+            начинайте с перезапуска.
           </div>
           <div class="btn-row">
             <button class="btn btn-primary" onclick="restartServices()">↻ Перезапустить службы</button>
@@ -637,7 +638,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card" style="border-color:rgba(108,142,245,0.4)">
         <div class="card-title">🛰️ Выход в интернет (egress)</div>
         <div class="override-row" style="border:none;margin:0;padding:6px 0 12px 0">
-          <div class="override-label">Через AdGuard VPN <span class="hint" tabindex="0" data-tip="Заблокированный трафик пойдёт через туннель AdGuard. Перекрывает выбранный сервер ниже.">?</span></div>
+          <div class="override-label">Через AdGuard VPN <span class="hint" tabindex="0" data-tip="Заблокированный трафик пойдёт через туннель AdGuard. Эта настройка перекрывает выбранный ниже сервер.">?</span></div>
           <label class="toggle"><input type="checkbox" id="egress-adguard" onchange="renderEgressHint()"><span class="slider"></span></label>
         </div>
         <div class="info-row">
@@ -670,7 +671,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           </div>
           <div id="egress-pings" style="display:none;max-height:260px;overflow-y:auto;border:1px solid rgba(128,128,128,.25);border-radius:8px;padding:6px;margin-bottom:10px"></div>
           <div class="override-row" style="padding:8px 0">
-            <div class="override-label">Постквантовая криптография <span class="hint" tabindex="0" data-tip="Защита от «записать сейчас — расшифровать потом»: трафик пишут сегодня, вскрывают, когда дозреют квантовые компьютеры. Переключение переподключит туннель.">?</span></div>
+            <div class="override-label">Постквантовая криптография <span class="hint" tabindex="0" data-tip="Защита от «записать сейчас — расшифровать потом»: перехваченный сегодня трафик могут расшифровать позже, когда квантовые компьютеры станут достаточно мощными. Переключение переподключит туннель.">?</span></div>
             <label class="toggle"><input type="checkbox" id="egress-ag-pq"><span class="slider"></span></label>
           </div>
           <div class="text-muted" style="font-size:12px">Вход в аккаунт AdGuard — на шлюзе: <span class="monospace">adguardvpn-cli login</span></div>
@@ -685,7 +686,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="card-title">⚙️ Настройки выхода</div>
 
         <div class="override-row" style="border:none;padding:6px 0">
-          <div class="override-label">Протокол AdGuard <span class="hint" tabindex="0" data-tip="QUIC быстрее, но 4 сентября именно он не давал переподключиться: клиент ходил к бэкенду по IPv6, которого у шлюза нет. HTTP/2 идёт по TCP и этот путь минует.">?</span></div>
+          <div class="override-label">Протокол AdGuard <span class="hint" tabindex="0" data-tip="QUIC быстрее, но идёт по UDP: если UDP фильтруется или IPv6 объявлен, но не работает, переподключение может зависать. HTTP/2 идёт по TCP — выберите его, если туннель перестал восстанавливаться сам.">?</span></div>
           <select id="ag-protocol" style="min-width:150px" onchange="saveAgProtocol()">
             <option value="">— не менять —</option>
             <option value="http2">HTTP/2 (надёжнее)</option>
@@ -705,7 +706,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
             <span id="fptn-service" class="info-val monospace">—</span>
           </div>
           <div class="override-row" style="padding:8px 0">
-            <div class="override-label">Сервер FPTN <span class="hint" tabindex="0" data-tip="В США доступны только USA-1 и USA-2; USA-1 не подключался ни разу за все проверки.">?</span></div>
+            <div class="override-label">Сервер FPTN <span class="hint" tabindex="0" data-tip="Не каждый сервер принимает подключения в любой момент. Если выбранный не отвечает, попробуйте другой в той же стране.">?</span></div>
             <select id="fptn-server" style="min-width:230px"></select>
           </div>
           <div class="btn-row">
@@ -783,7 +784,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div id="fallback-banner" style="display:none;margin-top:12px;margin-bottom:4px;padding:12px 14px;border-radius:var(--radius);background:rgba(240,173,78,0.12);border:1px solid var(--orange);font-size:13px"></div>
 
         <div class="override-row">
-          <div class="override-label">Apple CDN <span class="hint" tabindex="0" data-tip="Вкл. = через VPN, Выкл. = напрямую.">?</span></div>
+          <div class="override-label">Apple CDN <span class="hint" tabindex="0" data-tip="Вкл. — трафик устройства идёт через VPN, выкл. — напрямую.">?</span></div>
           <label class="toggle" title="Apple CDN (aaplimg.com) через VPN">
             <input type="checkbox" id="aaplimg-toggle" onchange="setAaplimg(this.checked)">
             <span class="slider"></span>
@@ -1501,11 +1502,11 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <input id="proxy-port" type="number" min="1" max="65535" value="1080" style="width:130px">
         </div>
         <div class="override-row" style="padding:8px 0">
-          <div class="override-label">Только домашняя сеть <span class="hint" tabindex="0" data-tip="Слушать лишь на адресе шлюза в Home-сети, не на стороне провайдера">?</span></div>
+          <div class="override-label">Только домашняя сеть <span class="hint" tabindex="0" data-tip="Слушать только на адресе шлюза в домашней сети, не на стороне провайдера.">?</span></div>
           <label class="toggle"><input type="checkbox" id="proxy-home"><span class="slider"></span></label>
         </div>
         <div class="override-row" style="padding:8px 0">
-          <div class="override-label">Логин и пароль (защита прокси) <span class="hint" tabindex="0" data-tip="Рекомендуется, если прокси доступен не только домашним устройствам">?</span></div>
+          <div class="override-label">Логин и пароль (защита прокси) <span class="hint" tabindex="0" data-tip="Рекомендуется, если прокси доступен не только домашним устройствам.">?</span></div>
           <label class="toggle"><input type="checkbox" id="proxy-auth" onchange="proxyAuthToggle()"><span class="slider"></span></label>
         </div>
         <div id="proxy-auth-fields" style="display:none;gap:8px;flex-direction:column;margin-top:8px">

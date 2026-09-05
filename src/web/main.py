@@ -2879,10 +2879,11 @@ async def set_topology(req: TopologyReq, u: str = Depends(auth_dep)):
     # 192.168.50.1) — every inline failure stranded the gateway. Inline can only
     # be done as a deliberate console reconfiguration, not a one-click action.
     if req.topology == "inline":
-        raise HTTPException(409, "Inline через кнопку отключён: режимы требуют разной "
-                                 "коммутации, а автооткат в loop после inline невозможен "
-                                 "(шлюз оставался без сети). Inline — только консольной "
-                                 "перенастройкой. Подробности — у ассистента.")
+        raise HTTPException(409, "Переключение в inline из интерфейса отключено: схемы "
+                                 "требуют разной коммутации кабелей, а автоматический "
+                                 "возврат из inline в loop невозможен — при неудаче шлюз "
+                                 "останется без сети. Inline настраивается вручную из "
+                                 "консоли.")
     ifaces = {i["name"]: i for i in list_net_interfaces()}
     if not req.lan_if or req.lan_if not in ifaces:
         raise HTTPException(400, f"LAN-интерфейс {req.lan_if} не найден")
