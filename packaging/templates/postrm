@@ -6,11 +6,11 @@ case "$1" in
     systemctl daemon-reload >/dev/null 2>&1 || true
     # Configuration, database and logs are the administrator's data and are
     # only destroyed on an explicit purge.
-    rm -rf /opt/xray-proxy/config /opt/xray-proxy/logs
-    # bin/ is created by our postinst but owned by xray-gateway-core, so dpkg
+    rm -rf /opt/shunt/config /opt/shunt/logs
+    # bin/ is created by our postinst but owned by shunt-xray, so dpkg
     # will not clear it. Remove it only while empty, which leaves the core
     # package's binary alone when that package is still installed.
-    rmdir /opt/xray-proxy/bin /opt/xray-proxy 2>/dev/null || true
+    rmdir /opt/shunt/bin /opt/shunt 2>/dev/null || true
     ;;
 esac
 exit 0

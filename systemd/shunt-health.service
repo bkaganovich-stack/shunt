@@ -1,0 +1,14 @@
+[Unit]
+Description=Shunt — continuous health monitor and auto-fix
+After=network-online.target shunt.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/shunt/scripts/health_monitor.py
+Restart=always
+RestartSec=10
+User=root
+
+[Install]
+WantedBy=multi-user.target

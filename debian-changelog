@@ -1,18 +1,33 @@
-xray-gateway (1.7.1) stable; urgency=medium
+shunt (2.0.0) stable; urgency=medium
+
+  * Renamed from xray-gateway to Shunt. The old name promoted one replaceable
+    component -- xray-core sits beside sing-box, dnsmasq and several egress
+    providers -- into the name of the whole product.
+  * The install path moves from /opt/xray-proxy to /opt/shunt and the units
+    from xray-* to shunt-*, so this is a breaking change. Installing over an
+    xray-gateway installation migrates the configuration, database and logs and
+    retires the old units; the old code is left in place to be deleted by hand.
+  * xray's own names are deliberately untouched: the binary, xray.json,
+    XRAY_LOCATION_ASSET and the XRAY_* firewall chains all name the component,
+    not the product.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sat, 05 Sep 2026 13:34:12 +0300
+
+shunt (1.7.0) stable; urgency=medium
+
+  * First packaged release. Previously installed by copying files into
+    /opt/shunt with install.sh.
+  * Split the xray-core binary into shunt-xray so the core can be
+    updated on its own.
+  * geoip/geosite rule sets are downloaded after installation and refreshed
+    weekly by shunt-geoupdate.timer instead of being shipped in the package.
+  * Network detection moved out of install.sh into shunt-setup, which
+    now recognises the inline layout and records WAN_IF and TOPOLOGY.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 04 Sep 2026 23:48:58 +0300
+
+shunt (1.7.1) stable; urgency=medium
 
   * The interface can be switched between Russian and English.
 
  -- Boris Kaganovich <bkaganovich@gmail.com>  Sat, 05 Sep 2026 09:07:53 +0300
-
-xray-gateway (1.7.0) stable; urgency=medium
-
-  * First packaged release. Previously installed by copying files into
-    /opt/xray-proxy with install.sh.
-  * Split the xray-core binary into xray-gateway-core so the core can be
-    updated on its own.
-  * geoip/geosite rule sets are downloaded after installation and refreshed
-    weekly by xray-geoupdate.timer instead of being shipped in the package.
-  * Network detection moved out of install.sh into xray-gateway-setup, which
-    now recognises the inline layout and records WAN_IF and TOPOLOGY.
-
- -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 04 Sep 2026 23:48:58 +0300

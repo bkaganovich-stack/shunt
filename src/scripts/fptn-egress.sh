@@ -16,8 +16,8 @@ TUN=fptn0
 SOCKS_PORT=1082
 TUN_IP=10.77.0.1          # bind the bridge to this; gone with the tunnel
 BRIDGE_UID=65534          # nobody: the bridge needs no privileges
-CONF=/opt/xray-proxy/config/fptn-socks.json
-SERVER=$(cat /opt/xray-proxy/config/fptn-server 2>/dev/null || echo USA-2)
+CONF=/opt/shunt/config/fptn-socks.json
+SERVER=$(cat /opt/shunt/config/fptn-server 2>/dev/null || echo USA-2)
 
 setup() {
     teardown >/dev/null 2>&1
@@ -58,9 +58,9 @@ setup() {
     ip netns exec $NS iptables -A OUTPUT -o veth-fptn-ns -m owner --uid-owner $BRIDGE_UID \
         -j REJECT --reject-with icmp-host-unreachable
     mkdir -p /etc/netns/$NS && echo "nameserver $HOSTIP" > /etc/netns/$NS/resolv.conf
-    sed "s|^LISTEN = .*|LISTEN = [(\"$HOSTIP\", 53)]|" /opt/xray-proxy/doh_proxy.py > /opt/xray-proxy/doh_proxy_ns.py
+    sed "s|^LISTEN = .*|LISTEN = [(\"$HOSTIP\", 53)]|" /opt/shunt/doh_proxy.py > /opt/shunt/doh_proxy_ns.py
     systemctl reset-failed fptn-ns-dns 2>/dev/null
-    systemd-run --unit fptn-ns-dns --collect /usr/bin/python3 /opt/xray-proxy/doh_proxy_ns.py >/dev/null 2>&1
+    systemd-run --unit fptn-ns-dns --collect /usr/bin/python3 /opt/shunt/doh_proxy_ns.py >/dev/null 2>&1
 }
 
 bridge() {
@@ -86,7 +86,7 @@ bridge() {
 }
 EOF
     ip netns exec $NS setpriv --reuid=$BRIDGE_UID --regid=$BRIDGE_UID --clear-groups \
-        /opt/xray-proxy/bin/xray run -config "$CONF" &
+        /opt/shunt/bin/xray run -config "$CONF" &
     echo $! > /run/fptn-bridge.pid
 }
 
@@ -116,7 +116,7 @@ teardown() {
     iptables -t nat -D PREROUTING -s $SUB -p tcp --dport 53 -j RETURN 2>/dev/null
     iptables -D FORWARD -d $SUB -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null
     iptables -D FORWARD -s $SUB -j ACCEPT 2>/dev/null
-    rm -rf /etc/netns/$NS /opt/xray-proxy/doh_proxy_ns.py
+    rm -rf /etc/netns/$NS /opt/shunt/doh_proxy_ns.py
 }
 
 status() {

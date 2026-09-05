@@ -2,7 +2,7 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Xray-core
 Source: https://github.com/XTLS/Xray-core
 
-Files: opt/xray-proxy/bin/xray
+Files: opt/shunt/bin/xray
 Copyright: 2020 The Xray-core authors
 License: MPL-2.0
 Comment: The unmodified upstream release binary. It is statically linked, as

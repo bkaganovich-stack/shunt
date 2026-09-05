@@ -1,15 +1,15 @@
 [Unit]
-Description=Xray Transparent Proxy Gateway
+Description=Shunt — transparent split routing (xray-core in TPROXY mode)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-Environment=XRAY_LOCATION_ASSET=/opt/xray-proxy/config
-ExecStartPre=/opt/xray-proxy/scripts/iptables.sh up
-ExecStart=/opt/xray-proxy/bin/xray run -config /opt/xray-proxy/config/xray.json
-ExecStopPost=/opt/xray-proxy/scripts/iptables.sh down
+Environment=XRAY_LOCATION_ASSET=/opt/shunt/config
+ExecStartPre=/opt/shunt/scripts/iptables.sh up
+ExecStart=/opt/shunt/bin/xray run -config /opt/shunt/config/xray.json
+ExecStopPost=/opt/shunt/scripts/iptables.sh down
 Restart=on-failure
 RestartSec=5
 # Increased from 65535: a busy home gateway with 100K+ connections/day and

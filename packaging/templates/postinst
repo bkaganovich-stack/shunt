@@ -1,14 +1,49 @@
 #!/bin/sh
-# postinst — xray-gateway
+# postinst — shunt
 set -e
 
-BASE=/opt/xray-proxy
-UNITS="xray-proxy.service xray-web.service xray-dohproxy.service xray-health.service
-       xray-agwatch.service xray-agwatch.timer xray-mgmt-ap.service
-       xray-first-boot.service fptn-egress.service xray-geoupdate.timer"
+BASE=/opt/shunt
+UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.service
+       shunt-agwatch.service shunt-agwatch.timer shunt-mgmt-ap.service
+       shunt-first-boot.service shunt-fptn-egress.service shunt-geoupdate.timer"
 
 case "$1" in
   configure)
+    # ── migrate an installation from before the rename ───────────────────────
+    # Until 2.0 the product was called xray-gateway and lived in
+    # /opt/xray-proxy with xray-* units, installed by copying files rather than
+    # by a package. Those installations carry the administrator's configuration
+    # and database, which have to come across; the old units have to go, or two
+    # sets of services would fight over the same firewall rules.
+    OLD=/opt/xray-proxy
+    OLD_UNITS="xray-proxy.service xray-web.service xray-dohproxy.service
+               xray-health.service xray-agwatch.service xray-agwatch.timer
+               xray-mgmt-ap.service xray-first-boot.service fptn-egress.service
+               xray-geoupdate.service xray-geoupdate.timer"
+    if [ -d "$OLD" ] && [ ! -d "$BASE/config" ]; then
+        echo "shunt: migrating the xray-gateway installation in $OLD"
+        for u in $OLD_UNITS; do
+            systemctl stop "$u" >/dev/null 2>&1 || true
+            systemctl disable "$u" >/dev/null 2>&1 || true
+            rm -f "/etc/systemd/system/$u"
+        done
+        systemctl daemon-reload >/dev/null 2>&1 || true
+
+        # Moved rather than copied: the rule sets and the database together run
+        # to well over a hundred megabytes, and two divergent copies would be
+        # worse than one.
+        mkdir -p "$BASE"
+        [ -d "$OLD/config" ] && mv "$OLD/config" "$BASE/config"
+        [ -d "$OLD/logs" ]   && mv "$OLD/logs"   "$BASE/logs"
+        [ -f "$BASE/config/gateway.db" ] && mv "$BASE/config/gateway.db" "$BASE/config/shunt.db"
+        # dnsmasq's snippet is regenerated under the new name; leaving the old
+        # one would apply both.
+        rm -f /etc/dnsmasq.d/gateway.conf
+
+        echo "shunt: configuration moved to $BASE/config; the old code in $OLD"
+        echo "  is no longer used and can be deleted once you are satisfied."
+    fi
+
     # ── runtime directories the application expects but does not own ──────────
     mkdir -p "$BASE/config/snapshots" "$BASE/logs" "$BASE/bin"
     chmod 755 "$BASE/config" "$BASE/logs" "$BASE/bin"
@@ -33,7 +68,7 @@ case "$1" in
         fi
     done
     if [ -n "$shadowed" ]; then
-        echo "xray-gateway: locally modified units in /etc/systemd/system take" >&2
+        echo "shunt: locally modified units in /etc/systemd/system take" >&2
         echo "  precedence over the packaged copies and were left untouched:" >&2
         for u in $shadowed; do echo "    $u" >&2; done
         echo "  Compare them with /lib/systemd/system and remove yours to adopt" >&2
@@ -42,8 +77,8 @@ case "$1" in
 
     # ── network detection: only on a box that has never been configured ───────
     if [ ! -f "$BASE/config/network.conf" ]; then
-        /usr/sbin/xray-gateway-setup --detect-only || \
-            echo "xray-gateway: network detection failed; run xray-gateway-setup by hand" >&2
+        /usr/sbin/shunt-setup --detect-only || \
+            echo "shunt: network detection failed; run shunt-setup by hand" >&2
     fi
 
     systemctl daemon-reload >/dev/null 2>&1 || true
@@ -64,10 +99,10 @@ case "$1" in
                 *)  systemctl enable "$u" >/dev/null 2>&1 || true ;;
             esac
         done
-        systemctl start xray-web.service >/dev/null 2>&1 || true
-        echo "xray-gateway: web interface on port 80. Routing services are enabled"
+        systemctl start shunt-web.service >/dev/null 2>&1 || true
+        echo "shunt: web interface on port 80. Routing services are enabled"
         echo "  but not started — review the configuration, then run:"
-        echo "    systemctl start xray-proxy sing-box"
+        echo "    systemctl start shunt sing-box"
     else
         # ── upgrade: restart only what was already running ───────────────────
         for u in $UNITS; do
@@ -86,9 +121,9 @@ case "$1" in
 
     # ── rule sets: required at runtime, too volatile to ship in the package ───
     if [ ! -s "$BASE/config/geosite.dat" ] || [ ! -s "$BASE/config/geoip.dat" ]; then
-        echo "xray-gateway: downloading geoip/geosite rule sets…"
+        echo "shunt: downloading geoip/geosite rule sets…"
         "$BASE/scripts/update-geo.sh" || \
-            echo "xray-gateway: download failed; run $BASE/scripts/update-geo.sh once online" >&2
+            echo "shunt: download failed; run $BASE/scripts/update-geo.sh once online" >&2
     fi
     ;;
 esac

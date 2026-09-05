@@ -1,12 +1,12 @@
-.TH XRAY-GATEWAY-SETUP 8 "2026-09-04" "xray-gateway 1.7.1" "System Administration"
+.TH SHUNT-SETUP 8 "2026-09-05" "shunt 2.0.0" "System Administration"
 .SH NAME
-xray\-gateway\-setup \- detect the network layout for xray\-gateway
+shunt\-setup \- detect the network layout for Shunt
 .SH SYNOPSIS
-.B xray\-gateway\-setup
+.B shunt\-setup
 .RI [ --detect-only " | " --dry-run ]
 .SH DESCRIPTION
 Works out how the gateway is wired into the network and records the result in
-.IR /opt/xray-proxy/config/network.conf ,
+.IR /opt/shunt/config/network.conf ,
 which
 .BR iptables.sh (8)
 and the routing scripts read.
@@ -45,9 +45,9 @@ Used by the package's post-installation script.
 Report what would be detected and written, and change nothing.
 .SH FILES
 .TP
-.I /opt/xray-proxy/config/network.conf
+.I /opt/shunt/config/network.conf
 Layout and interface names. Safe to edit by hand; restart
-.B xray-proxy
+.B shunt
 afterwards.
 .SH EXIT STATUS
 Non-zero if no physical network interface could be found.

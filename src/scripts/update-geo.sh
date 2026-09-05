@@ -2,7 +2,7 @@
 # Update geoip.dat and geosite.dat from runetfreedom/russia-v2ray-rules-dat
 set -euo pipefail
 
-GEO_DIR="/opt/xray-proxy/config"
+GEO_DIR="/opt/shunt/config"
 TMP=$(mktemp -d)
 trap "rm -rf $TMP" EXIT
 

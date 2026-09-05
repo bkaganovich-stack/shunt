@@ -1,0 +1,9 @@
+[Unit]
+Description=Shunt — refresh the geoip/geosite rule sets
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/shunt/scripts/update-geo.sh
+ExecStartPost=/bin/sh -c 'systemctl is-active --quiet shunt.service && systemctl restart shunt.service || true'

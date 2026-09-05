@@ -1,11 +1,11 @@
-Package: xray-gateway-core
+Package: shunt-xray
 Version: @COREVER@
 Section: net
 Priority: optional
 Architecture: @ARCH@
 Maintainer: Boris Kaganovich <bkaganovich@gmail.com>
 Installed-Size: @SIZE@
-Description: xray-core binary for xray-gateway
- The upstream xray-core proxy binary, installed at /opt/xray-proxy/bin/xray
- where xray-gateway expects it. Packaged separately so that the core can be
- updated independently of the gateway application.
+Description: xray-core binary for Shunt
+ The upstream xray-core proxy binary, installed at /opt/shunt/bin/xray where
+ Shunt expects it. Packaged separately so that the core can be updated
+ independently of the application.

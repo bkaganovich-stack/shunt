@@ -1,11 +1,11 @@
 [Unit]
-Description=Xray Proxy Web Management Interface
+Description=Shunt — web management interface
 After=network-online.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/xray-proxy/web
+WorkingDirectory=/opt/shunt/web
 ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 80 --log-level warning --timeout-graceful-shutdown 10
 Restart=always
 RestartSec=3

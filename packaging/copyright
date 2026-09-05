@@ -1,11 +1,11 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: xray-gateway
+Upstream-Name: shunt
 
 Files: *
 Copyright: 2026 Boris Kaganovich <bkaganovich@gmail.com>
 License: MIT
 
-Files: opt/xray-proxy/web/static/vendor/*
+Files: opt/shunt/web/static/vendor/*
 Copyright: 2017 The xterm.js authors
 License: MIT
 Comment: Bundled copies of xterm.js and its fit addon, served locally so the

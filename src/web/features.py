@@ -1,5 +1,5 @@
 """
-xray-gateway — P3 feature implementations.
+Shunt — P3 feature implementations.
 Imported by main.py at startup. Keeps main.py manageable.
 """
 import asyncio, hashlib, json, os, re, shutil, socket, subprocess, tempfile
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 # Injected by main.py after import
-BASE: Path = Path("/opt/xray-proxy")
+BASE: Path = Path("/opt/shunt")
 CFG_DIR: Path = BASE / "config"
 
 import db as _db
@@ -30,9 +30,9 @@ TERMINAL_BUILTIN_ALLOWLIST: list[str] = [
     "curl -s https://ipinfo.io", "curl -s http://ip.me",
     "df -h", "free -h", "uptime", "uname -a",
     "cat /proc/loadavg", "cat /proc/meminfo",
-    "ls /opt/xray-proxy",
-    "cat /etc/dnsmasq.d/gateway.conf",
-    "cat /opt/xray-proxy/config/network.conf",
+    "ls /opt/shunt",
+    "cat /etc/dnsmasq.d/shunt.conf",
+    "cat /opt/shunt/config/network.conf",
 ]
 
 TERMINAL_MODES = ("disabled", "diagnostic", "allowlist", "full")
@@ -173,7 +173,7 @@ def parse_subscription_content(text: str, sub_type: str) -> tuple[list[str], lis
 def fetch_subscription(url: str, timeout: int = 30) -> str:
     """Fetch subscription URL. Returns raw text content."""
     req = urllib.request.Request(
-        url, headers={"User-Agent": "xray-gateway/1.6.0"})
+        url, headers={"User-Agent": "shunt/1.6.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read(8 * 1024 * 1024)  # 8 MB max
     # detect encoding
@@ -381,7 +381,7 @@ def _task_geo_update() -> tuple[str, str]:
     script = BASE / "scripts" / "update-geo.sh"
     r = subprocess.run([str(script)], capture_output=True, text=True, timeout=120)
     if r.returncode == 0:
-        subprocess.run(["systemctl", "restart", "xray-proxy"], capture_output=True)
+        subprocess.run(["systemctl", "restart", "shunt"], capture_output=True)
         return "ok", "geo databases updated"
     return "error", r.stderr[:200]
 
@@ -424,10 +424,10 @@ def _task_sub_update(settings: dict) -> tuple[str, str]:
 
 def _task_health_check() -> tuple[str, str]:
     results = []
-    # xray-proxy
-    r = subprocess.run(["systemctl", "is-active", "xray-proxy"],
+    # shunt
+    r = subprocess.run(["systemctl", "is-active", "shunt"],
                        capture_output=True, text=True)
-    results.append(f"xray-proxy={r.stdout.strip()}")
+    results.append(f"shunt={r.stdout.strip()}")
     # dnsmasq
     r = subprocess.run(["systemctl", "is-active", "dnsmasq"],
                        capture_output=True, text=True)
@@ -457,13 +457,13 @@ def _task_log_rotate() -> tuple[str, str]:
 
 # ── UPDATE CENTER ─────────────────────────────────────────────────────────────
 XRAY_RELEASES_API = "https://api.github.com/repos/XTLS/Xray-core/releases/latest"
-GW_RELEASES_API   = "https://api.github.com/repos/bkaganovich-stack/xray-gateway/releases/latest"
+GW_RELEASES_API   = "https://api.github.com/repos/bkaganovich-stack/shunt/releases/latest"
 
 
 def _github_latest(api_url: str, timeout: int = 10) -> dict:
     req = urllib.request.Request(
         api_url,
-        headers={"User-Agent": "xray-gateway/1.6.0",
+        headers={"User-Agent": "shunt/1.6.0",
                  "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())

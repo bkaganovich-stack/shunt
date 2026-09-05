@@ -1,15 +1,15 @@
 [Unit]
-Description=Xray Proxy Gateway — First Boot Setup
+Description=Shunt — first boot setup
 # Run after network is up (DHCP assigned) but before xray services start
 After=network-online.target
 Wants=network-online.target
-Before=xray-proxy.service xray-web.service
+Before=shunt.service shunt-web.service
 # Only run if the stamp file is absent (not yet installed)
-ConditionPathExists=!/opt/xray-proxy/.installed
+ConditionPathExists=!/opt/shunt/.installed
 
 [Service]
 Type=oneshot
-ExecStart=/opt/xray-proxy-src/scripts/first-boot.sh
+ExecStart=/opt/shunt-src/scripts/first-boot.sh
 # Keep the journal entry visible after the service finishes
 RemainAfterExit=yes
 # Give install.sh time to download xray-core, geo files, etc.

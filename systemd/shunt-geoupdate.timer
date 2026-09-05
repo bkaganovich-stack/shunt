@@ -1,5 +1,5 @@
 [Unit]
-Description=Weekly refresh of xray-gateway geoip/geosite rule sets
+Description=Shunt — weekly refresh of the geoip/geosite rule sets
 
 [Timer]
 OnCalendar=Sun 04:00

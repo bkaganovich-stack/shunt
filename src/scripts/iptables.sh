@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # iptables TProxy setup for xray-core transparent proxy
-# Called by xray-proxy.service ExecStartPost / ExecStopPost
+# Called by shunt.service ExecStartPost / ExecStopPost
 set -euo pipefail
 
 ACTION="${1:-up}"
@@ -10,7 +10,7 @@ XRAY_MARK=255   # mark on xray's own outbound sockets (set in xray config)
 
 # ── Resolve topology + interfaces ─────────────────────────────────────────────
 # Priority 1: network.conf written by install.sh / switch scripts
-NET_CONF=/opt/xray-proxy/config/network.conf
+NET_CONF=/opt/shunt/config/network.conf
 if [[ -f "$NET_CONF" ]] && grep -q '^LAN_IF=' "$NET_CONF"; then
     # shellcheck source=/dev/null
     source "$NET_CONF"
@@ -134,7 +134,7 @@ iptables -t mangle -A PREROUTING -j XRAY_PREROUTING
 # Skip already-marked (xray's own) traffic
 # The FPTN second egress lives in a netns on this subnet. Its exclusion belongs
 # here, not in fptn-egress.sh: this chain is flushed and rebuilt on every
-# xray-proxy restart, so a rule added elsewhere silently disappears and the
+# shunt restart, so a rule added elsewhere silently disappears and the
 # secondary egress starts being TPROXY-ed into the primary one — a second exit
 # must never be able to disturb the first.
 iptables -t mangle -A XRAY_PREROUTING -s 192.168.244.0/30 -j RETURN

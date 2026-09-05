@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Xray Proxy Gateway — Installation Script
+# Shunt — legacy installation script (superseded by the Debian package)
 # Run as root on the mini PC (Ubuntu 26.04+)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
-INSTALL_DIR=/opt/xray-proxy
+INSTALL_DIR=/opt/shunt
 NET_CONF="$INSTALL_DIR/config/network.conf"
 
 RED='\033[0;31m'; GRN='\033[0;32m'; YLW='\033[1;33m'; NC='\033[0m'
@@ -56,7 +56,7 @@ detect_network() {
     mkdir -p "$INSTALL_DIR/config"
     cat > "$NET_CONF" <<NETEOF
 # Auto-detected by install.sh on $(date -u '+%Y-%m-%d %H:%M UTC')
-# Edit manually if the values are wrong, then restart xray-proxy.
+# Edit manually if the values are wrong, then restart shunt.
 LAN_IF=$LAN_IF
 ROUTER_IP=$ROUTER_IP
 NETEOF
@@ -70,8 +70,8 @@ step "Stopping old services"
 systemctl stop sing-box   2>/dev/null || true
 systemctl disable sing-box 2>/dev/null || true
 systemctl stop portal     2>/dev/null || true
-systemctl stop xray-proxy 2>/dev/null || true
-systemctl stop xray-web   2>/dev/null || true
+systemctl stop shunt 2>/dev/null || true
+systemctl stop shunt-web   2>/dev/null || true
 
 # ── 2. System packages ─────────────────────────────────────────────────────────
 step "Installing system packages"
@@ -133,11 +133,11 @@ bash "$INSTALL_DIR/scripts/update-geo.sh" || warn "Geo download failed — will 
 step "Generating initial xray config"
 python3 - <<'PYEOF'
 import json, sys
-sys.path.insert(0, '/opt/xray-proxy/web')
+sys.path.insert(0, '/opt/shunt/web')
 from main import build_xray_config, save_settings, DEFAULT_SETTINGS, CFG_DIR, XCFG
-import pathlib; pathlib.Path('/opt/xray-proxy/config').mkdir(parents=True, exist_ok=True)
+import pathlib; pathlib.Path('/opt/shunt/config').mkdir(parents=True, exist_ok=True)
 # Write default settings if not present
-if not pathlib.Path('/opt/xray-proxy/config/settings.json').exists():
+if not pathlib.Path('/opt/shunt/config/settings.json').exists():
     save_settings(dict(DEFAULT_SETTINGS))
 cfg = build_xray_config(DEFAULT_SETTINGS)
 XCFG.write_text(json.dumps(cfg, indent=2))
@@ -151,7 +151,7 @@ LAN_IP=$(ip -4 addr show "$LAN_IF" | grep -oP '(?<=inet )\d+\.\d+\.\d+\.\d+' | h
 [[ -z "$LAN_IP" ]] && warn "No IPv4 yet on $LAN_IF — dnsmasq will bind on first-boot"
 info "LAN IP: ${LAN_IP:-<pending>}"
 
-cat > /etc/dnsmasq.d/gateway.conf <<DNSEOF
+cat > /etc/dnsmasq.d/shunt.conf <<DNSEOF
 # Listen only on LAN interface
 listen-address=${LAN_IP:-127.0.0.1}
 bind-interfaces
@@ -189,7 +189,7 @@ ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
 
 # ── 12. sysctl ────────────────────────────────────────────────────────────────
 step "Enabling IP forwarding"
-cat > /etc/sysctl.d/90-xray-proxy.conf <<EOF
+cat > /etc/sysctl.d/90-shunt.conf <<EOF
 net.ipv4.ip_forward = 1
 net.ipv4.conf.all.route_localnet = 1
 net.ipv6.conf.all.forwarding = 1
@@ -198,28 +198,28 @@ sysctl --system -q
 
 # ── 13. Install systemd services ──────────────────────────────────────────────
 step "Installing systemd services"
-cp "$SCRIPT_DIR/systemd/xray-proxy.service" /etc/systemd/system/
-cp "$SCRIPT_DIR/systemd/xray-web.service"   /etc/systemd/system/
+cp "$SCRIPT_DIR/systemd/shunt.service" /etc/systemd/system/
+cp "$SCRIPT_DIR/systemd/shunt-web.service"   /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable xray-proxy xray-web
+systemctl enable shunt shunt-web
 
 # ── 14. Weekly geo cron ───────────────────────────────────────────────────────
 step "Setting up weekly geo update"
-echo "0 3 * * 0 root /opt/xray-proxy/scripts/update-geo.sh && systemctl restart xray-proxy" \
+echo "0 3 * * 0 root /opt/shunt/scripts/update-geo.sh && systemctl restart shunt" \
     > /etc/cron.d/xray-geo-update
 
 # ── 15. Start services ────────────────────────────────────────────────────────
 step "Starting services"
-systemctl start xray-web
+systemctl start shunt-web
 sleep 2
-systemctl start xray-proxy
+systemctl start shunt
 sleep 2
 
 # ── 16. Status check ─────────────────────────────────────────────────────────
 step "Verifying installation"
 echo ""
-systemctl is-active xray-web   && info "xray-web   ✓ running" || warn "xray-web   ✗ failed"
-systemctl is-active xray-proxy && info "xray-proxy ✓ running" || warn "xray-proxy ✗ check: journalctl -u xray-proxy"
+systemctl is-active shunt-web   && info "shunt-web   ✓ running" || warn "shunt-web   ✗ failed"
+systemctl is-active shunt && info "shunt ✓ running" || warn "shunt ✗ check: journalctl -u shunt"
 systemctl is-active dnsmasq    && info "dnsmasq    ✓ running" || warn "dnsmasq    ✗ failed"
 
 echo ""

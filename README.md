@@ -1,12 +1,18 @@
-# xray-gateway
+# Shunt
 
-A transparent split-routing VPN gateway for a home network. Traffic is routed by
-destination: domestic sites go out directly, foreign ones through a tunnel. No
-client software is needed on the devices behind it — phones, TVs and consoles
-included.
+A transparent split-routing gateway for a home network. Traffic is routed by
+destination: domestic sites go out directly, foreign ones through a tunnel.
+Nothing has to be installed on the devices behind it, so televisions, consoles
+and guest hardware are covered along with the phones and laptops.
 
-It combines xray-core in TPROXY mode, sing-box, dnsmasq and a DNS-over-HTTPS
-proxy, and is managed through a web interface on port 80, in Russian or English.
+Shunt is a box on the wire, not an application: it sits either between the ISP
+and the router or inside the router's LAN. It combines xray-core in TPROXY mode,
+sing-box, dnsmasq and a DNS-over-HTTPS proxy under one web interface on port 80,
+in Russian or English.
+
+The name is the electrical and railway sense of the word: a shunt diverts part
+of a flow onto another path. The tunnel is one such path, and which traffic
+takes it is the whole point of the product.
 
 ## Interface language
 
@@ -27,14 +33,14 @@ ISP and is where the gateway MASQUERADEs; `LAN_IF` faces the router.
 **loop** — a single network port; the gateway sits inside the router's LAN and
 the router performs the final NAT.
 
-`xray-gateway-setup` works out which layout applies and records it in
-`/opt/xray-proxy/config/network.conf`.
+`shunt-setup` works out which layout applies and records it in
+`/opt/shunt/config/network.conf`.
 
 ## Installing
 
 ```
 shasum -a 256 -c SHA256SUMS
-sudo apt install ./xray-gateway_1.7.1_all.deb ./xray-gateway-core_*.deb
+sudo apt install ./shunt_2.0.0_all.deb ./shunt-xray_*.deb
 ```
 
 Installing the two `.deb` files directly is the supported route. `apt` resolves
@@ -52,7 +58,7 @@ and routing tables, which should not happen unattended during a package
 install. Review the detected layout, then:
 
 ```
-sudo systemctl start xray-proxy sing-box
+sudo systemctl start shunt sing-box
 ```
 
 On upgrade, only the services that were already running are restarted.
@@ -62,14 +68,14 @@ On upgrade, only the services that were already running are restarted.
 `geoip.dat` and `geosite.dat` come from
 [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat).
 They are about 92 MB and go stale, so they are downloaded after installation
-rather than shipped in the package, and `xray-geoupdate.timer` refreshes them
+rather than shipped in the package, and `shunt-geoupdate.timer` refreshes them
 weekly.
 
 ## Building
 
 ```
-./packaging/build.sh                          # xray-gateway
-./packaging/build.sh --with-core /path/to/xray  # and xray-gateway-core
+./packaging/build.sh                          # shunt
+./packaging/build.sh --with-core /path/to/xray  # and shunt-xray
 ```
 
 Needs only `dpkg-dev`, so it builds on the gateway itself. Output goes to
@@ -80,11 +86,11 @@ there is one place to bump.
 
 | Path | Owned by | Contents |
 |---|---|---|
-| `/opt/xray-proxy/web`, `/scripts` | package | application and helper scripts |
-| `/opt/xray-proxy/config` | administrator | settings, database, rule sets |
-| `/opt/xray-proxy/bin/xray` | `xray-gateway-core` | the proxy core |
+| `/opt/shunt/web`, `/scripts` | package | application and helper scripts |
+| `/opt/shunt/config` | administrator | settings, database, rule sets |
+| `/opt/shunt/bin/xray` | `shunt-xray` | the proxy core |
 | `/lib/systemd/system` | package | units |
-| `/usr/sbin/xray-gateway-setup` | package | network detection |
+| `/usr/sbin/shunt-setup` | package | network detection |
 
 Removing the package stops the services and withdraws the firewall rules but
 leaves `config/` alone. `apt purge` deletes it.

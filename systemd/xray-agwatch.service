@@ -1,7 +1,0 @@
-[Unit]
-Description=AdGuard egress watchdog (probe SOCKS path, restart adguardvpn if dead)
-After=adguardvpn.service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/xray-proxy/scripts/adguard_watchdog.sh

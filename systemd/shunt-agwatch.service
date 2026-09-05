@@ -1,0 +1,7 @@
+[Unit]
+Description=Shunt — AdGuard egress watchdog (probe the SOCKS path, restart adguardvpn if dead)
+After=adguardvpn.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/shunt/scripts/adguard_watchdog.sh

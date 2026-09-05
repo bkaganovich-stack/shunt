@@ -36,7 +36,7 @@ AP_IP=192.168.99.1
 AP_CIDR=24
 DHCP_START=192.168.99.10
 DHCP_END=192.168.99.50
-HOSTAPD_CONF=/opt/xray-proxy/config/mgmt-ap-hostapd.conf
+HOSTAPD_CONF=/opt/shunt/config/mgmt-ap-hostapd.conf
 DNSMASQ_PID=/run/mgmt-ap-dnsmasq.pid
 HOSTAPD_PID=/run/mgmt-ap-hostapd.pid
 
@@ -87,7 +87,7 @@ ap_up() {
         --dhcp-option=3,"$AP_IP" \
         --dhcp-authoritative \
         --pid-file="$DNSMASQ_PID" \
-        --log-facility=/opt/xray-proxy/logs/mgmt-ap-dnsmasq.log \
+        --log-facility=/opt/shunt/logs/mgmt-ap-dnsmasq.log \
         --conf-file=/dev/null \
         --dhcp-leasefile=/run/mgmt-ap.leases \
         --except-interface=lo

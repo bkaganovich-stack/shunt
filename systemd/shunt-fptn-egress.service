@@ -1,0 +1,15 @@
+[Unit]
+Description=Shunt — FPTN second egress (isolated netns + SOCKS bridge on 192.168.244.2:1082)
+After=network-online.target shunt.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/opt/shunt/scripts/fptn-egress.sh setup
+ExecStart=/opt/shunt/scripts/fptn-egress.sh run
+ExecStopPost=/opt/shunt/scripts/fptn-egress.sh teardown
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

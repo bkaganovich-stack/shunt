@@ -33,8 +33,8 @@ done
 # Release is written once, after every Packages file exists, because it carries
 # their checksums -- generating it inside the loop would hash an incomplete set.
 ( cd "$REPO" && apt-ftparchive \
-    -o "APT::FTPArchive::Release::Origin=xray-gateway" \
-    -o "APT::FTPArchive::Release::Label=xray-gateway" \
+    -o "APT::FTPArchive::Release::Origin=shunt" \
+    -o "APT::FTPArchive::Release::Label=shunt" \
     -o "APT::FTPArchive::Release::Suite=$SUITE" \
     -o "APT::FTPArchive::Release::Codename=$SUITE" \
     -o "APT::FTPArchive::Release::Architectures=$ARCHES" \
@@ -50,12 +50,12 @@ gpg --batch --yes --default-key "$KEYID" --clearsign -o InRelease   Release
 gpg --batch --yes --default-key "$KEYID" -abs        -o Release.gpg Release
 
 # The public key, in the dearmored form apt expects under /etc/apt/keyrings.
-gpg --export "$KEYID" > "$REPO/xray-gateway-archive-keyring.gpg"
+gpg --export "$KEYID" > "$REPO/shunt-archive-keyring.gpg"
 
 echo "repository ready at $REPO"
 echo
 echo "On a client:"
-echo "  sudo install -m644 xray-gateway-archive-keyring.gpg /etc/apt/keyrings/"
-echo "  echo 'deb [signed-by=/etc/apt/keyrings/xray-gateway-archive-keyring.gpg] \\"
-echo "        <base-url> $SUITE $COMPONENT' | sudo tee /etc/apt/sources.list.d/xray-gateway.list"
-echo "  sudo apt update && sudo apt install xray-gateway"
+echo "  sudo install -m644 shunt-archive-keyring.gpg /etc/apt/keyrings/"
+echo "  echo 'deb [signed-by=/etc/apt/keyrings/shunt-archive-keyring.gpg] \\"
+echo "        <base-url> $SUITE $COMPONENT' | sudo tee /etc/apt/sources.list.d/shunt.list"
+echo "  sudo apt update && sudo apt install shunt"

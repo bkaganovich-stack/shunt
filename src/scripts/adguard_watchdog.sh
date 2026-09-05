@@ -8,9 +8,9 @@
 #      logs `socks5: request rejected, code=5`) and Restart=always never fires because
 #      the process hangs in its own "Waiting recovery" loop instead of exiting.
 SOCKS=127.0.0.1:1081
-STATE=/run/xray-agwatch.fail
-STAMP=/run/xray-agwatch.last
-LOG=/opt/xray-proxy/logs/agwatch.log
+STATE=/run/shunt-agwatch.fail
+STAMP=/run/shunt-agwatch.last
+LOG=/opt/shunt/logs/agwatch.log
 MAX_FAIL=2
 COOLDOWN=90   # a restart costs ~10 s, so do not suppress a needed second attempt
 MEM_LIMIT_MB=600
@@ -39,7 +39,7 @@ fi
 n=$(( $(cat "$STATE" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$STATE"
 # Sample the DIRECT path too (not through the tunnel), so the next incident settles
 # whether the WAN blipped first (ISP fault) or only the tunnel died (AdGuard fault).
-# xray-health flags "inline WAN unhealthy" ~14 s before every egress failure, but that
+# shunt-health flags "inline WAN unhealthy" ~14 s before every egress failure, but that
 # check reads WAN byte counters, which also go quiet when the tunnel dies — so on its
 # own it cannot tell cause from consequence.
 isp=$(ip route | awk '/default/{print $3; exit}')

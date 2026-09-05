@@ -1,19 +1,22 @@
-Package: xray-gateway
+Package: shunt
 Version: @VER@
 Section: net
 Priority: optional
 Architecture: all
 Maintainer: Boris Kaganovich <bkaganovich@gmail.com>
 Depends: python3 (>= 3.10), python3-fastapi, python3-uvicorn (>= 0.23.1), python3-pydantic, python3-multipart, iproute2, iptables, curl, ca-certificates, procps
-Recommends: xray-gateway-core, sing-box, dnsmasq-base
+Recommends: shunt-xray, sing-box, dnsmasq-base
 Suggests: adguardvpn-cli, fptn-client
 Installed-Size: @SIZE@
-Description: Transparent split-routing VPN gateway with a web interface
- A gateway that routes traffic by destination: domestic traffic goes out
- directly, foreign traffic through a tunnel. It combines xray-core in TPROXY
- mode, sing-box, dnsmasq and a DNS-over-HTTPS proxy, and is managed through a
- web interface on port 80.
+Description: Transparent split-routing gateway for a home network
+ Shunt routes traffic by destination: domestic traffic goes out directly,
+ foreign traffic through a tunnel. Nothing has to be installed on the devices
+ behind it, so televisions, consoles and guest hardware are covered too.
  .
- The package ships the application, its helper scripts and systemd units.
- The xray-core binary lives in xray-gateway-core; the geoip/geosite rule sets
- are downloaded after installation and refreshed by a weekly timer.
+ It sits either between the ISP and the router or inside the router's LAN, and
+ combines xray-core in TPROXY mode, sing-box, dnsmasq and a DNS-over-HTTPS
+ proxy under one web interface on port 80, in Russian or English.
+ .
+ This package carries the application, its helper scripts and systemd units.
+ The xray-core binary lives in shunt-xray; the geoip/geosite rule sets are
+ downloaded after installation and refreshed by a weekly timer.

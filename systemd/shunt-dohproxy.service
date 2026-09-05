@@ -1,0 +1,10 @@
+[Unit]
+Description=Shunt — DoH proxy: dnsmasq upstream -> DoH 1.1.1.1 over the tunnel (plain :53 is blocked by the VPN server)
+After=network.target sing-box.service shunt.service
+[Service]
+ExecStart=/usr/bin/python3 /opt/shunt/doh_proxy.py
+Restart=always
+RestartSec=2
+User=root
+[Install]
+WantedBy=multi-user.target

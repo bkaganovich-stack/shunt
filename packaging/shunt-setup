@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# xray-gateway-setup — work out the network layout and record it in
+# shunt-setup — work out the network layout and record it in
 # config/network.conf, which iptables.sh and the routing scripts source.
 #
 # Two layouts are supported, matching iptables.sh:
@@ -10,7 +10,7 @@
 #            the router and receives forwarded traffic.
 set -euo pipefail
 
-BASE=/opt/xray-proxy
+BASE=/opt/shunt
 NET_CONF="$BASE/config/network.conf"
 DETECT_ONLY=0; DRY_RUN=0
 case "${1:-}" in
@@ -105,7 +105,7 @@ else
 fi
 if [ -n "$CANDIDATES" ] && [ "$(echo "$CANDIDATES" | wc -w)" -gt 1 ]; then
     echo "note: more than one candidate for the LAN port ($CANDIDATES);" >&2
-    echo "      picked $LAN_IF — check $NET_CONF before starting xray-proxy." >&2
+    echo "      picked $LAN_IF — check $NET_CONF before starting shunt." >&2
 fi
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -115,8 +115,8 @@ fi
 
 mkdir -p "$BASE/config"
 {
-    echo "# Written by xray-gateway-setup on $(date -u '+%Y-%m-%d %H:%M UTC')"
-    echo "# Edit by hand if these are wrong, then restart xray-proxy."
+    echo "# Written by shunt-setup on $(date -u '+%Y-%m-%d %H:%M UTC')"
+    echo "# Edit by hand if these are wrong, then restart shunt."
     echo "TOPOLOGY=$TOPOLOGY"
     [ -n "$WAN_IF" ] && echo "WAN_IF=$WAN_IF"
     echo "LAN_IF=$LAN_IF"

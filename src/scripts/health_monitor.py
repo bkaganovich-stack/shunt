@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Continuous health monitor + auto-fix for the xray-gateway.
+"""Continuous health monitor + auto-fix for the shunt.
 
 Runs as a systemd daemon (internal 60s loop, Restart=always). Topology-aware.
 Every cycle it validates the datapath and self-heals known failure modes, with
@@ -22,7 +22,7 @@ is running, to avoid fighting it.
 import json, re, subprocess, time
 from pathlib import Path
 
-BASE        = Path("/opt/xray-proxy")
+BASE        = Path("/opt/shunt")
 CFG         = BASE / "config"
 NET_CONF    = CFG / "network.conf"
 STATE_FILE  = CFG / "health-state.json"
@@ -36,7 +36,7 @@ INTERVAL        = 60     # seconds between cycles
 WAN_FAIL_LIMIT  = 10**9   # inline static: never auto-revert to loop
 ROUTER          = "192.168.50.1"
 LOOP_IP         = "192.168.50.2"
-SERVICES        = ["xray-proxy", "xray-web", "dnsmasq", "sing-box"]
+SERVICES        = ["shunt", "shunt-web", "dnsmasq", "sing-box"]
 DISK_PRUNE_PCT  = 90
 ACCESS_LOG      = BASE / "logs" / "access.log"
 ACCESS_MAX      = 200 * 1024 * 1024   # bytes (actual blocks) before rotation
@@ -129,7 +129,7 @@ def revert_to_loop(reason: str) -> None:
     log(f"AUTO-FIX: {reason} -> reverting to known-good loop (safe_harbor)")
     # reuse the proven recovery in apply_topology
     run("/usr/bin/python3", "-c",
-        "import sys; sys.path.insert(0,'/opt/xray-proxy/scripts'); "
+        "import sys; sys.path.insert(0,'/opt/shunt/scripts'); "
         "import apply_topology as A; ok,info=A.safe_harbor_loop(); print('safe_harbor', ok, info)",
         timeout=180)
 
@@ -148,7 +148,7 @@ def rotate_access_log() -> None:
         return
     log(f"AUTO-FIX: access.log ~{st.st_blocks*512//(1024*1024)}MB > limit -> truncate + xray reopen")
     run("truncate", "-s", "0", str(ACCESS_LOG))
-    run("systemctl", "restart", "xray-proxy", timeout=40)
+    run("systemctl", "restart", "shunt", timeout=40)
 
 def ap_up_check() -> None:
     """The out-of-band rescue AP must always be up (it's the lifeline during
@@ -169,8 +169,8 @@ def prune_disk() -> None:
     # keep only the newest gateway backup, truncate big rotated logs
     run("bash", "-c",
         "ls -1dt /home/user/gateway-backup-* 2>/dev/null | tail -n +2 | xargs -r rm -rf; "
-        "find /opt/xray-proxy/logs -name '*.log.*' -delete 2>/dev/null; "
-        "truncate -s 0 /opt/xray-proxy/logs/access.log 2>/dev/null || true", timeout=60)
+        "find /opt/shunt/logs -name '*.log.*' -delete 2>/dev/null; "
+        "truncate -s 0 /opt/shunt/logs/access.log 2>/dev/null || true", timeout=60)
 
 # ── one monitoring cycle ──────────────────────────────────────────────────────
 def cycle(state: dict) -> dict:
@@ -207,9 +207,9 @@ def cycle(state: dict) -> dict:
             log(f"WARN: inline WAN '{wan}' unhealthy ({n}/{WAN_FAIL_LIMIT})")
             if n == 1:   # snapshot forensics at the first sign, before reverting
                 run("/usr/bin/python3", "-c",
-                    "import sys; sys.path.insert(0,'/opt/xray-proxy/scripts'); "
+                    "import sys; sys.path.insert(0,'/opt/shunt/scripts'); "
                     "import apply_topology as A,json; "
-                    "A.capture_debug(json.load(open('/opt/xray-proxy/config/topology-target.json')), 'health-monitor-inline-degraded')",
+                    "A.capture_debug(json.load(open('/opt/shunt/config/topology-target.json')), 'health-monitor-inline-degraded')",
                     timeout=40)
         if n >= WAN_FAIL_LIMIT:
             revert_to_loop(f"inline WAN dead {n} cycles")

@@ -1,5 +1,5 @@
 """
-SQLite database layer for xray-gateway.
+SQLite database layer for shunt.
 Handles analytics, subscription rules, terminal audit, scheduler history.
 Uses stdlib sqlite3 + asyncio.get_event_loop().run_in_executor() for async access.
 """
@@ -23,7 +23,7 @@ def set_db_path(path: Path) -> None:
 def _get_db_path() -> Path:
     if _DB_PATH is not None:
         return _DB_PATH
-    return Path("/opt/xray-proxy/config/gateway.db")
+    return Path("/opt/shunt/config/shunt.db")
 
 
 @contextmanager

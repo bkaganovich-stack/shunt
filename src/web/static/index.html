@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Proxy Gateway</title>
+<title>Shunt</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="shortcut icon" href="/favicon.svg">
 <link rel="stylesheet" href="/static/vendor/xterm.css">
@@ -479,7 +479,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
 <div id="login-screen" style="display:none">
   <div class="login-card">
     <div class="logo">🛡️</div>
-    <h1>Proxy Gateway</h1>
+    <h1>Shunt</h1>
     <p>Управление шлюзом</p>
     <div class="field"><label>Логин</label>
       <input id="l-user" type="text" value="admin" autocomplete="username"></div>
@@ -499,14 +499,14 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
   <!-- Mobile top bar -->
   <div class="mobile-header">
     <button class="hamburger" onclick="toggleNav()" aria-label="Меню">☰</button>
-    <span class="m-title">Proxy Gateway</span>
+    <span class="m-title">Shunt</span>
   </div>
   <!-- Nav overlay (tap to close on mobile) -->
   <div class="nav-overlay" id="nav-overlay" onclick="closeNav()"></div>
   <nav id="sidebar">
     <div class="nav-logo">
       <div class="icon">🛡️</div>
-      <span>Proxy Gateway</span>
+      <span>Shunt</span>
     </div>
     <div class="nav-links">
       <div class="nav-link active" onclick="showPage('dashboard',this)">
@@ -1197,7 +1197,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">О системе</div>
         <div class="info-row">
-          <span class="info-key">xray-gateway</span>
+          <span class="info-key">shunt</span>
           <span id="about-gw-ver" class="info-val monospace">—</span>
         </div>
         <div class="info-row">
@@ -1210,9 +1210,9 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         </div>
         <div class="info-row" style="border:none">
           <span class="info-key">GitHub</span>
-          <a href="https://github.com/bkaganovich-stack/xray-gateway" target="_blank"
+          <a href="https://github.com/bkaganovich-stack/shunt" target="_blank"
              class="info-val" style="color:var(--accent);font-size:13px">
-            bkaganovich-stack/xray-gateway</a>
+            bkaganovich-stack/shunt</a>
         </div>
       </div>
     </div>
@@ -1913,7 +1913,7 @@ async function loadAbout() {
   const xrayVer = r.xray_core ? 'v' + r.xray_core : '—';
   // nav sidebar
   const nav = document.getElementById('nav-version');
-  if (nav) nav.textContent = 'xray-gateway ' + gwVer;
+  if (nav) nav.textContent = 'shunt ' + gwVer;
   // settings page cards
   const gwEl = document.getElementById('about-gw-ver');
   if (gwEl) gwEl.textContent = gwVer;
