@@ -6,7 +6,18 @@ client software is needed on the devices behind it — phones, TVs and consoles
 included.
 
 It combines xray-core in TPROXY mode, sing-box, dnsmasq and a DNS-over-HTTPS
-proxy, and is managed through a web interface on port 80.
+proxy, and is managed through a web interface on port 80, in Russian or English.
+
+## Interface language
+
+Russian is what the markup contains and is the default; English is a dictionary
+applied to the DOM at runtime, loaded from `static/locales/en.json` the first
+time it is needed. The switcher sits at the bottom of the sidebar and on the
+login screen, and the choice is remembered per browser. A phrase with no entry
+stays Russian rather than going blank, so a gap in the dictionary degrades
+gracefully. To revise a translation, edit `locales/en.json` -- no rebuild of the
+page is involved. `tools/i18n_extract.py` regenerates the list of translatable
+strings after the interface changes.
 
 ## Layouts
 
@@ -22,7 +33,7 @@ the router performs the final NAT.
 ## Installing
 
 ```
-sudo apt install ./xray-gateway_1.7.0_all.deb ./xray-gateway-core_*.deb
+sudo apt install ./xray-gateway_1.7.1_all.deb ./xray-gateway-core_*.deb
 ```
 
 The Python dependencies come from the Ubuntu archive. `sing-box` is not in the

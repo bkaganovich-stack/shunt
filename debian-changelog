@@ -1,3 +1,9 @@
+xray-gateway (1.7.1) stable; urgency=medium
+
+  * The interface can be switched between Russian and English.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sat, 05 Sep 2026 09:07:53 +0300
+
 xray-gateway (1.7.0) stable; urgency=medium
 
   * First packaged release. Previously installed by copying files into
