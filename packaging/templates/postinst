@@ -3,123 +3,177 @@
 set -e
 
 BASE=/opt/shunt
+OLD=/opt/xray-proxy
 UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.service
        shunt-agwatch.service shunt-agwatch.timer shunt-mgmt-ap.service
        shunt-first-boot.service shunt-fptn-egress.service shunt-geoupdate.timer"
 
+# Old unit -> its replacement. Used both to retire the old units and to bring
+# back up exactly what was running before, so that migrating a live gateway
+# leaves it running rather than stopped.
+MAP="xray-proxy.service:shunt.service
+     xray-web.service:shunt-web.service
+     xray-dohproxy.service:shunt-dohproxy.service
+     xray-health.service:shunt-health.service
+     xray-agwatch.service:shunt-agwatch.service
+     xray-agwatch.timer:shunt-agwatch.timer
+     xray-mgmt-ap.service:shunt-mgmt-ap.service
+     fptn-egress.service:shunt-fptn-egress.service
+     xray-geoupdate.service:shunt-geoupdate.service
+     xray-geoupdate.timer:shunt-geoupdate.timer
+     xray-first-boot.service:shunt-first-boot.service"
+
 case "$1" in
   configure)
-    # ── migrate an installation from before the rename ───────────────────────
-    # Until 2.0 the product was called xray-gateway and lived in
-    # /opt/xray-proxy with xray-* units, installed by copying files rather than
-    # by a package. Those installations carry the administrator's configuration
-    # and database, which have to come across; the old units have to go, or two
-    # sets of services would fight over the same firewall rules.
-    OLD=/opt/xray-proxy
-    OLD_UNITS="xray-proxy.service xray-web.service xray-dohproxy.service
-               xray-health.service xray-agwatch.service xray-agwatch.timer
-               xray-mgmt-ap.service xray-first-boot.service fptn-egress.service
-               xray-geoupdate.service xray-geoupdate.timer"
+
+    # ══ 1. Survey ════════════════════════════════════════════════════════════
+    # Nothing here touches a running service. Until 2.0 the product was called
+    # xray-gateway, lived in /opt/xray-proxy under xray-* units and was
+    # installed by copying files rather than by a package.
+    MIGRATE=0
+    RESUME=""
     if [ -d "$OLD" ] && [ ! -d "$BASE/config" ]; then
-        echo "shunt: migrating the xray-gateway installation in $OLD"
-        for u in $OLD_UNITS; do
-            systemctl stop "$u" >/dev/null 2>&1 || true
-            systemctl disable "$u" >/dev/null 2>&1 || true
-            rm -f "/etc/systemd/system/$u"
+        MIGRATE=1
+        for pair in $MAP; do
+            old=${pair%%:*}; new=${pair#*:}
+            # A oneshot that has already run reports active; re-running it on a
+            # configured gateway is pointless, so it is never resumed.
+            case "$old" in xray-first-boot.service) continue;; esac
+            if systemctl is-active --quiet "$old" 2>/dev/null; then
+                RESUME="$RESUME $new"
+            fi
         done
-        systemctl daemon-reload >/dev/null 2>&1 || true
-
-        # Moved rather than copied: the rule sets and the database together run
-        # to well over a hundred megabytes, and two divergent copies would be
-        # worse than one.
-        mkdir -p "$BASE"
-        [ -d "$OLD/config" ] && mv "$OLD/config" "$BASE/config"
-        [ -d "$OLD/logs" ]   && mv "$OLD/logs"   "$BASE/logs"
-        [ -f "$BASE/config/gateway.db" ] && mv "$BASE/config/gateway.db" "$BASE/config/shunt.db"
-        # dnsmasq's snippet is regenerated under the new name; leaving the old
-        # one would apply both.
-        rm -f /etc/dnsmasq.d/gateway.conf
-
-        echo "shunt: configuration moved to $BASE/config; the old code in $OLD"
-        echo "  is no longer used and can be deleted once you are satisfied."
+        echo "shunt: migrating the xray-gateway installation in $OLD"
+        [ -n "$RESUME" ] && echo "shunt: will bring back up:$RESUME"
     fi
 
-    # ── runtime directories the application expects but does not own ──────────
-    mkdir -p "$BASE/config/snapshots" "$BASE/logs" "$BASE/bin"
-    chmod 755 "$BASE/config" "$BASE/logs" "$BASE/bin"
+    # ══ 2. Prepare ═══════════════════════════════════════════════════════════
+    # Still no service impact: directories, accounts, unit files, enablement.
+    if [ "$MIGRATE" = 0 ]; then
+        mkdir -p "$BASE/config/snapshots"
+        chmod 755 "$BASE/config"
+    fi
+    mkdir -p "$BASE/logs" "$BASE/bin"
+    chmod 755 "$BASE/logs" "$BASE/bin"
 
-    # ── sing-box runs under its own account (sing-box.service has User=) ──────
+    # sing-box runs under its own account (sing-box.service has User=).
     if ! getent passwd sing-box >/dev/null 2>&1; then
         adduser --system --group --no-create-home --home /nonexistent \
                 --shell /usr/sbin/nologin sing-box >/dev/null 2>&1 || true
     fi
 
-    # ── migrate admin-placed units that would shadow the packaged ones ────────
-    # Only units byte-identical to ours are removed; anything the admin edited
-    # is left alone and reported, because /etc wins over /lib.
+    # An admin-placed copy in /etc shadows the packaged unit in /lib. Only
+    # byte-identical copies are removed; an edited one is left and reported.
     shadowed=""
     for u in $UNITS; do
         old="/etc/systemd/system/$u"; new="/lib/systemd/system/$u"
         [ -f "$old" ] && [ -f "$new" ] || continue
-        if cmp -s "$old" "$new"; then
-            rm -f "$old"
-        else
-            shadowed="$shadowed $u"
-        fi
+        if cmp -s "$old" "$new"; then rm -f "$old"; else shadowed="$shadowed $u"; fi
     done
     if [ -n "$shadowed" ]; then
         echo "shunt: locally modified units in /etc/systemd/system take" >&2
         echo "  precedence over the packaged copies and were left untouched:" >&2
         for u in $shadowed; do echo "    $u" >&2; done
-        echo "  Compare them with /lib/systemd/system and remove yours to adopt" >&2
-        echo "  the packaged versions." >&2
     fi
 
-    # ── network detection: only on a box that has never been configured ───────
-    if [ ! -f "$BASE/config/network.conf" ]; then
+    if [ "$MIGRATE" = 0 ] && [ ! -f "$BASE/config/network.conf" ]; then
         /usr/sbin/shunt-setup --detect-only || \
             echo "shunt: network detection failed; run shunt-setup by hand" >&2
     fi
 
     systemctl daemon-reload >/dev/null 2>&1 || true
+    # Enabled but not armed: a timer started here would fire while the old
+    # services are still running, and one of them wrote its log into a
+    # directory the switch below still has to move.
+    for u in $UNITS; do
+        [ -f "/lib/systemd/system/$u" ] && systemctl enable "$u" >/dev/null 2>&1 || true
+    done
 
-    if [ -z "$2" ]; then
-        # ── first install ────────────────────────────────────────────────────
-        # The management interface is enabled and started so the box can be
-        # configured. The routing services are enabled but NOT started: they
-        # rewrite firewall and routing tables, which must not happen behind the
-        # administrator's back during a package install.
-        for u in $UNITS; do
-            [ -f "/lib/systemd/system/$u" ] || continue
-            case "$u" in
-                *.timer)
-                    # "enable" alone only schedules a timer from the next boot;
-                    # --now arms it immediately.
-                    systemctl enable --now "$u" >/dev/null 2>&1 || true ;;
-                *)  systemctl enable "$u" >/dev/null 2>&1 || true ;;
-            esac
+    # ══ 3. Switch over ═══════════════════════════════════════════════════════
+    # The only part that interrupts anything. Stopping xray-proxy runs its
+    # ExecStopPost, which withdraws the TPROXY rules *and* the blanket
+    # MASQUERADE — in the inline layout that is the whole network's route to
+    # the internet, not merely the tunnel. So this block is kept as short as
+    # possible and everything slow was done above.
+    if [ "$MIGRATE" = 1 ]; then
+        mkdir -p "$BASE/migration-backup/systemd"
+        for pair in $MAP; do
+            old=${pair%%:*}
+            [ -f "/etc/systemd/system/$old" ] && \
+                cp -a "/etc/systemd/system/$old" "$BASE/migration-backup/systemd/"
+            systemctl stop "$old" >/dev/null 2>&1 || true
+            systemctl disable "$old" >/dev/null 2>&1 || true
+            rm -f "/etc/systemd/system/$old"
         done
+        systemctl daemon-reload >/dev/null 2>&1 || true
+
+        # /opt is one filesystem, so these are renames rather than copies and
+        # cost nothing regardless of the hundreds of megabytes involved.
+        [ -d "$OLD/config" ] && mv "$OLD/config" "$BASE/config"
+        # By content rather than by directory: the destination already exists,
+        # and may already hold a file written since the package was unpacked.
+        if [ -d "$OLD/logs" ]; then
+            mkdir -p "$BASE/logs"
+            find "$OLD/logs" -mindepth 1 -maxdepth 1 -exec mv -n {} "$BASE/logs/" \; 2>/dev/null || true
+            rmdir "$OLD/logs" 2>/dev/null || true
+        fi
+        [ -f "$BASE/config/gateway.db" ] && mv "$BASE/config/gateway.db" "$BASE/config/shunt.db"
+        # The core normally arrives in shunt-xray. If that package was not part
+        # of the same transaction, the old binary is carried over rather than
+        # leaving the gateway with no core to run.
+        [ -x "$BASE/bin/xray" ] || { [ -x "$OLD/bin/xray" ] && mv "$OLD/bin/xray" "$BASE/bin/xray"; }
+        # dnsmasq's snippet is regenerated under the new name; both would apply.
+        rm -f /etc/dnsmasq.d/gateway.conf
+        mkdir -p "$BASE/config/snapshots"
+
+        for u in $RESUME; do systemctl start "$u" >/dev/null 2>&1 || true; done
+        # A unit still coming up is not a unit that failed; give them a moment
+        # before passing judgement.
+        sleep 3
+
+        failed=""
+        for u in $RESUME; do
+            systemctl is-active --quiet "$u" 2>/dev/null || failed="$failed $u"
+        done
+        if [ -n "$failed" ]; then
+            echo "shunt: these did not come back up:$failed" >&2
+            echo "  The previous unit files are in $BASE/migration-backup/systemd." >&2
+            echo "  Check: systemctl status$failed" >&2
+        else
+            echo "shunt: migration complete; the services that were running are running"
+        fi
+        echo "shunt: configuration is now in $BASE/config; the old code in $OLD"
+        echo "  is unused and can be deleted once you are satisfied."
+    fi
+
+    # ══ 4. First install on a fresh machine ══════════════════════════════════
+    # Routing services are enabled but deliberately NOT started: they rewrite
+    # firewall and routing tables, which must not happen unattended during a
+    # package install. A migration is different — there the gateway was already
+    # routing, and section 3 put it back the way it was.
+    if [ "$MIGRATE" = 0 ] && [ -z "$2" ]; then
         systemctl start shunt-web.service >/dev/null 2>&1 || true
-        echo "shunt: web interface on port 80. Routing services are enabled"
-        echo "  but not started — review the configuration, then run:"
+        echo "shunt: web interface on port 80. Routing services are enabled but"
+        echo "  not started — review the configuration, then run:"
         echo "    systemctl start shunt sing-box"
-    else
-        # ── upgrade: restart only what was already running ───────────────────
+    elif [ "$MIGRATE" = 0 ] && [ -n "$2" ]; then
+        # Upgrade: restart only what was already running.
         for u in $UNITS; do
-            case "$u" in
-                *.timer)
-                    # A timer added by a newer version has to be armed here;
-                    # existing ones are already running and left alone.
-                    systemctl is-enabled --quiet "$u" 2>/dev/null || \
-                        systemctl enable --now "$u" >/dev/null 2>&1 || true ;;
-                *)  if systemctl is-active --quiet "$u" 2>/dev/null; then
-                        systemctl restart "$u" >/dev/null 2>&1 || true
-                    fi ;;
-            esac
+            case "$u" in *.timer) continue;; esac
+            systemctl is-active --quiet "$u" 2>/dev/null && \
+                systemctl restart "$u" >/dev/null 2>&1 || true
         done
     fi
 
-    # ── rule sets: required at runtime, too volatile to ship in the package ───
+    # ══ 4b. Arm the timers ═══════════════════════════════════════════════════
+    # Last, so that nothing fires while the switch above is in progress.
+    for u in $UNITS; do
+        case "$u" in *.timer) ;; *) continue;; esac
+        [ -f "/lib/systemd/system/$u" ] && systemctl enable --now "$u" >/dev/null 2>&1 || true
+    done
+
+    # ══ 5. Rule sets ═════════════════════════════════════════════════════════
+    # Required at runtime, too volatile to ship in the package.
     if [ ! -s "$BASE/config/geosite.dat" ] || [ ! -s "$BASE/config/geoip.dat" ]; then
         echo "shunt: downloading geoip/geosite rule sets…"
         "$BASE/scripts/update-geo.sh" || \
