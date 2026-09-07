@@ -19,15 +19,36 @@ Self-hosted. Debian or Ubuntu, managed from one web interface.
 
 ## Install
 
-You need Debian or Ubuntu, python3 3.10 or newer, and any small always-on x86
-machine with one or two network ports.
+Any small always-on x86 machine with one or two network ports. Two ways onto it.
 
-Both packages are on the [Releases](https://github.com/bkaganovich-stack/shunt/releases)
-page:
+### An installer image
+
+`packaging/mkiso.sh` turns a Debian 13 amd64 netinst image into one that
+installs Debian and both Shunt packages without asking anything:
+
+```
+./packaging/mkiso.sh --iso debian-13.6.0-amd64-netinst.iso \
+                     --ssh-key ~/.ssh/id_ed25519.pub
+```
+
+Write the result to a USB stick and boot the machine from it. After a ten second
+pause it installs on its own and **erases that machine's internal disk** — the
+first fixed disk it finds, or the one named by `--disk`. It needs a working
+internet connection while it runs, and xorriso is all that is needed to build it.
+
+No image is published prebuilt, deliberately: one that everybody downloads would
+have to carry credentials that everybody knows. The script will not build
+without an SSH key or a password of your own.
+
+### The packages
+
+For a machine already running Debian 12 or newer, or Ubuntu 22.04 or newer, with
+python3 3.10 or newer. Both are on the
+[Releases](https://github.com/bkaganovich-stack/shunt/releases) page:
 
 ```
 shasum -a 256 -c SHA256SUMS
-sudo apt install ./shunt_2.0.0_all.deb ./shunt-xray_*.deb
+sudo apt install ./shunt_2.1.0_all.deb ./shunt-xray_*.deb
 ```
 
 `apt` resolves the rest from the distribution archive. `sing-box` is not in the
@@ -37,7 +58,12 @@ stale, so they download after installation and refresh weekly on a timer.
 
 ## After installing
 
-The management interface comes up on port 80, at `http://<box-ip>/`.
+The management interface comes up on port 80, at `http://<box-ip>/`, or at
+`http://shunt.local/` after an image install.
+
+**Change the password first.** It starts as `admin` / `admin`, and until it is
+changed anyone who can reach the box can rewrite the routing for every device
+behind it.
 
 The routing services are enabled but deliberately not started. They rewrite
 firewall and routing tables, which should not happen unattended during a package
@@ -45,6 +71,14 @@ install. Review the layout the setup tool detected, then start them:
 
 ```
 sudo systemctl start shunt sing-box
+```
+
+An image install detects the layout while the machine is still plugged in
+wherever it was installed, which is usually not where it will live. Once it is
+wired into place, re-run the detection:
+
+```
+sudo shunt-setup
 ```
 
 ## Wiring
@@ -99,6 +133,7 @@ from [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russi
 
 ```
 ./packaging/build.sh          # build the packages; needs only dpkg-dev
+./packaging/mkiso.sh --help   # build an installer image; needs only xorriso
 python3 -m pytest tests/ -q   # 150 tests, redirected to a temp directory
 ```
 

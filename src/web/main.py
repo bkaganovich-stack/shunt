@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -1677,11 +1677,10 @@ def _export_file_list() -> list[tuple[Path, str]]:
     entries: list[tuple[Path, str]] = []
     for rel in ["web/main.py", "web/static/index.html",
                 "scripts/iptables.sh", "scripts/update-geo.sh",
-                "scripts/first-boot.sh", "install.sh", "SETUP.md",
                 "config/settings.json", "config/network.conf"]:
         p = BASE / rel
         if p.exists(): entries.append((p, rel))
-    for svc in ("shunt.service", "shunt-web.service", "shunt-first-boot.service"):
+    for svc in ("shunt.service", "shunt-web.service"):
         p = Path("/etc/systemd/system") / svc
         if p.exists(): entries.append((p, f"systemd/{svc}"))
     return entries
@@ -1690,11 +1689,10 @@ def _import_dest(arcname: str) -> Optional[Path]:
     name = arcname.lstrip("./")
     if name.startswith("systemd/") and name.endswith(".service"):
         svc = Path(name).name
-        if svc in ("shunt.service", "shunt-web.service", "shunt-first-boot.service"):
+        if svc in ("shunt.service", "shunt-web.service"):
             return Path("/etc/systemd/system") / svc
     allowed = {"web/main.py", "web/static/index.html",
                 "scripts/iptables.sh", "scripts/update-geo.sh",
-                "scripts/first-boot.sh", "install.sh", "SETUP.md",
                 "config/settings.json", "config/network.conf"}
     if name in allowed: return BASE / name
     return None

@@ -1,8 +1,10 @@
 #!/bin/sh
 set -e
+# shunt-first-boot.service is no longer shipped, but a box that installed 2.0.0
+# still has it enabled, so removing the package should still clear it.
 UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.service
        shunt-agwatch.service shunt-agwatch.timer shunt-mgmt-ap.service
-       shunt-first-boot.service shunt-fptn-egress.service shunt-geoupdate.timer"
+       shunt-fptn-egress.service shunt-geoupdate.timer shunt-first-boot.service"
 case "$1" in
   remove)
     for u in $UNITS; do

@@ -6,7 +6,12 @@ BASE=/opt/shunt
 OLD=/opt/xray-proxy
 UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.service
        shunt-agwatch.service shunt-agwatch.timer shunt-mgmt-ap.service
-       shunt-first-boot.service shunt-fptn-egress.service shunt-geoupdate.timer"
+       shunt-fptn-egress.service shunt-geoupdate.timer"
+
+# Units this package used to ship and no longer does. They are disabled and
+# removed on every configure, so a box that installed 2.0.0 stops carrying an
+# enabled unit whose ExecStart does not exist.
+RETIRED="shunt-first-boot.service"
 
 # Old unit -> its replacement. Used both to retire the old units and to bring
 # back up exactly what was running before, so that migrating a live gateway
@@ -20,8 +25,7 @@ MAP="xray-proxy.service:shunt.service
      xray-mgmt-ap.service:shunt-mgmt-ap.service
      fptn-egress.service:shunt-fptn-egress.service
      xray-geoupdate.service:shunt-geoupdate.service
-     xray-geoupdate.timer:shunt-geoupdate.timer
-     xray-first-boot.service:shunt-first-boot.service"
+     xray-geoupdate.timer:shunt-geoupdate.timer"
 
 case "$1" in
   configure)
@@ -36,9 +40,6 @@ case "$1" in
         MIGRATE=1
         for pair in $MAP; do
             old=${pair%%:*}; new=${pair#*:}
-            # A oneshot that has already run reports active; re-running it on a
-            # configured gateway is pointless, so it is never resumed.
-            case "$old" in xray-first-boot.service) continue;; esac
             if systemctl is-active --quiet "$old" 2>/dev/null; then
                 RESUME="$RESUME $new"
             fi
@@ -55,6 +56,21 @@ case "$1" in
     fi
     mkdir -p "$BASE/logs" "$BASE/bin"
     chmod 755 "$BASE/logs" "$BASE/bin"
+
+    # Session tokens are signed with this. Until now only the pre-package
+    # install.sh created it, so a box installed from the package alone fell back
+    # to the literal default in main.py -- a value published with the source,
+    # which lets anyone mint a valid admin token for any such gateway. Generated
+    # once and never regenerated, so existing sessions survive an upgrade.
+    if [ ! -s "$BASE/.secret" ]; then
+        if [ -s "$OLD/.secret" ]; then
+            cp -a "$OLD/.secret" "$BASE/.secret"
+        else
+            python3 -c 'import secrets; print(secrets.token_hex(32))' > "$BASE/.secret"
+        fi
+        chown root:root "$BASE/.secret" 2>/dev/null || true
+        chmod 600 "$BASE/.secret"
+    fi
 
     # sing-box runs under its own account (sing-box.service has User=).
     if ! getent passwd sing-box >/dev/null 2>&1; then
@@ -80,6 +96,34 @@ case "$1" in
         /usr/sbin/shunt-setup --detect-only || \
             echo "shunt: network detection failed; run shunt-setup by hand" >&2
     fi
+
+    # The old installer wrote its sysctl settings by hand; the package now owns
+    # them in /etc/sysctl.d/90-shunt.conf. Same values, so dropping the old
+    # files first only avoids applying them twice.
+    if [ "$MIGRATE" = 1 ]; then
+        rm -f /etc/sysctl.d/90-xray-proxy.conf /etc/sysctl.d/99-xray-bbr.conf \
+              /etc/sysctl.d/99-xray-no-ipv6.conf
+    fi
+
+    # The packaged drop-in only takes effect at boot on its own; forwarding and
+    # route_localnet are needed before shunt.service is first started, and
+    # disabling IPv6 matters immediately (a live IPv6 path bypasses the split
+    # routing entirely, which is a leak rather than a degradation).
+    sysctl --system >/dev/null 2>&1 || true
+
+    # Units dropped from the package. 2.0.0 shipped shunt-first-boot.service,
+    # a leftover of the pre-package install method: it was enabled here, but its
+    # ExecStart lived in a source tree the package does not create, so it failed
+    # on every boot. First-time setup is done by this script and shunt-setup.
+    for u in $RETIRED; do
+        systemctl disable "$u" >/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/$u" "/lib/systemd/system/$u"
+        # On an upgrade dpkg has already deleted the unit file by the time this
+        # runs, and systemctl cannot disable a unit it can no longer read, so
+        # the enablement symlink is removed by hand rather than left dangling.
+        rm -f /etc/systemd/system/*.wants/"$u" \
+              /etc/systemd/system/*.requires/"$u"
+    done
 
     systemctl daemon-reload >/dev/null 2>&1 || true
     # Enabled but not armed: a timer started here would fire while the old

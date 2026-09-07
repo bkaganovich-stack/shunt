@@ -22,7 +22,8 @@ mkdir -p "$OUT"
 # ── shunt ─────────────────────────────────────────────────────────────
 P="$STAGE/shunt"
 install -d "$P/DEBIAN" "$P/opt/shunt/web/static" "$P/opt/shunt/scripts" \
-           "$P/lib/systemd/system" "$P/usr/sbin" "$P/usr/share/doc/shunt"
+           "$P/lib/systemd/system" "$P/usr/sbin" "$P/usr/share/doc/shunt" \
+           "$P/etc/sysctl.d"
 
 install -m 644 "$ROOT"/src/web/*.py            "$P/opt/shunt/web/"
 # main.py carries a shebang, so it gets the matching exec bit. The alternative
@@ -38,6 +39,7 @@ for f in "$ROOT"/src/scripts/*; do install -m 755 "$f" "$P/opt/shunt/scripts/"; 
 chmod 750 "$P/opt/shunt/scripts/fptn-egress.sh"
 install -m 644 "$ROOT"/systemd/*.service "$ROOT"/systemd/*.timer "$P/lib/systemd/system/"
 install -m 755 "$ROOT/packaging/shunt-setup" "$P/usr/sbin/"
+install -m 644 "$ROOT/packaging/sysctl/90-shunt.conf" "$P/etc/sysctl.d/"
 install -d "$P/usr/share/man/man8"
 gzip -9nc "$ROOT/packaging/shunt-setup.8" > "$P/usr/share/man/man8/shunt-setup.8.gz"
 install -m 644 "$ROOT/README.md"            "$P/usr/share/doc/shunt/"
@@ -49,8 +51,16 @@ gzip -9nc "$ROOT/debian-changelog" > "$P/usr/share/doc/shunt/changelog.gz"
 find "$P/opt" -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$P/opt" \( -name '*.bak*' -o -name '._*' -o -name '.DS_Store' \) -delete 2>/dev/null || true
 
+# Files under /etc are the administrator's to edit; dpkg keeps local changes
+# across upgrades only for those declared here.
+printf '/etc/sysctl.d/90-shunt.conf\n' > "$P/DEBIAN/conffiles"
+chmod 644 "$P/DEBIAN/conffiles"
+
 # md5sums lets dpkg --verify and debsums detect files altered after install.
+# Conffiles are excluded: dpkg tracks those separately, and an intentional edit
+# to one is not corruption.
 ( cd "$P" && find . -type f ! -path './DEBIAN/*' -printf '%P\0' \
+  | grep -zv '^etc/sysctl.d/90-shunt.conf$' \
   | sort -z | xargs -0 md5sum > DEBIAN/md5sums )
 chmod 644 "$P/DEBIAN/md5sums"
 

@@ -1,3 +1,33 @@
+shunt (2.1.0) stable; urgency=medium
+
+  * Drop shunt-first-boot.service. It was a leftover of the pre-package install
+    method: enabled by the postinst, but its ExecStart pointed at a source tree
+    the package never creates, so on a fresh install it failed at every boot.
+    Nothing depended on it -- first-time setup is done by the postinst and
+    shunt-setup. Upgrading disables and removes any copy left behind by 2.0.0.
+  * Ship /etc/sysctl.d/90-shunt.conf. IP forwarding, route_localnet, BBR with
+    fair queueing and disabled IPv6 were previously written by hand by the old
+    installer, which meant a box installed from the package alone was missing
+    them. Disabling IPv6 is the load-bearing one: a live IPv6 path leaves
+    through the WAN port unsplit and untunnelled. It is a conffile, so local
+    edits survive upgrades; migrating retires the old xray-* drop-ins.
+  * Generate /opt/shunt/.secret at install time. Session tokens are signed
+    with it, and only the pre-package install.sh ever created it, so a gateway
+    installed from the package alone fell back to the literal default in
+    main.py -- a value published with the source, which is enough to mint a
+    valid admin token for any such gateway without knowing its password. An
+    existing secret is kept, and a migration carries the old one across.
+  * Bound the geo rule set download. It used --connect-timeout, which only
+    limits the handshake: a connection that opened and then delivered nothing
+    hung forever, stalling the postinst -- and the weekly timer -- with no
+    indication of what was wrong. It now aborts a transfer that stays under
+    1 kB/s for a minute, which is the right test for a 92 MB file on a slow
+    link, and retries three times.
+  * Add packaging/mkiso.sh, which builds an unattended Debian 13 amd64
+    installer image with both packages preinstalled.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sun, 06 Sep 2026 19:56:18 +0300
+
 shunt (2.0.0) stable; urgency=medium
 
   * Renamed from xray-gateway to Shunt. The old name promoted one replaceable
