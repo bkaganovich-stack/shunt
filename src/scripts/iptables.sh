@@ -102,6 +102,17 @@ fi
 
 # ── UP ──────────────────────────────────────────────────────────────────────
 
+# Anything below can fail -- a missing account for an owner match, an interface
+# that went away -- and set -e would then stop half way, leaving the PREROUTING
+# jump in place with nothing listening on the tproxy port. That is not a
+# degraded gateway, it is one that silently drops every forwarded packet. So a
+# failed setup withdraws whatever it managed to install.
+trap 'rc=$?; if [ $rc -ne 0 ]; then
+          flush_rules
+          echo "iptables: setup failed (exit $rc) -- rules withdrawn" >&2
+      fi
+      exit $rc' EXIT
+
 # Kernel requirements
 sysctl -qw net.ipv4.ip_forward=1
 sysctl -qw net.ipv4.conf.all.route_localnet=1
@@ -171,7 +182,12 @@ iptables -t mangle -A OUTPUT -j XRAY_OUTPUT
 
 iptables -t mangle -A XRAY_OUTPUT -m mark --mark $XRAY_MARK -j RETURN
 # AdGuard VPN CLI (user agvpn) egress must bypass this tunnel -> DIRECT to reach AdGuard servers (else loop)
-iptables -t mangle -A XRAY_OUTPUT -m owner --uid-owner agvpn -j RETURN
+if getent passwd agvpn >/dev/null 2>&1; then
+    iptables -t mangle -A XRAY_OUTPUT -m owner --uid-owner agvpn -j RETURN
+else
+    echo "iptables: no agvpn account (adguardvpn-cli not installed) --" \
+         "skipping its direct-egress exemption" >&2
+fi
 iptables -t mangle -A XRAY_OUTPUT -d 224.0.0.0/4   -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 240.0.0.0/4   -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 127.0.0.0/8   -j RETURN

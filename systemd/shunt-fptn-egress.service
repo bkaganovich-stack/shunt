@@ -2,6 +2,10 @@
 Description=Shunt — FPTN second egress (isolated netns + SOCKS bridge on 192.168.244.2:1082)
 After=network-online.target shunt.service
 Wants=network-online.target
+# fptn-client is a Suggests, not a dependency: the backup egress is
+# optional, and Restart=always would otherwise loop forever without it.
+ConditionPathExists=/usr/bin/fptn-client-cli
+ConditionPathExists=/etc/fptn-client/token
 
 [Service]
 Type=simple

@@ -2,6 +2,9 @@
 Description=Shunt — out-of-band management Wi-Fi AP (rescue channel)
 After=network-online.target
 Wants=network-online.target
+# Generated when the rescue AP is configured; without it mgmt_ap.sh
+# exits with an error, which is not a fault worth reporting.
+ConditionPathExists=/opt/shunt/config/mgmt-ap-hostapd.conf
 
 [Service]
 Type=oneshot

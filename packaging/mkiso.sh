@@ -385,7 +385,15 @@ echo "       $(du -h "$OUT" | cut -f1), shunt $VER, administrator '$USERNAME'"
 [ "$PWHASH" != '*' ] || echo "       console password locked; sudo needs no password"
 echo "       target disk: ${DISK:-first non-removable disk in the machine}"
 echo
-echo "  Write it to a USB stick, for example:"
-echo "      sudo dd if=$OUT of=/dev/sdX bs=4M status=progress oflag=sync"
+echo "  Write it to a USB stick. Identify the device first -- naming the wrong"
+echo "  one destroys whatever is on it:"
+if [ "$(uname)" = Darwin ]; then
+    echo "      diskutil list external              # find the stick, e.g. disk4"
+    echo "      diskutil unmountDisk /dev/disk4"
+    echo "      sudo dd if=$OUT of=/dev/rdisk4 bs=4m   # the r matters, ~20x faster"
+else
+    echo "      lsblk                               # find the stick, e.g. sdb"
+    echo "      sudo dd if=$OUT of=/dev/sdb bs=4M status=progress oflag=sync"
+fi
 echo "  It installs unattended after a ten second pause and ERASES that disk."
 echo "  The machine needs a working internet connection while it installs."

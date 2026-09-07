@@ -31,9 +31,15 @@ installs Debian and both Shunt packages without asking anything:
                      --ssh-key ~/.ssh/id_ed25519.pub
 ```
 
-Write the result to a USB stick and boot the machine from it. After a ten second
-pause it installs on its own and **erases that machine's internal disk** — the
-first fixed disk it finds, or the one named by `--disk`. It needs a working
+Write the result to a USB stick — raw, byte for byte, the way `dd`, Balena
+Etcher and Rufus in *DD Image mode* do it. The image is a hybrid that boots
+both BIOS and UEFI, and a writer that unpacks it onto a fresh filesystem
+instead throws that away along with the boot menu the unattended install
+starts from.
+
+Boot the machine from the stick. After a ten second pause it installs on its
+own and **erases that machine's internal disk** — the first fixed disk it
+finds, or the one named by `--disk`. It needs a working
 internet connection while it runs, and xorriso is all that is needed to build it.
 
 No image is published prebuilt, deliberately: one that everybody downloads would

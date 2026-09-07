@@ -2,6 +2,12 @@
 Description=Shunt — transparent split routing (xray-core in TPROXY mode)
 After=network-online.target
 Wants=network-online.target
+# Stop retrying after five failures in five minutes. Without this a machine
+# that is installed but not yet configured restarts this unit forever -- there
+# is no xray.json until a profile is applied, so iptables.sh refuses -- and
+# every attempt runs iptables.sh up and down again.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

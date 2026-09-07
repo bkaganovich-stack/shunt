@@ -23,6 +23,21 @@ shunt (2.1.0) stable; urgency=medium
     indication of what was wrong. It now aborts a transfer that stays under
     1 kB/s for a minute, which is the right test for a 92 MB file on a slow
     link, and retries three times.
+  * iptables.sh withdraws its own partial work. A failure part-way through
+    "up" used to stop with the TPROXY jump already attached to PREROUTING and
+    nothing listening on the tproxy port, which does not degrade a gateway --
+    it silently drops every packet forwarded through it. Setup is now all or
+    nothing.
+  * iptables.sh no longer requires the agvpn account. adguardvpn-cli is a
+    Suggests, so on a freshly installed gateway the account does not exist,
+    iptables rejected the owner match outright, and routing could never start
+    at all. Its direct-egress exemption is skipped with a note instead.
+  * Units that cannot succeed on a fresh install no longer report faults or
+    retry forever. shunt-mgmt-ap and shunt-fptn-egress are skipped by a
+    condition when the files they need are absent -- a rescue AP that was
+    never configured and an optional backup egress are not failures -- and
+    shunt.service gives up after five attempts rather than restarting every
+    five seconds on a machine nobody has configured yet.
   * Add packaging/mkiso.sh, which builds an unattended Debian 13 amd64
     installer image with both packages preinstalled.
 
