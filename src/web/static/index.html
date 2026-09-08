@@ -466,6 +466,16 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
   .status-grid { grid-template-columns: 1fr; }
   main { padding: 12px 10px; }
 }
+
+/* Update instructions on the gateway card */
+.update-howto{margin-top:10px;padding:12px 14px;border-left:2px solid var(--accent);
+  background:var(--bg3);border-radius:0 var(--radius) var(--radius) 0}
+.update-howto-title{font-weight:600;font-size:13px;margin-bottom:4px;color:var(--text)}
+.update-howto-why{font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.45}
+.update-howto-cmd{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;line-height:1.55;
+  white-space:pre;overflow-x:auto;margin:0 0 8px;padding:8px 10px;color:var(--text);
+  background:var(--bg);border:1px solid var(--border);border-radius:4px}
+.update-howto-link{margin-left:10px;font-size:12px;color:var(--accent)}
 </style>
 </head>
 <body>
@@ -3953,6 +3963,23 @@ function renderUpdatesContent(r) {
     const updateBtn = avail && title === 'xray-core'
       ? `<button class="btn btn-primary btn-sm" onclick="doUpdateXray('${escHtml(info.latest||'')}')">⬆ Обновить до v${escHtml(info.latest||'')}</button>`
       : '';
+    // The gateway is not updated from here: apt would replace the process
+    // serving this page. Show the commands rather than a badge with no exit.
+    let howTo = '';
+    if (avail && title === 'gateway') {
+      const v = info.latest || '';
+      const base = (info.release_url || '').replace('/releases/tag/', '/releases/download/');
+      const cmd = base
+        ? `cd /tmp\ncurl -sSLO ${base}/shunt_${v}_all.deb\ncurl -sSLO ${base}/SHA256SUMS\nsha256sum -c --ignore-missing SHA256SUMS\nsudo apt install ./shunt_${v}_all.deb`
+        : `sudo apt install ./shunt_${v}_all.deb`;
+      howTo = `<div class="update-howto">
+        <div class="update-howto-title">Ставится с консоли шлюза</div>
+        <div class="update-howto-why">Здесь кнопки нет намеренно: обновление заменяет саму программу, которая отдаёт эту страницу, и оборванная установка оставила бы сеть без шлюза и без интерфейса.</div>
+        <pre class="update-howto-cmd">${escHtml(cmd)}</pre>
+        <button class="btn btn-sm" onclick="copyUpdateCmd(this)">Скопировать команды</button>
+        ${info.release_url ? `<a class="update-howto-link" href="${escHtml(info.release_url)}" target="_blank" rel="noopener noreferrer">Что изменилось</a>` : ''}
+      </div>`;
+    }
     const notes = info.release_notes
       ? `<details><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Release notes</summary><pre style="font-size:11px;color:var(--muted);white-space:pre-wrap;margin-top:6px">${escHtml(info.release_notes.slice(0,500))}</pre></details>`
       : '';
@@ -3964,10 +3991,19 @@ function renderUpdatesContent(r) {
         ${avail ? ` · Доступна: v${escHtml(info.latest||'?')}` : ''}</div>
       ${notes}
       <div class="vpn-actions" style="margin-top:8px">${updateBtn}</div>
+      ${howTo}
       ${info.error ? `<div style="color:var(--red);font-size:11px;margin-top:4px">⚠ ${escHtml(info.error)}</div>` : ''}
     </div>`;
   }
   el.innerHTML = compCard('gateway', r.gateway) + compCard('xray-core', r.xray);
+}
+
+function copyUpdateCmd(btn) {
+  const pre = btn.parentElement.querySelector('.update-howto-cmd');
+  if (!pre) return;
+  navigator.clipboard.writeText(pre.textContent).then(
+    () => toast('Команды скопированы'),
+    () => toast('Не удалось скопировать', false));
 }
 
 async function doUpdateXray(tag) {
