@@ -14,6 +14,7 @@ VERSION = "2.1.0"
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
 import features as _ft
+import sources as _src
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -3226,6 +3227,28 @@ async def refresh_subscription(sid: str, u: str = Depends(auth_dep)):
     ok, err = apply_config(s2, "subscription_update", _pre_settings=old_s)
     return {"ok": ok, "error": err or None, "rule_count": len(rules),
             "dry_run": dry_run, "parse_errors": errs}
+
+# ── Sources ───────────────────────────────────────────────────────────────────
+# The subscription machinery above applies five kinds of list. sources.py
+# describes every kind Shunt can be given -- including the ones not applied yet
+# -- so the interface can say what a type costs before it is accepted, and so
+# the manifest format has one place to live.
+#
+# Reading is what ships here. Writing a manifest changes nothing on anyone's
+# machine; reading one rewrites routing for a whole household, so import lands
+# with the preview it needs rather than ahead of it.
+
+@app.get("/api/sources/types")
+async def get_source_types(u: str = Depends(auth_dep)):
+    return {"version": _src.MANIFEST_VERSION, "types": _src.type_table()}
+
+@app.get("/api/sources/manifest")
+async def export_sources_manifest(include_private: bool = False,
+                                  u: str = Depends(auth_dep)):
+    """The gateway's own sources, as a manifest someone else could import."""
+    s = load_settings()
+    m = _src.manifest_from_settings(s, include_private=include_private)
+    return {"manifest": m, "omitted": bool(m.get("note")) and not include_private}
 
 # ── Adblock endpoints ─────────────────────────────────────────────────────────
 @app.get("/api/adblock")
