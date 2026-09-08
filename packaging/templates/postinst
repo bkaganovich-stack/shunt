@@ -211,10 +211,31 @@ case "$1" in
         echo "    systemctl start shunt sing-box"
     elif [ "$MIGRATE" = 0 ] && [ -n "$2" ]; then
         # Upgrade: restart only what was already running.
+        #
+        # With one exception. The web interface offers a terminal, and that
+        # terminal is a shell inside shunt-web's own cgroup -- so an upgrade
+        # started from it is killed the moment this loop restarts shunt-web:
+        # systemd takes down the service, and with it the shell, apt and dpkg
+        # in the middle of configuring. The package ends up half-configured and
+        # the next apt run refuses to do anything until someone runs
+        # "dpkg --configure -a" from somewhere else. Restarting a second later,
+        # from outside, lets dpkg finish first. The interface still goes away
+        # for a moment -- it has to, the new code is only running after it
+        # comes back -- but nothing is left broken behind it.
+        in_web=0
+        grep -qs 'shunt-web\.service' /proc/self/cgroup && in_web=1
         for u in $UNITS; do
             case "$u" in *.timer) continue;; esac
-            systemctl is-active --quiet "$u" 2>/dev/null && \
+            systemctl is-active --quiet "$u" 2>/dev/null || continue
+            if [ "$u" = shunt-web.service ] && [ "$in_web" = 1 ] \
+               && command -v systemd-run >/dev/null 2>&1; then
+                echo "shunt: this upgrade is running inside the web terminal;" \
+                     "the interface restarts a moment after it finishes"
+                systemd-run --on-active=5 --unit=shunt-web-restart --collect \
+                    systemctl restart shunt-web.service >/dev/null 2>&1 || true
+            else
                 systemctl restart "$u" >/dev/null 2>&1 || true
+            fi
         done
     fi
 

@@ -4006,6 +4006,7 @@ function renderUpdatesContent(r) {
         <div class="update-howto-why">Установка заменит программу, которая отдаёт эту страницу: интерфейс на минуту пропадёт и вернётся сам. Ход установки виден ниже.</div>
         <div id="gw-update-status" class="update-progress" style="display:none"></div>
         <details class="update-howto-manual"><summary>Сделать вручную с консоли</summary>
+          <div class="update-howto-why">Не в терминале этого интерфейса: установка перезапускает его, и apt оборвётся вместе с ним. Нужен доступ по SSH или консоль шлюза.</div>
           <pre class="update-howto-cmd">${escHtml(cmd)}</pre>
           <button class="btn btn-sm" onclick="copyUpdateCmd(this)">Скопировать команды</button>
         </details>

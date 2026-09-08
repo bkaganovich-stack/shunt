@@ -632,7 +632,8 @@
     "Автоматическая установка выключена": "Automatic installation is off",
     "Не удалось запустить обновление": "Could not start the update",
     "Обновление не удалось": "The update failed",
-    "⏳ Устанавливается…": "⏳ Installing…"
+    "⏳ Устанавливается…": "⏳ Installing…",
+    "Не в терминале этого интерфейса: установка перезапускает его, и apt оборвётся вместе с ним. Нужен доступ по SSH или консоль шлюза.": "Not in this interface's own terminal: installing restarts it, and apt is cut off with it. Use SSH or the gateway's console."
   },
   "patterns": [
     [
