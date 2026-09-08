@@ -3998,7 +3998,7 @@ function renderUpdatesContent(r) {
       const v = info.latest || '';
       const base = (info.release_url || '').replace('/releases/tag/', '/releases/download/');
       const cmd = base
-        ? `cd /tmp\ncurl -sSLO ${base}/shunt_${v}_all.deb\ncurl -sSLO ${base}/SHA256SUMS\nsha256sum -c --ignore-missing SHA256SUMS\nsudo apt install ./shunt_${v}_all.deb`
+        ? `cd /tmp\ncurl -sSLO ${base}/shunt_${v}_all.deb\ncurl -sSL ${base}/SHA256SUMS | grep 'shunt_${v}_all.deb$' | sha256sum -c -\nsudo apt install ./shunt_${v}_all.deb`
         : `sudo apt install ./shunt_${v}_all.deb`;
       howTo = `<div class="update-howto">
         <button class="btn btn-primary btn-sm" id="update-gw-btn" onclick="doUpdateGateway('${escHtml(v)}')">⬆ Обновить до v${escHtml(v)}</button>
