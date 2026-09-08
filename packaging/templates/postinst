@@ -97,13 +97,22 @@ case "$1" in
             echo "shunt: network detection failed; run shunt-setup by hand" >&2
     fi
 
-    # The old installer wrote its sysctl settings by hand; the package now owns
-    # them in /etc/sysctl.d/90-shunt.conf. Same values, so dropping the old
-    # files first only avoids applying them twice.
-    if [ "$MIGRATE" = 1 ]; then
-        rm -f /etc/sysctl.d/90-xray-proxy.conf /etc/sysctl.d/99-xray-bbr.conf \
-              /etc/sysctl.d/99-xray-no-ipv6.conf
-    fi
+    # The old installer wrote these by hand; the package now owns the same
+    # settings in /etc/sysctl.d/90-shunt.conf. Retiring them was tied to the
+    # migration, which was wrong: the drop-ins outlive the tree they came with,
+    # so a gateway whose old directory was deleted before upgrading keeps them.
+    # They then quietly win, because sysctl.d applies files in name order and
+    # 99- sorts after 90- -- an edit to the packaged conffile would have no
+    # effect and nothing would say why. Moved rather than deleted: they are not
+    # ours to destroy, and the backup directory is where the migration already
+    # puts what it takes away.
+    for f in 90-xray-proxy.conf 99-xray-bbr.conf 99-xray-no-ipv6.conf; do
+        [ -e "/etc/sysctl.d/$f" ] || continue
+        mkdir -p "$BASE/migration-backup/sysctl"
+        mv "/etc/sysctl.d/$f" "$BASE/migration-backup/sysctl/$f"
+        echo "shunt: retired /etc/sysctl.d/$f (superseded by 90-shunt.conf);" \
+             "the old copy is in $BASE/migration-backup/sysctl"
+    done
 
     # The packaged drop-in only takes effect at boot on its own; forwarding and
     # route_localnet are needed before shunt.service is first started, and
