@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -84,6 +84,9 @@ DEFAULT_SETTINGS: dict = {
     # Subscriptions: [{id, name, url, type, enabled, schedule, last_update,
     #                  last_error, rule_count}]
     "subscriptions": [],
+    # Self-update. Off by default: installing whatever appears on GitHub without
+    # anyone looking is a delegation of trust, not a convenience setting.
+    "updates": {"auto": False},
     # Adblock DNS
     "adblock": {
         "enabled":         False,
@@ -152,7 +155,7 @@ def _migrate_settings(s: dict) -> dict:
     for k, v in DEFAULT_SETTINGS.items():
         s.setdefault(k, v)
     # Deep-merge nested dicts
-    for nested_key in ("dns", "alerts", "adblock", "terminal", "analytics", "proxy", "adguard"):
+    for nested_key in ("dns", "alerts", "adblock", "terminal", "analytics", "proxy", "adguard", "updates"):
         if nested_key not in s:
             s[nested_key] = dict(DEFAULT_SETTINGS[nested_key])
         else:
@@ -3564,6 +3567,68 @@ async def update_xray_core(u: str = Depends(auth_dep)):
     else:
         _db.log_update("xray-core", current_ver, tag, "error", msg)
         return {"ok": False, "error": msg, "snapshot_id": snap_id}
+
+class AutoUpdateReq(BaseModel):
+    auto: bool
+
+@app.post("/api/updates/auto")
+async def set_auto_update(req: AutoUpdateReq, u: str = Depends(auth_dep)):
+    """Arm or disarm the daily timer that installs releases unattended."""
+    s = load_settings()
+    s.setdefault("updates", {})["auto"] = bool(req.auto)
+    save_settings(s)
+    # The timer is what actually makes it happen, so it follows the setting
+    # rather than sitting armed and reading a flag that says no.
+    action = ["enable", "--now"] if req.auto else ["disable", "--now"]
+    subprocess.run(["systemctl", *action, "shunt-selfupdate.timer"],
+                   capture_output=True)
+    return {"ok": True, "auto": bool(req.auto)}
+
+@app.post("/api/updates/gateway")
+async def update_gateway(u: str = Depends(auth_dep)):
+    """
+    Start the upgrade and return immediately.
+
+    Installing the package restarts this very process, so the work cannot
+    happen inside the request: systemd-run hands it to a transient unit that
+    outlives the interface, and the caller watches the status file instead of
+    waiting for a response that will never arrive.
+    """
+    cached = load_settings().get("update_cache", {}).get("gateway", {})
+    latest = cached.get("latest")
+    if not latest:
+        raise HTTPException(400, "Check for updates first")
+    if not cached.get("update_available"):
+        return {"ok": True, "message": "Already up to date"}
+    if subprocess.run(["systemctl", "is-active", "--quiet", "shunt-self-update"],
+                      capture_output=True).returncode == 0:
+        return {"ok": False, "error": "An update is already running"}
+
+    create_snapshot("pre_gateway_update")
+    r = subprocess.run(
+        ["systemd-run", "--unit=shunt-self-update", "--collect",
+         "--description=Shunt self-update",
+         "/opt/shunt/scripts/self-update.sh", "apply", str(latest)],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        return {"ok": False, "error": (r.stderr or r.stdout or "").strip()[:300]}
+    _db.log_update("shunt", VERSION, str(latest), "started", "self-update started")
+    return {"ok": True, "started": True, "to": latest}
+
+@app.get("/api/updates/gateway/status")
+async def gateway_update_status(u: str = Depends(auth_dep)):
+    """Where the upgrade got to. Read from disk: the process that wrote it is
+    usually the one that just restarted this one."""
+    running = subprocess.run(
+        ["systemctl", "is-active", "--quiet", "shunt-self-update"],
+        capture_output=True).returncode == 0
+    f = BASE / "logs" / "self-update.json"
+    st = {}
+    if f.exists():
+        try: st = json.loads(f.read_text())
+        except Exception: st = {"state": "unknown", "message": "status file unreadable"}
+    auto = bool(load_settings().get("updates", {}).get("auto"))
+    return {"running": running, "status": st, "version": VERSION, "auto": auto}
 
 @app.get("/api/updates/history")
 async def get_update_history(u: str = Depends(auth_dep)):

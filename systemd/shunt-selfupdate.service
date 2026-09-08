@@ -1,0 +1,17 @@
+[Unit]
+Description=Shunt — install a newer release if the operator asked for it
+After=network-online.target
+Wants=network-online.target
+# Nothing to update against without a package database.
+ConditionPathExists=/usr/bin/dpkg-query
+
+[Service]
+Type=oneshot
+ExecStart=/opt/shunt/scripts/self-update.sh auto
+# The script installs a package that restarts several units, including ones
+# this service does not own; it must not be torn down with them.
+KillMode=process
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

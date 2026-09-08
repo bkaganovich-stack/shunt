@@ -4,7 +4,8 @@ set -e
 # still has it enabled, so removing the package should still clear it.
 UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.service
        shunt-agwatch.service shunt-agwatch.timer shunt-mgmt-ap.service
-       shunt-fptn-egress.service shunt-geoupdate.timer shunt-first-boot.service"
+       shunt-fptn-egress.service shunt-geoupdate.timer shunt-first-boot.service
+       shunt-selfupdate.service shunt-selfupdate.timer"
 case "$1" in
   remove)
     for u in $UNITS; do

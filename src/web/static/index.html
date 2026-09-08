@@ -476,6 +476,22 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
   white-space:pre;overflow-x:auto;margin:0 0 8px;padding:8px 10px;color:var(--text);
   background:var(--bg);border:1px solid var(--border);border-radius:4px}
 .update-howto-link{margin-left:10px;font-size:12px;color:var(--accent)}
+.update-howto-manual{margin-top:10px}
+.update-howto-manual summary{cursor:pointer;font-size:12px;color:var(--muted)}
+.update-howto-manual .update-howto-cmd{margin-top:8px}
+.update-progress{margin-top:10px;font-size:12.5px;color:var(--text);
+  display:flex;align-items:center;gap:8px;min-height:20px}
+.update-progress.good{color:var(--green)}
+.update-progress.bad{color:var(--red)}
+.update-progress-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);
+  flex:none;animation:update-pulse 1.2s ease-in-out infinite}
+@keyframes update-pulse{0%,100%{opacity:.25}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.update-progress-dot{animation:none;opacity:.7}}
+.auto-update{display:flex;gap:10px;align-items:flex-start;margin-bottom:16px;
+  padding:12px 14px;background:var(--bg3);border-radius:var(--radius);cursor:pointer}
+.auto-update input{margin-top:3px;flex:none}
+.auto-update-title{display:block;font-size:13px;font-weight:600;color:var(--text)}
+.auto-update-why{display:block;font-size:12px;color:var(--muted);line-height:1.5;margin-top:4px}
 </style>
 </head>
 <body>
@@ -1606,9 +1622,16 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <h2>Обновления</h2>
       <p class="page-desc">Проверка и установка обновлений компонентов шлюза</p>
       <div class="card">
-        <div class="btn-row" style="margin-bottom:16px">
+        <div class="btn-row" style="margin-bottom:12px">
           <button class="btn btn-primary" id="check-updates-btn" onclick="checkUpdates()">🔍 Проверить обновления</button>
         </div>
+        <label class="auto-update">
+          <input type="checkbox" id="auto-update-cb" onchange="setAutoUpdate(this.checked)">
+          <span>
+            <span class="auto-update-title">Ставить новые версии без подтверждения</span>
+            <span class="auto-update-why">Раз в сутки проверять релизы на GitHub и устанавливать новую версию, не спрашивая. Перед установкой снимается конфигурация, после — проверяется, что интерфейс и маршрутизация поднялись; если нет, возвращается прежняя версия. Это доверие тому, кто публикует релизы: обновление заменяет программу, через которую ходит трафик всей сети.</span>
+          </span>
+        </label>
         <div id="updates-content">
           <div class="text-muted" style="font-size:13px">Нажмите «Проверить» для получения информации об обновлениях.</div>
         </div>
@@ -3946,6 +3969,11 @@ async function checkUpdates() {
 async function loadCachedUpdates() {
   const r = await apiJ('GET', '/api/updates/cached');
   if (r && (r.xray || r.gateway)) renderUpdatesContent(r);
+  const st = await apiJ('GET', '/api/updates/gateway/status');
+  const cb = document.getElementById('auto-update-cb');
+  if (cb && st) cb.checked = !!st.auto;
+  // An update started before this page was opened is still worth watching.
+  if (st?.running) pollGatewayUpdate();
 }
 
 function renderUpdatesContent(r) {
@@ -3973,11 +4001,14 @@ function renderUpdatesContent(r) {
         ? `cd /tmp\ncurl -sSLO ${base}/shunt_${v}_all.deb\ncurl -sSLO ${base}/SHA256SUMS\nsha256sum -c --ignore-missing SHA256SUMS\nsudo apt install ./shunt_${v}_all.deb`
         : `sudo apt install ./shunt_${v}_all.deb`;
       howTo = `<div class="update-howto">
-        <div class="update-howto-title">Ставится с консоли шлюза</div>
-        <div class="update-howto-why">Здесь кнопки нет намеренно: обновление заменяет саму программу, которая отдаёт эту страницу, и оборванная установка оставила бы сеть без шлюза и без интерфейса.</div>
-        <pre class="update-howto-cmd">${escHtml(cmd)}</pre>
-        <button class="btn btn-sm" onclick="copyUpdateCmd(this)">Скопировать команды</button>
+        <button class="btn btn-primary btn-sm" id="update-gw-btn" onclick="doUpdateGateway('${escHtml(v)}')">⬆ Обновить до v${escHtml(v)}</button>
         ${info.release_url ? `<a class="update-howto-link" href="${escHtml(info.release_url)}" target="_blank" rel="noopener noreferrer">Что изменилось</a>` : ''}
+        <div class="update-howto-why">Установка заменит программу, которая отдаёт эту страницу: интерфейс на минуту пропадёт и вернётся сам. Ход установки виден ниже.</div>
+        <div id="gw-update-status" class="update-progress" style="display:none"></div>
+        <details class="update-howto-manual"><summary>Сделать вручную с консоли</summary>
+          <pre class="update-howto-cmd">${escHtml(cmd)}</pre>
+          <button class="btn btn-sm" onclick="copyUpdateCmd(this)">Скопировать команды</button>
+        </details>
       </div>`;
     }
     const notes = info.release_notes
@@ -3996,6 +4027,60 @@ function renderUpdatesContent(r) {
     </div>`;
   }
   el.innerHTML = compCard('gateway', r.gateway) + compCard('xray-core', r.xray);
+}
+
+async function setAutoUpdate(on) {
+  const r = await apiJ('POST', '/api/updates/auto', {auto: !!on});
+  if (r?.ok) toast(on ? 'Новые версии будут ставиться сами' : 'Автоматическая установка выключена');
+  else { toast('Не удалось сохранить', false); document.getElementById('auto-update-cb').checked = !on; }
+}
+
+async function doUpdateGateway(v) {
+  if (!confirm(t(`Обновить Shunt до v${v}?\n\nИнтерфейс перезапустится и на минуту станет недоступен. Если после установки он или маршрутизация не поднимутся, автоматически вернётся текущая версия.`))) return;
+  const btn = document.getElementById('update-gw-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Устанавливается…'; }
+  const r = await apiJ('POST', '/api/updates/gateway');
+  if (!r?.ok) {
+    if (btn) { btn.disabled = false; btn.textContent = `⬆ Обновить до v${v}`; }
+    toast(r?.error || 'Не удалось запустить обновление', false);
+    return;
+  }
+  pollGatewayUpdate();
+}
+
+// The upgrade restarts this page's own server, so polling has to treat a dead
+// connection as normal progress rather than as failure.
+async function pollGatewayUpdate() {
+  const el = document.getElementById('gw-update-status');
+  if (el) el.style.display = '';
+  let unreachable = 0;
+  for (let i = 0; i < 150; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    let st = null;
+    try { st = await apiJ('GET', '/api/updates/gateway/status'); } catch (e) { st = null; }
+    if (!st) {
+      unreachable++;
+      if (el) el.innerHTML = `<span class="update-progress-dot"></span>Интерфейс перезапускается…`;
+      if (unreachable > 90) break;
+      continue;
+    }
+    unreachable = 0;
+    const s = st.status || {};
+    const state = s.state || 'unknown';
+    if (el) {
+      const cls = state === 'failed' ? 'bad' : state === 'done' ? 'good' : '';
+      el.className = 'update-progress ' + cls;
+      el.innerHTML = (state === 'done' || state === 'failed' ? '' :
+        '<span class="update-progress-dot"></span>') + escHtml(s.message || state);
+    }
+    if (!st.running && (state === 'done' || state === 'failed' || state === 'idle')) {
+      if (state === 'done') { toast(`Shunt обновлён до v${escHtml(s.to || '')}`); setTimeout(() => location.reload(), 2500); }
+      else if (state === 'failed') toast(escHtml(s.message || 'Обновление не удалось'), false);
+      checkUpdates();
+      return;
+    }
+  }
+  if (el) el.innerHTML = 'Обновление идёт дольше обычного — откройте страницу заново, чтобы увидеть результат.';
 }
 
 function copyUpdateCmd(btn) {

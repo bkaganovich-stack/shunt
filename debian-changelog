@@ -1,3 +1,33 @@
+shunt (2.2.0) stable; urgency=medium
+
+  * Update the gateway from the interface. The updates page reported that a
+    newer version existed and offered no way to install it -- the button was
+    rendered only for xray-core -- so it now has one, plus the console
+    commands as a fallback.
+  * The work happens in a transient systemd unit rather than in the web
+    process, because installing the package restarts that process: it would
+    otherwise be killed part-way through its own upgrade. The interface polls
+    a status file instead of waiting for a response that will never arrive.
+  * An update verifies before it installs and proves itself afterwards: the
+    checksum is checked, dpkg is asked whether the file really is the shunt
+    package at the version claimed, a downgrade is refused outright, the
+    configuration is snapshotted, and the copy currently installed is kept on
+    disk first -- so that when the interface or routing does not come back,
+    the previous version goes back without needing the network that is now
+    broken.
+  * Optionally, unattended: a daily timer installs new releases without
+    asking. Off by default and armed only when switched on, because it hands
+    whoever publishes the releases the ability to change the program every
+    packet on the network passes through.
+  * Add sources.py: one description of every kind of source Shunt can be
+    given -- what it carries, which consumer applies it, whether it adds or
+    replaces, and what accepting it costs -- and a versioned manifest format
+    for them. Reading only: export writes a manifest and leaves out addresses
+    that look like personal links, while import arrives later with the
+    preview that a change to a household's routing deserves.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Tue, 08 Sep 2026 11:25:22 +0300
+
 shunt (2.1.0) stable; urgency=medium
 
   * Drop shunt-first-boot.service. It was a leftover of the pre-package install

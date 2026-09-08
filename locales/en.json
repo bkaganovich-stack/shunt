@@ -621,7 +621,18 @@
     "Здесь кнопки нет намеренно: обновление заменяет саму программу, которая отдаёт эту страницу, и оборванная установка оставила бы сеть без шлюза и без интерфейса.": "There is deliberately no button here: the update replaces the very program serving this page, and an interrupted install would leave the network without a gateway and without an interface to see why.",
     "Скопировать команды": "Copy the commands",
     "Что изменилось": "What changed",
-    "Команды скопированы": "Commands copied"
+    "Команды скопированы": "Commands copied",
+    "Ставить новые версии без подтверждения": "Install new versions without asking",
+    "Раз в сутки проверять релизы на GitHub и устанавливать новую версию, не спрашивая. Перед установкой снимается конфигурация, после — проверяется, что интерфейс и маршрутизация поднялись; если нет, возвращается прежняя версия. Это доверие тому, кто публикует релизы: обновление заменяет программу, через которую ходит трафик всей сети.": "Check GitHub releases once a day and install a newer version without asking. The configuration is snapshotted first, and afterwards the interface and routing are checked; if either fails to come back, the previous version is restored. This is trust placed in whoever publishes the releases: an update replaces the program every packet on the network passes through.",
+    "Установка заменит программу, которая отдаёт эту страницу: интерфейс на минуту пропадёт и вернётся сам. Ход установки виден ниже.": "Installing replaces the program serving this page: the interface will disappear for about a minute and come back on its own. Progress is shown below.",
+    "Сделать вручную с консоли": "Do it by hand from the console",
+    "Интерфейс перезапускается…": "The interface is restarting…",
+    "Обновление идёт дольше обычного — откройте страницу заново, чтобы увидеть результат.": "This is taking longer than usual — reload the page to see how it ended.",
+    "Новые версии будут ставиться сами": "New versions will install themselves",
+    "Автоматическая установка выключена": "Automatic installation is off",
+    "Не удалось запустить обновление": "Could not start the update",
+    "Обновление не удалось": "The update failed",
+    "⏳ Устанавливается…": "⏳ Installing…"
   },
   "patterns": [
     [

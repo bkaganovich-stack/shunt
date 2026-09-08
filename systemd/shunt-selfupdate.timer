@@ -1,0 +1,12 @@
+[Unit]
+Description=Shunt — daily check for a newer release
+
+[Timer]
+OnCalendar=daily
+# Spread over four hours: every gateway running this would otherwise ask
+# GitHub at the same second.
+RandomizedDelaySec=4h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

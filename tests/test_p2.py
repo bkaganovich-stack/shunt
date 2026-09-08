@@ -102,6 +102,24 @@ class TestMigration:
         assert "devices" in s
         assert "custom_rules" in s
 
+    def test_unattended_updates_are_off_unless_asked_for(self):
+        # Installing whatever appears on GitHub without anyone looking is a
+        # delegation of trust. A settings file written before the feature
+        # existed must not come back with it switched on.
+        s = m._migrate_settings({"profile": "all"})
+        assert s["updates"]["auto"] is False
+
+    def test_updates_block_is_deep_merged_like_the_others(self):
+        # The nested-merge list is easy to forget when adding a settings block:
+        # miss it and a gateway upgrading from an older version has a settings
+        # file with "updates" present but the new keys absent.
+        s = m._migrate_settings({"profile": "all", "updates": {}})
+        assert s["updates"].get("auto") is False
+
+    def test_an_operator_choice_survives_migration(self):
+        s = m._migrate_settings({"profile": "all", "updates": {"auto": True}})
+        assert s["updates"]["auto"] is True
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: ARP / device merging
