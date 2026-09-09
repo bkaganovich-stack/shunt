@@ -95,16 +95,24 @@ and can compare against on any change.
 
 ---
 
-## Provider adaptation still outstanding
+## Provider adaptation: done as of 2.3.1
 
-- **Release 2.2.0 and install it.** The CGNAT fix currently exists on the live
-  gateway only as an edited file; `dpkg -V shunt` reports the divergence. Any
-  reinstall or upgrade reverts it and reproduces the whole outage.
-- **A DNS fallback that is not Cloudflare DoH.** It answers on this provider,
-  but roughly two dozen TLS connections an hour are reset before completing.
-  Resolution succeeds by retrying, which costs latency on every cold name. The
-  lease resolvers already have a routing bypass; adding them to dnsmasq as a
-  second upstream would make name resolution robust rather than persistent.
+The CGNAT fix, the two-writers fix and split DNS are all in the package now;
+`dpkg -V shunt` on the live gateway reports nothing, so there is no edited file
+left for the next upgrade to revert. Russian names resolve through the
+provider's own resolvers, everything else through the DoH proxy, and both were
+verified after the upgrade.
+
+Still open on the DNS question, and worth measuring before acting:
+
+- **Whether the DoH proxy should keep the foreign half at all.** AdGuard's own
+  resolvers, reached through the tunnel, would remove one moving part. Held
+  back deliberately: the current layout should be left alone long enough to
+  know it is stable, since the failure mode it replaces cost a day.
+- **Cloudflare's reset rate.** Roughly two dozen TLS connections an hour to
+  the DoH endpoint are reset before completing on this provider. Resolution
+  survives by retrying, which costs latency on every cold name. Not urgent now
+  that Russian names never reach it.
 
 ## Earlier items, unchanged
 
