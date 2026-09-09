@@ -1,5 +1,25 @@
 shunt (2.2.0) stable; urgency=medium
 
+  * Deliver packets addressed to the gateway itself on a CGNAT provider. The
+    TPROXY chain skipped RFC1918 and nothing else, so on a provider that hands
+    out an address from 100.64.0.0/10 -- RFC 6598, the carrier's own side of a
+    CGNAT -- every reply arriving for the box was intercepted into xray rather
+    than delivered. DNS answers, TLS server-hellos, the tunnel's own handshake:
+    all of it vanished while tcpdump showed it arriving on the wire. Nothing
+    could start, because the egress needed a name resolved and resolving a name
+    needed the egress. Providers issuing RFC1918 WAN addresses never showed it.
+  * Route the resolvers from the DHCP lease around the tunnel, the way the DoH
+    endpoints already were. Without it the queries followed sing-box's default
+    into a tunnel that cannot come up until a name resolves.
+  * dnsmasq binds dynamically. bind-interfaces claims its sockets once at
+    start-up, so a gateway booted with the LAN cable disconnected served
+    neither DHCP nor DNS on it afterwards, however many times the cable was
+    reconnected -- which is exactly how a gateway gets handled while its
+    provider is being changed.
+  * The inline dnsmasq template pointed at a hardcoded public resolver while
+    settings.json named the local DoH proxy. It now agrees with the rest of the
+    product.
+
   * Update the gateway from the interface. The updates page reported that a
     newer version existed and offered no way to install it -- the button was
     rendered only for xray-core -- so it now has one, plus the console

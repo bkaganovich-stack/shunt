@@ -61,6 +61,10 @@ flush_rules() {
     iptables -t mangle -X XRAY_ACCT 2>/dev/null || true
     ip rule  del fwmark $TPROXY_MARK table 100 2>/dev/null || true
     ip rule  del to 1.1.1.1/32 priority 50 lookup main 2>/dev/null || true
+    for _dns in $(grep -hs '^DNS=' /run/systemd/netif/leases/* 2>/dev/null \
+                  | cut -d= -f2 | tr ' ' '\n' | grep -E '^[0-9.]+$' | head -4); do
+        ip rule del to "$_dns/32" priority 50 lookup main 2>/dev/null || true
+    done
     ip rule  del to 1.0.0.1/32 priority 50 lookup main 2>/dev/null || true
     ip rule  del uidrange 994-994 priority 50 lookup main 2>/dev/null || true
     ip rule  del fwmark 0xff priority 40 lookup main 2>/dev/null || true
@@ -134,6 +138,14 @@ ip rule  add fwmark $TPROXY_MARK table 100 priority 100
 # (i.e. Russian) traffic while the tunnelled path keeps working.
 ip rule  add fwmark 0xff priority 40 lookup main 2>/dev/null || true
 ip rule  add to 1.1.1.1/32 priority 50 lookup main 2>/dev/null || true
+# The provider's own resolvers, straight from the DHCP lease. On a provider that
+# blocks or resets public DoH these are the only names the box can resolve, and
+# without a rule of their own the queries disappear into the tunnel -- which
+# cannot come up, because bringing it up needs a name resolved first.
+for _dns in $(grep -hs '^DNS=' /run/systemd/netif/leases/* 2>/dev/null \
+              | cut -d= -f2 | tr ' ' '\n' | grep -E '^[0-9.]+$' | head -4); do
+    ip rule add to "$_dns/32" priority 50 lookup main 2>/dev/null || true
+done
 ip rule  add to 1.0.0.1/32 priority 50 lookup main 2>/dev/null || true
 ip rule  add uidrange 994-994 priority 50 lookup main 2>/dev/null || true   # AdGuard CLI (agvpn) egress -> direct
 ip route add local 0.0.0.0/0 dev lo table 100
@@ -154,6 +166,15 @@ iptables -t mangle -A XRAY_PREROUTING -m mark --mark $XRAY_MARK -j RETURN
 iptables -t mangle -A XRAY_PREROUTING -d 224.0.0.0/4   -j RETURN
 iptables -t mangle -A XRAY_PREROUTING -d 240.0.0.0/4   -j RETURN
 # Skip private/local destinations (private ranges handled by xray routing)
+#
+# 100.64.0.0/10 is RFC 6598, the space carriers use for their own side of a
+# CGNAT. On such a provider it is the gateway's OWN WAN address -- so without
+# this line every packet arriving for the box itself is TPROXY'd into xray
+# instead of being delivered: DNS answers, TLS server-hellos, everything. The
+# box then behaves as if the internet were unreachable while tcpdump shows the
+# replies arriving, which is as confusing as it sounds. Providers on RFC1918
+# WAN addresses never showed it, because 10.0.0.0/8 below already covered them.
+iptables -t mangle -A XRAY_PREROUTING -d 100.64.0.0/10 -j RETURN
 iptables -t mangle -A XRAY_PREROUTING -d 127.0.0.0/8   -j RETURN
 iptables -t mangle -A XRAY_PREROUTING -d 10.0.0.0/8    -j RETURN
 iptables -t mangle -A XRAY_PREROUTING -d 172.16.0.0/12 -j RETURN
@@ -190,6 +211,7 @@ else
 fi
 iptables -t mangle -A XRAY_OUTPUT -d 224.0.0.0/4   -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 240.0.0.0/4   -j RETURN
+iptables -t mangle -A XRAY_OUTPUT -d 100.64.0.0/10 -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 127.0.0.0/8   -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 10.0.0.0/8    -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 172.16.0.0/12 -j RETURN
