@@ -1,3 +1,15 @@
+shunt (2.3.0) stable; urgency=medium
+
+  * Writing DNS settings no longer deletes the DHCP server. apply_topology.py
+    and build_dnsmasq_conf write the same file, and the second emitted only the
+    DNS half -- so changing a resolver in the interface removed the DHCP the
+    downstream router leases its WAN address from, and the router went dark at
+    its next renewal with nothing connecting the two events. Whichever writer
+    runs last now produces a complete file, and it binds dynamically for the
+    same reason apply_topology does.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Wed, 09 Sep 2026 22:16:05 +0300
+
 shunt (2.2.0) stable; urgency=medium
 
   * Deliver packets addressed to the gateway itself on a CGNAT provider. The

@@ -121,6 +121,42 @@ class TestMigration:
         assert s["updates"]["auto"] is True
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: the dnsmasq file has two writers and one of them used to truncate it
+# ─────────────────────────────────────────────────────────────────────────────
+class TestDnsmasqConfig:
+    def test_saving_dns_settings_keeps_serving_dhcp(self):
+        # apply_topology.py and build_dnsmasq_conf write the same file. The
+        # second used to emit only the DNS half, so changing a resolver in the
+        # interface deleted the DHCP server the downstream router leases its
+        # WAN address from -- and the router went dark at its next renewal,
+        # with nothing to connect the two events.
+        (m.CFG_DIR / "network.conf").write_text(
+            "TOPOLOGY=inline\nWAN_IF=eth0\nLAN_IF=eth1\nROUTER_IP=192.168.100.1\n")
+        with patch.object(m, "_get_lan_ip", return_value="192.168.100.1"):
+            conf = m.build_dnsmasq_conf({"upstream": ["127.0.0.1#5053"]})
+        assert "dhcp-range=192.168.100.10,192.168.100.50" in conf
+        assert "dhcp-option=3,192.168.100.1" in conf
+        assert "interface=eth1" in conf
+
+    def test_it_binds_dynamically(self):
+        # bind-interfaces claims its sockets once: a gateway booted with the LAN
+        # cable out then serves nothing on that interface however often the
+        # cable is reconnected, which is how a gateway is handled during a
+        # provider change.
+        (m.CFG_DIR / "network.conf").write_text("LAN_IF=eth1\n")
+        with patch.object(m, "_get_lan_ip", return_value="192.168.100.1"):
+            conf = m.build_dnsmasq_conf({})
+        assert "bind-dynamic" in conf and "bind-interfaces" not in conf
+
+    def test_russian_names_go_to_their_own_upstream(self):
+        with patch.object(m, "_get_lan_ip", return_value="192.168.100.1"):
+            conf = m.build_dnsmasq_conf(
+                {"upstream": ["127.0.0.1#5053"], "upstream_ru": ["213.234.193.1"]})
+        assert "server=127.0.0.1#5053" in conf
+        assert "server=/ru/213.234.193.1" in conf
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: ARP / device merging
 # ─────────────────────────────────────────────────────────────────────────────
