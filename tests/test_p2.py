@@ -381,6 +381,18 @@ class TestDNSConfigGeneration:
         assert "server=/ru/192.168.50.1" in conf
         assert "server=/local/192.168.50.1" in conf
 
+    def test_the_upstream_the_box_actually_runs_on_validates(self):
+        # 127.0.0.1#5053 is the local DoH proxy: the gateway's real upstream,
+        # on a port because dnsmasq holds 53. The validator used to reject it,
+        # so the DNS page could not save the settings it was showing.
+        assert m.validate_dns_settings(
+            {"upstream": ["127.0.0.1#5053"], "upstream_ru": ["213.234.193.1"],
+             "cache_size": 1000, "local_records": []}) == []
+
+    def test_a_nonsense_port_is_still_refused(self):
+        for bad in ("1.1.1.1#0", "1.1.1.1#70000", "1.1.1.1#abc", "1.1.1.1#"):
+            assert m.validate_dns_settings({"upstream": [bad]}), bad
+
     def test_local_record_in_conf(self):
         dns  = {"upstream": ["8.8.8.8"], "upstream_ru": [], "cache_size": 1000,
                 "local_records": [{"hostname": "mydevice.local", "ip": "192.168.1.5"}]}

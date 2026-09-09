@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -650,7 +650,18 @@ def build_xray_config(settings: dict) -> dict:
 
 # ── DNS Config ─────────────────────────────────────────────────────────────────
 def _validate_dns_ip(ip: str) -> bool:
-    try: ipaddress.ip_address(ip); return True
+    """
+    An upstream as dnsmasq spells it: an address, optionally with a port.
+
+    The gateway's own upstream is 127.0.0.1#5053 -- the local DoH proxy, on a
+    port because 53 belongs to dnsmasq itself. Validating with ip_address()
+    alone rejected exactly the value the box was running on, so the DNS page
+    refused to save the settings it was displaying.
+    """
+    addr, sep, port = ip.partition("#")
+    if sep and not (port.isdigit() and 0 < int(port) < 65536):
+        return False
+    try: ipaddress.ip_address(addr); return True
     except ValueError: return False
 
 def _validate_hostname(h: str) -> bool:
