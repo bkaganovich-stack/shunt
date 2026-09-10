@@ -95,6 +95,35 @@ and can compare against on any change.
 
 ---
 
+## 5. Inbound access, when the box is the edge
+
+In inline topology the gateway *is* the edge router, and `iptables.sh` closes
+the WAN unconditionally: replies and ping in, everything new dropped. That is
+the right default and it should stay the default. But it also means there is no
+way to let anything in — a console, a home server, a WireGuard endpoint —
+without editing a shipped script, which the next upgrade overwrites.
+
+So the item is **inbound access**, not a firewall editor:
+
+- A short list of what the household deliberately exposes: external port,
+  internal device and port, protocol, on or off. That is the whole feature.
+- Say what it costs, at the moment of adding it, in the sentence a person can
+  act on: this makes `<device>:<port>` reachable from the internet.
+- The list is also the audit. Nothing exposed that is not on it, and the page
+  shows the closed default as a first-class state rather than an empty table.
+
+**Not** a general rule editor. Routing on this box depends on the exact order
+of fifteen rules in two mangle chains, and the last outage was one missing rule
+in one of them. Handing that ordering to a form multiplies the ways to produce
+a gateway that is broken in a way nobody can see, in exchange for flexibility
+a household never asked for. The diagnostic half of "what is the firewall
+doing" belongs to item 1, which already shows rule counters.
+
+Worth pairing with a plain view of **what listens on which interface** — the
+admin interface on :80, SSH, dnsmasq, xray's ports. That is answerable today
+only over SSH with `ss -tulnp`, and it is the question anyone asks first when
+wondering whether the box is safe on a public address.
+
 ## Provider adaptation: done as of 2.3.1
 
 The CGNAT fix, the two-writers fix and split DNS are all in the package now;
@@ -124,6 +153,12 @@ Still open on the DNS question, and worth measuring before acting:
   end to end; distribution is by file for now.
 - **Multi-subscription egress registry.** Parked: blocked on subscriptions
   worth trusting rather than on anything technical.
+- **ufw is enabled at boot and inactive.** A Debian default, not ours: the
+  unit runs, `ufw` itself is off, so it writes nothing today. It is a loaded
+  gun rather than a bug — `ufw enable` would insert its own chains and its
+  default FORWARD policy would stop the gateway forwarding, with no obvious
+  connection to the command that caused it. Either mask the unit or say so
+  where an operator would look.
 - **Tunnel throughput.** ~9 Mbit/s per flow is a 128 KB window over a 90-120 ms
   RTT, not a provider limit. Untried: AdGuard over QUIC rather than HTTP/2, and
   an exit closer than the United States.
