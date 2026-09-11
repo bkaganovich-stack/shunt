@@ -168,9 +168,39 @@ cat > "$STAGE/preseed.cfg" <<'PRESEED'
 d-i debian-installer/locale string en_US.UTF-8
 d-i keyboard-configuration/xkb-keymap select us
 
-### Network. A gateway has two ports and typically only one is plugged in at
-### install time, so the interface with a link wins rather than a fixed name.
+### Network. `auto` picks the first interface that has a link -- and on a box
+### with Wi-Fi that can be the wireless one, at which point the installer stops
+### and asks for a WPA passphrase the preseed has no way to answer. (Observed:
+### an install that reached "Некорректная ключевая фраза" because the Ethernet
+### link had not come up yet.) So: wait for a wired carrier and name it
+### explicitly, the same way the disk is chosen above. If no wired link appears,
+### `auto` remains as the fallback and the operator gets the usual questions.
+# early_command runs before the network drivers are necessarily loaded, so it
+# waits only when there is something to wait FOR: a wired interface that exists
+# but has not negotiated yet. With no wired interface visible at all it gives up
+# at once rather than charging every install twenty seconds for nothing.
+d-i preseed/early_command string \
+    W=""; \
+    for i in $(seq 1 20); do \
+        SEEN=""; \
+        for n in /sys/class/net/*; do \
+            d=$(basename $n); \
+            [ "$d" = lo ] && continue; \
+            [ -e "$n/wireless" ] && continue; \
+            [ -e "$n/phy80211" ] && continue; \
+            SEEN=1; \
+            [ "$(cat $n/carrier 2>/dev/null)" = 1 ] || continue; \
+            W="$d"; break; \
+        done; \
+        [ -n "$W" ] && break; \
+        [ -z "$SEEN" ] && break; \
+        sleep 1; \
+    done; \
+    { [ -n "$W" ] && debconf-set netcfg/choose_interface "$W"; } || true
 d-i netcfg/choose_interface select auto
+# Give a slow-negotiating port time before anything is decided about it.
+d-i netcfg/link_wait_timeout string 30
+d-i netcfg/link_detection_timeout string 30
 d-i netcfg/dhcp_timeout string 60
 d-i netcfg/get_hostname string shunt
 d-i netcfg/get_domain string local
@@ -396,4 +426,9 @@ else
     echo "      sudo dd if=$OUT of=/dev/sdb bs=4M status=progress oflag=sync"
 fi
 echo "  It installs unattended after a ten second pause and ERASES that disk."
-echo "  The machine needs a working internet connection while it installs."
+echo
+echo "  Plug an Ethernet cable in BEFORE booting it, into a port that hands out"
+echo "  DHCP -- a LAN port of the existing router will do. The installer needs"
+echo "  the network for the package mirror, and it will not use Wi-Fi: with no"
+echo "  wired link it stops and asks for a WPA passphrase that nothing can"
+echo "  answer unattended. If you see that question, the cable is the problem."

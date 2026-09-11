@@ -129,6 +129,9 @@ textarea { resize: vertical; min-height: 90px; font-family: 'SF Mono', monospace
 .btn-sm { padding: 6px 12px; font-size: 12px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+/* Отступ только когда за строкой кнопок что-то идёт: этот класс стоит и
+   последним элементом карточки, где нижний отступ был бы лишним полем. */
+.btn-row:not(:last-child) { margin-bottom: 14px; }
 /* .card has no margin-top, so a card placed right after a button row sat flush
    against it and looked like the button overlapped it (seen on the Proxy page). */
 .btn-row + .card { margin-top: 16px; }
