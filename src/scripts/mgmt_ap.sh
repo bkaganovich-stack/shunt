@@ -76,11 +76,42 @@ ap_up() {
     ap_down 2>/dev/null || true
     sleep 1
 
-    # L3 on the AP interface
-    ip addr add "$AP_IP/$AP_CIDR" dev "$AP_IF"
     ip link set "$AP_IF" up
 
-    # Dedicated DHCP-only dnsmasq (port=0 disables DNS → no clash with prod DNS)
+    # Without hostapd there is no access point at all, and the interface is left
+    # holding the AP address with the link down -- which is exactly what happened
+    # here: the out-of-band way into the gateway was silently gone for a day, and
+    # the only trace was one line in the journal nobody had reason to read.
+    if ! command -v hostapd >/dev/null 2>&1; then
+        echo "mgmt-ap: hostapd не установлен — точка доступа не поднимется." >&2
+        echo "mgmt-ap: установите её: apt-get install -y hostapd" >&2
+        logger -t shunt-mgmt-ap "hostapd отсутствует, запасной вход недоступен"
+        exit 1
+    fi
+
+    # hostapd (foreground -B = daemonize)
+    hostapd -B -P "$HOSTAPD_PID" "$HOSTAPD_CONF"
+
+    # Address AFTER hostapd, not before. Taking the radio over re-initialises
+    # the interface and the kernel drops its IPv4 address on the way, so the
+    # old order produced an access point that answered on no address at all:
+    # a client could associate, get a lease, be told the gateway was
+    # 192.168.99.1, and find nothing there. Assign it once hostapd holds the
+    # interface, then check that it stuck rather than announcing success.
+    for _ in $(seq 1 10); do
+        ip addr show dev "$AP_IF" | grep -q "inet $AP_IP/" && break
+        ip addr add "$AP_IP/$AP_CIDR" dev "$AP_IF" 2>/dev/null || true
+        sleep 1
+    done
+    if ! ip addr show dev "$AP_IF" | grep -q "inet $AP_IP/"; then
+        echo "mgmt-ap: не удалось закрепить $AP_IP на $AP_IF — входа по Wi-Fi нет" >&2
+        logger -t shunt-mgmt-ap "адрес $AP_IP не закрепился, запасной вход не работает"
+        exit 1
+    fi
+
+    # DHCP only (port=0 disables DNS → no clash with the production resolver).
+    # Started last: --bind-interfaces claims its socket once, so it has to see
+    # the address already in place.
     dnsmasq --port=0 \
         --interface="$AP_IF" --bind-interfaces \
         --dhcp-range="$DHCP_START,$DHCP_END,255.255.255.0,12h" \
@@ -91,9 +122,6 @@ ap_up() {
         --conf-file=/dev/null \
         --dhcp-leasefile=/run/mgmt-ap.leases \
         --except-interface=lo
-
-    # hostapd (foreground -B = daemonize)
-    hostapd -B -P "$HOSTAPD_PID" "$HOSTAPD_CONF"
 
     echo "mgmt-AP up: SSID see $HOSTAPD_CONF, UI at http://$AP_IP"
 }
