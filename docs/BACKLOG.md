@@ -107,21 +107,31 @@ Four things turned up, and the shape of the search is the lesson:
   tunnel's tun answers ICMP echo for every address, including documentation
   addresses nobody replies to. Fixed, and worth remembering as a class: a check
   that cannot fail is worse than no check, because it is believed.
-- **ICMP is broken for everything behind the gateway.** The router pings 8.8.8.8
-  every fifteen seconds -- 5562 times in a day -- and sing-box refuses every one
-  of them, because its SOCKS outbound does not carry ICMP. So the router
-  believes it has no internet, `ping` from any device on the LAN is a lie, and
-  the first diagnostic anyone reaches for is broken. Not yet fixed: it needs a
-  rule sending ICMP to the direct outbound, and the two transparent-proxy
-  datapaths on this box (xray TPROXY and sing-box tun/auto_route) want thinking
-  about first.
-- **The five-minute period is still unexplained.** Ruled out by measurement, not
-  by argument: the offload watchdog (fires on that period but touches nothing),
-  head-of-line blocking in the tunnel (losses are single packets, never runs),
-  AdGuard reconnecting (a connection through it lived 14 minutes across three
-  of its wake-ups), and xray's 300-second idle default on an active connection.
-  Still open: UDP through xray specifically, and whether the router reacts to
-  believing the internet is down.
+- **ICMP was broken for everything behind the gateway.** The router pinged
+  8.8.8.8 every fifteen seconds -- 5562 times in a day -- and sing-box refused
+  every one, because its SOCKS outbound cannot carry ICMP. Fixed in 2.3.3: ICMP
+  carries the bypass mark and leaves through the WAN. The router's connectivity
+  check works again, which removes the most plausible remaining cause of a
+  periodic disruption nobody on this box could see.
+- **The five-minute period is not yet explained, and four candidates are dead.**
+  Ruled out by measurement rather than argument: the offload watchdog (fires on
+  exactly that period, but exits without touching the NIC unless the kernel has
+  logged transmit faults, and it has not); head-of-line blocking in the tunnel
+  (every loss is a single packet, never a run); AdGuard reconnecting (a
+  connection through it lived fourteen minutes across three of its wake-ups);
+  and xray's 300-second idle default, which looked like a perfect fit until
+  setting it to 60 seconds failed to cut an active connection at all -- the
+  296-second death that suggested it was a restart of xray, by this author, at
+  that moment.
+
+  What remains: whether the router was reacting to believing it had no
+  internet. That is now unfalsifiable from this side, because the cause was
+  removed -- which is the right order, but it means the next call is the test.
+
+  The wider lesson is the measurement, not the answer. Four wrong ideas cost
+  about ten minutes each because each one could be checked; the same four, a
+  week ago, would have been argued about. Item 1 exists to make that cheap for
+  someone who is not holding a root shell.
 
 ---
 
