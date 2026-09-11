@@ -875,6 +875,15 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       </div>
 
       <div class="card">
+        <div class="card-title">Допущения о провайдере</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Настройки опираются на то, как ведёт себя провайдер. В сентябре три
+          таких допущения перестали выполняться разом, и ни одно не было записано.
+          Здесь они записаны и проверяются.</p>
+        <div id="provider-audit"><span class="text-muted">загрузка…</span></div>
+      </div>
+
+      <div class="card">
         <div class="card-title">Канал провайдера</div>
         <div id="path-link"><span class="text-muted">загрузка…</span></div>
         <div id="path-lease-note" class="mt-4" style="display:none;padding:12px 14px;
@@ -2871,8 +2880,42 @@ async function loadLadder() {
   el.innerHTML = h;
 }
 
+async function loadProviderAudit() {
+  const el = document.getElementById('provider-audit');
+  if (!el) return;
+  const d = await apiJ('GET', '/api/provider');
+  const p = d && d.provider;
+  if (!p) {
+    el.innerHTML = '<span class="text-muted">сторож ещё не отчитался</span>';
+    return;
+  }
+  let h = '';
+  (p.checks || []).forEach(c => {
+    // Три состояния, а не два: «не проверялось» и «записано к сведению» —
+    // не то же самое, что «сломано», и красный цвет им не положен.
+    const mark = c.holds === true ? '<span style="color:var(--green)">✓</span>'
+               : c.holds === false ? '<span style="color:var(--red)">✕</span>'
+               : '<span class="text-muted">·</span>';
+    h += '<div class="info-row"><span class="info-key">' + mark + ' ' +
+         escHtml(c.title) + '</span><span class="info-val ' +
+         (c.holds === null ? 'text-muted' : '') + '">' + escHtml(c.detail || '') +
+         '</span></div>';
+    if (c.holds === false && c.remedy)
+      h += '<div style="color:var(--orange);font-size:12px;margin:-4px 0 8px">' +
+           escHtml(c.remedy) + '</div>';
+  });
+  const f = p.fingerprint || {};
+  h += '<div class="text-muted" style="font-size:12px;margin-top:8px">' +
+       'Провайдер: DHCP-сервер ' + escHtml(f.dhcp_server || '—') +
+       ', сеть ' + escHtml(f.network || '—') +
+       (p.known_providers > 1 ? '. Известных провайдеров: ' + p.known_providers : '') +
+       '</div>';
+  el.innerHTML = h;
+}
+
 async function loadPath() {
   loadLadder();
+  loadProviderAudit();
   const d = await apiJ('GET', '/api/path');
   if (!d) return;
   renderPathLink(d);

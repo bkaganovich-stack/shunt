@@ -130,7 +130,26 @@ response (restart AdGuard) could not possibly have helped.
   wrong.
 - Escalate somewhere a person will see, not only into a log file.
 
-## 4. Provider profiles
+## 4. Provider profiles — shipped in 2.7.0
+
+Built as an **assumptions audit** rather than as a profile browser, because the
+profile was never the point: the gateway depending on assumptions nobody had
+written down was. Each check names an assumption, tests it against what the
+provider is doing now, and says what to do when it fails. The first one is the
+outage itself -- is the gateway's own network excepted from interception? --
+and it is verified by deleting the CGNAT line from a copy of the live chain and
+watching the check go red with the remedy attached.
+
+The fingerprint is the "named set", keyed on the DHCP server and the resolvers
+rather than the address, so a session rebuild is not mistaken for a new company.
+
+One thing this got wrong on the first pass, caught by running it: the cloned WAN
+MAC was reported as a broken assumption. Cloning was deliberate. A permanent red
+mark for something nobody should act on is the same defect as `ping 1.1.1.1` --
+it teaches the reader to ignore the page. It is recorded as a dependency now,
+not judged.
+
+The original item, for the record:
 
 The gateway was configured for one provider's assumptions and silently depended
 on them: WAN inside 10.0.0.0/8, public DoH reachable, a lease measured in days.

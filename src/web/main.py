@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -2943,6 +2943,18 @@ async def health_diagnosis(u: str = Depends(auth_dep)):
     except (OSError, ValueError):
         d = None
     return {"diagnosis": d, "attention": _active_attention()}
+
+@app.get("/api/provider")
+async def provider_profile(u: str = Depends(auth_dep)):
+    """
+    Who the provider appears to be, and whether the assumptions this gateway
+    makes about them still hold.
+    """
+    try:
+        d = json.loads((LOGS / "provider.json").read_text())
+    except (OSError, ValueError):
+        d = None
+    return {"provider": d}
 
 @app.post("/api/attention/clear")
 async def attention_clear(u: str = Depends(auth_dep)):

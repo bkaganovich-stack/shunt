@@ -728,7 +728,18 @@
     "несущей нет — кабель не воткнут или порт мёртв": "no carrier — the cable is out or the port is dead",
     "TCP наружу проходит": "TCP gets out",
     "резолвер отвечает": "the resolver answers",
-    "туннель отвечает": "the tunnel answers"
+    "туннель отвечает": "the tunnel answers",
+    "Допущения о провайдере": "Assumptions about the provider",
+    "Настройки опираются на то, как ведёт себя провайдер. В сентябре три таких допущения перестали выполняться разом, и ни одно не было записано. Здесь они записаны и проверяются.": "The configuration rests on how the provider behaves. In September three such assumptions stopped holding at once and not one of them was written down. Here they are written down, and checked.",
+    "Собственная сеть шлюза исключена из перехвата": "The gateway's own network is excepted from interception",
+    "Сеть провайдера не пересекается с локальной": "The provider's network does not overlap the LAN",
+    "Публичный DoH доступен у этого провайдера": "Public DoH is reachable at this provider",
+    "Провайдер выдал резолверы, и они отвечают": "The provider handed out resolvers, and they answer",
+    "MAC на WAN": "The WAN MAC",
+    "Похоже, сменился провайдер": "The provider appears to have changed",
+    "Нарушено допущение": "An assumption no longer holds",
+    "не проверялось": "not checked",
+    "в аренде резолверов нет": "the lease carries no resolvers"
   },
   "patterns": [
     [

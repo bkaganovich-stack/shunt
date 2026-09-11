@@ -25,6 +25,7 @@ from pathlib import Path
 BASE        = Path("/opt/shunt")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import diagnose as dg  # noqa: E402
+import provider as pv  # noqa: E402
 CFG         = BASE / "config"
 NET_CONF    = CFG / "network.conf"
 STATE_FILE  = CFG / "health-state.json"
@@ -43,6 +44,7 @@ NETIF_LEASES    = Path("/run/systemd/netif/leases")
 WAN_CHANGES     = BASE / "logs" / "wan-changes.json"
 WAN_CURRENT     = BASE / "logs" / "wan-current.json"
 DIAGNOSIS       = BASE / "logs" / "diagnosis.json"
+PROVIDER        = BASE / "logs" / "provider.json"
 ATTENTION       = BASE / "logs" / "attention.json"
 ATTENTION_MAX   = 20
 WAN_CHANGES_MAX = 50
@@ -457,6 +459,60 @@ def run_diagnosis(state: dict, wan: str) -> dict:
                         "неисправность %s" % (d["owner"] or "—"))
     return state
 
+def check_provider(state: dict, wan: str, lan: str) -> dict:
+    """
+    Check the assumptions the configuration makes against the provider making
+    them false.
+
+    September's outage was a right setting whose precondition had stopped
+    holding, and nothing was written down that could notice. These checks are
+    that writing-down: the first is the outage itself -- is the gateway's own
+    address excepted from interception, or is every packet for it being
+    swallowed?
+    """
+    if not wan:
+        return state
+    fp = pv.fingerprint(wan)
+    chain = run("iptables", "-t", "mangle", "-L", "XRAY_PREROUTING",
+                "-v", "-n", "-x").stdout
+    lan_cidr = None
+    if lan:
+        m = re.search(r"inet (\d+\.\d+\.\d+\.\d+/\d+)",
+                      run("ip", "-4", "-o", "addr", "show", lan).stdout)
+        lan_cidr = m.group(1) if m else None
+    checks = pv.audit(fp, chain, lan_cidr,
+                      doh_ok=dg.resolves(server="127.0.0.1", port=5053),
+                      resolver_ok=(dg.resolves(server=fp["resolvers"][0], port=53)
+                                   if fp.get("resolvers") else None))
+    profiles, is_new = pv.remember(fp)
+    try:
+        PROVIDER.write_text(json.dumps(
+            {"ts": int(time.time()), "fingerprint": fp, "checks": checks,
+             "known_providers": len(profiles), "is_new": is_new},
+            ensure_ascii=False))
+    except OSError:
+        pass
+
+    if is_new and state.get("provider_seen"):
+        log("PROVIDER: похоже на другого провайдера (DHCP-сервер %s, "
+            "резолверы %s)" % (fp.get("dhcp_server"), ", ".join(fp.get("resolvers") or [])))
+        raise_attention("provider",
+                        "Похоже, сменился провайдер",
+                        "DHCP-сервер %s, резолверы %s. Проверьте допущения — "
+                        "в прошлый раз их сломалось три сразу."
+                        % (fp.get("dhcp_server"), ", ".join(fp.get("resolvers") or []) or "—"))
+    state["provider_seen"] = True
+
+    bad = pv.failing(checks)
+    if bad:
+        first = bad[0]
+        log("ASSUMPTION: %s — %s" % (first["title"], first["detail"]))
+        raise_attention("assumption", "Нарушено допущение: %s" % first["title"],
+                        "%s. %s" % (first["detail"], first["remedy"]))
+    else:
+        clear_attention("assumption")
+    return state
+
 def cycle(state: dict) -> dict:
     if topo_switch_running():
         return state   # never interfere mid-switch
@@ -485,6 +541,7 @@ def cycle(state: dict) -> dict:
     # 3b) the ladder: what is actually wrong, in the order things depend on
     #     each other, so a consequence never gets reported as a cause.
     state = run_diagnosis(state, wan)
+    state = check_provider(state, wan, lan)
 
     # 4) topology-specific reachability + the post-switch safety net
     if wan:
