@@ -209,7 +209,28 @@ Four things turned up, and the shape of the search is the lesson:
 
 ---
 
-## 5. Inbound access, when the box is the edge
+## 5. Inbound access, when the box is the edge — shipped in 2.8.0
+
+The forwarding turned out to be the easy half. The half worth building was the
+sentence at the top of the page: **this gateway is on CGNAT, and nothing from
+the internet reaches it, so no rule below can work.** A form that accepted port
+forwards without saying that would have cost somebody an evening and then a
+support conversation.
+
+Two things the real `ss` output taught, neither of which the design anticipated.
+Of 219 open sockets, 73 are loopback-only and 135 are xray's per-flow UDP
+sockets -- some showing foreign addresses in the local column, some bound to the
+wildcard on ephemeral ports. Both arrived looking exactly like listeners. A
+listener is now defined as a socket bound to an address this machine holds, or
+to a wildcard on a port outside the range the kernel hands to clients, read from
+the kernel rather than guessed. 219 sockets became 11 services.
+
+Still worth doing here later: UPnP is deliberately absent and should stay that
+way, but "this device asked to open a port and was refused" would be worth
+showing; and the same page should eventually say whether an open port is
+actually answering, in the spirit of item 2.
+
+The original item, for the record:
 
 In inline topology the gateway *is* the edge router, and `iptables.sh` closes
 the WAN unconditionally: replies and ping in, everything new dropped. That is

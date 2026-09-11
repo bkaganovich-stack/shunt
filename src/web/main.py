@@ -10,13 +10,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.7.1"
+VERSION = "2.8.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
 import features as _ft
 import sources as _src
 import netpath as _np
+import inbound as _in
 import dnspath as _dns
 
 import uvicorn
@@ -64,6 +65,9 @@ DEFAULT_SETTINGS: dict = {
     # Conferencing media (Zoom, Teams) leaves without the tunnel. See
     # REALTIME_DOMAINS for why; turn off if an exit country is needed for them.
     "realtime_direct":   True,
+    # Inbound forwards. Empty by default and it stays empty until somebody
+    # decides otherwise: the WAN is closed, which is where a gateway belongs.
+    "inbound":           [],
     "custom_rules": {"always_direct": [], "always_vpn": []},
     # Devices: keyed by MAC (or "ip:A.B.C.D" when MAC unavailable)
     # {"aa:bb:cc:dd:ee:ff": {"name":"...", "policy":"inherit", "ips":[]}}
@@ -899,6 +903,14 @@ def apply_config(settings: dict, reason: str = "config_change",
     cfg = build_xray_config(settings)
     CFG_DIR.mkdir(parents=True, exist_ok=True)
     XCFG.write_text(json.dumps(cfg, indent=2))
+    # settings.json is the single source of truth for what is open. Rewriting
+    # the datapath's copy on every apply means a restored snapshot or a hand-
+    # edited file cannot leave the wire disagreeing with the page.
+    try:
+        (CFG_DIR / "inbound.conf").write_text(
+            _in.render_conf(settings.get("inbound", [])))
+    except OSError:
+        pass
     subprocess.run(["systemctl", "restart", "shunt"], capture_output=True)
     for _ in range(10):
         time.sleep(0.5)
@@ -2972,6 +2984,100 @@ async def attention_clear(u: str = Depends(auth_dep)):
     except OSError as e:
         raise HTTPException(500, str(e))
     return {"ok": True, "cleared": len(items)}
+
+# ── Inbound access ─────────────────────────────────────────────────────────────
+INBOUND_CONF = CFG_DIR / "inbound.conf"
+
+def _gateway_addresses() -> set[str]:
+    out = set()
+    r = subprocess.run(["ip", "-4", "-o", "addr", "show"],
+                       capture_output=True, text=True)
+    for m in re.finditer(r"inet (\d+\.\d+\.\d+\.\d+)/", r.stdout):
+        out.add(m.group(1))
+    return out
+
+def _wan_cidr() -> Optional[str]:
+    wan = _net_conf().get("WAN_IF", "")
+    if not wan:
+        return None
+    r = subprocess.run(["ip", "-4", "-o", "addr", "show", wan],
+                       capture_output=True, text=True)
+    m = re.search(r"inet (\d+\.\d+\.\d+\.\d+/\d+)", r.stdout)
+    return m.group(1) if m else None
+
+def _lan_cidr() -> Optional[str]:
+    lan = _net_conf().get("LAN_IF", "")
+    if not lan:
+        return None
+    r = subprocess.run(["ip", "-4", "-o", "addr", "show", lan],
+                       capture_output=True, text=True)
+    m = re.search(r"inet (\d+\.\d+\.\d+\.\d+/\d+)", r.stdout)
+    return m.group(1) if m else None
+
+class InboundRule(BaseModel):
+    id:       Optional[str] = None
+    name:     str = ""
+    proto:    str
+    wan_port: int
+    to_ip:    str
+    to_port:  int
+    enabled:  bool = True
+
+class InboundReq(BaseModel):
+    rules: list[InboundRule]
+
+@app.get("/api/inbound")
+async def inbound_get(u: str = Depends(auth_dep)):
+    """
+    What the household deliberately exposes -- and first, whether exposing
+    anything can work here at all.
+    """
+    s = load_settings()
+    wan = _wan_cidr()
+    return {"rules": s.get("inbound", []),
+            "reachability": _in.reachability(wan),
+            "wan_cidr": wan, "lan_cidr": _lan_cidr(),
+            "topology": _net_conf().get("TOPOLOGY", "loop")}
+
+@app.get("/api/inbound/listeners")
+async def inbound_listeners(u: str = Depends(auth_dep)):
+    """Everything accepting connections on this box, and who can reach it."""
+    out = subprocess.run(["ss", "-tulnpH"], capture_output=True, text=True).stdout
+    wan = _wan_cidr()
+    return _in.parse_listeners(
+        out, _gateway_addresses(), lan_ip=_get_lan_ip(),
+        wan_ip=wan.split("/")[0] if wan else None)
+
+@app.put("/api/inbound")
+async def inbound_put(req: InboundReq, u: str = Depends(auth_dep)):
+    """
+    Replace the list wholesale, after checking every rule in it.
+
+    Whole-list replacement rather than add/remove endpoints: the list IS the
+    audit, and "what is open" has to be answerable by reading one thing.
+    """
+    if _net_conf().get("TOPOLOGY", "loop") != "inline":
+        raise HTTPException(400, "Проброс портов имеет смысл только в режиме "
+                                 "inline: иначе граница сети — не шлюз, а роутер.")
+    rules = [r.model_dump() if hasattr(r, "model_dump") else r.dict()
+             for r in req.rules]
+    lan, gws = _lan_cidr(), _gateway_addresses()
+    for i, r in enumerate(rules):
+        r["id"] = r.get("id") or _uuid_mod.uuid4().hex[:8]
+        errs = _in.validate_rule(r, lan, gws, rules)
+        if errs:
+            raise HTTPException(400, "Правило %d: %s" % (i + 1, "; ".join(errs)))
+    s = load_settings(); old_s = dict(s)
+    s["inbound"] = rules
+    save_settings(s)
+    try:
+        INBOUND_CONF.write_text(_in.render_conf(rules))
+    except OSError as e:
+        raise HTTPException(500, str(e))
+    ok, err = apply_config(s, "inbound_change", _pre_settings=old_s)
+    return {"ok": ok, "error": err or None, "rules": rules,
+            "opened": [_in.cost_sentence(r, _wan_cidr())
+                       for r in rules if r.get("enabled", True)]}
 
 # ── Network path ───────────────────────────────────────────────────────────────
 @app.get("/api/path")

@@ -76,6 +76,18 @@ flush_rules() {
     iptables -t nat -D PREROUTING -p tcp --dport 53 -d "$LAN_IP" -j REDIRECT --to-port 5335 2>/dev/null || true
     iptables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-port 5335 2>/dev/null || true
     iptables -t nat -D PREROUTING -p tcp --dport 53 -j REDIRECT --to-port 5335 2>/dev/null || true
+    # Inbound forwards: found by their comment, so they go away whatever
+    # interface they were installed on -- the same reason the MASQUERADE and
+    # edge-firewall cleanup below scans instead of trusting the current WAN_IF.
+    for _tbl in nat filter; do
+        _chain=PREROUTING; [[ "$_tbl" == filter ]] && _chain=FORWARD
+        while IFS= read -r _spec; do
+            [[ -z "$_spec" ]] && continue
+            # shellcheck disable=SC2086
+            iptables -t "$_tbl" ${_spec/-A/-D} 2>/dev/null || true
+        done < <(iptables -t "$_tbl" -S "$_chain" 2>/dev/null \
+                 | grep -- '--comment shunt-inbound' || true)
+    done
     # FCM bypass cleanup (try both possible egress interfaces)
     iptables -t nat -D POSTROUTING -o "$LAN_IF" -p tcp --dport 5228 -j MASQUERADE 2>/dev/null || true
     [[ -n "${WAN_IF:-}" ]] && iptables -t nat -D POSTROUTING -o "$WAN_IF" -p tcp --dport 5228 -j MASQUERADE 2>/dev/null || true
@@ -280,6 +292,32 @@ if [[ "$TOPOLOGY" == "inline" ]]; then
     iptables -A INPUT   -i "$WAN_IF" -j DROP
     # Forwarded path: let return traffic back to the LAN, block new inbound.
     iptables -A FORWARD -i "$WAN_IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+    # ── Inbound forwards, if the operator listed any ────────────────────────
+    # Written from settings.json by the interface; a plain four-column file so
+    # this script needs no JSON parser in the datapath. Nothing here opens by
+    # default: an absent or empty file means the WAN stays shut, which is the
+    # state every gateway should be in until somebody decides otherwise.
+    #
+    # Placed between the ESTABLISHED accept and the DROP on purpose -- after
+    # the DROP these would never be reached, which is the kind of ordering
+    # mistake that makes a feature look broken instead of closed.
+    INBOUND_CONF=/opt/shunt/config/inbound.conf
+    if [[ -r "$INBOUND_CONF" ]]; then
+        while read -r _proto _wport _dip _dport _rest || [[ -n "${_proto:-}" ]]; do
+            [[ -z "${_proto:-}" || "${_proto:0:1}" == "#" ]] && continue
+            [[ "$_proto" == tcp || "$_proto" == udp ]] || continue
+            [[ "$_wport" =~ ^[0-9]+$ && "$_dport" =~ ^[0-9]+$ ]] || continue
+            [[ "$_dip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            iptables -t nat -A PREROUTING -i "$WAN_IF" -p "$_proto" \
+                --dport "$_wport" -m comment --comment shunt-inbound \
+                -j DNAT --to-destination "$_dip:$_dport"
+            iptables -A FORWARD -i "$WAN_IF" -p "$_proto" -d "$_dip" \
+                --dport "$_dport" -m comment --comment shunt-inbound -j ACCEPT
+            echo "iptables: inbound $_proto/$_wport -> $_dip:$_dport"
+        done < "$INBOUND_CONF"
+    fi
+
     iptables -A FORWARD -i "$WAN_IF" -j DROP
 fi
 

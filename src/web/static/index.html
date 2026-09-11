@@ -542,6 +542,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <span class="ico">📊</span> Панель управления</div>
       <div class="nav-link" onclick="showPage('path',this)">
         <span class="ico">🩺</span> Сетевой тракт</div>
+      <div class="nav-link" onclick="showPage('inbound',this)">
+        <span class="ico">🚪</span> Входящий доступ</div>
       <div class="nav-link" onclick="showPage('vpn',this)">
         <span class="ico">🔑</span> VPN серверы</div>
       <div class="nav-link" onclick="showPage('profile',this)">
@@ -847,6 +849,41 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <button class="btn btn-primary" onclick="runRouteTest()" id="rt-btn">Проверить</button>
         </div>
         <div id="rt-result"></div>
+      </div>
+    </div>
+
+    <!-- ── ВХОДЯЩИЙ ДОСТУП ────────────────────────────────────────────────── -->
+    <div id="page-inbound" class="page">
+      <h2>Входящий доступ</h2>
+      <p class="page-desc">Что снаружи пускается внутрь. По умолчанию — ничего</p>
+
+      <div id="inbound-reach" class="card"></div>
+
+      <div class="card">
+        <div class="card-title">Открытые порты</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Этот список и есть аудит: снаружи открыто только то, что в нём.
+          Направить порт на сам шлюз нельзя — там веб-интерфейс и SSH.</p>
+        <div id="inbound-list"></div>
+        <div class="rule-add-row" style="margin-top:10px">
+          <select id="ib-proto" style="max-width:90px">
+            <option value="tcp">tcp</option><option value="udp">udp</option>
+          </select>
+          <input id="ib-wport" type="text" placeholder="внешний порт" style="max-width:130px">
+          <input id="ib-ip" type="text" placeholder="адрес устройства">
+          <input id="ib-dport" type="text" placeholder="порт устройства" style="max-width:140px">
+          <input id="ib-name" type="text" placeholder="название" style="max-width:160px">
+          <button class="btn btn-secondary btn-sm" onclick="addInbound()">+ Открыть</button>
+        </div>
+        <div id="inbound-result" class="mt-4"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Кто слушает на шлюзе</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Первый вопрос, который возникает, когда думаешь, безопасна ли коробка
+          на публичном адресе. Раньше на него отвечал только <code>ss -tulnp</code> по SSH.</p>
+        <div id="inbound-listeners"><span class="text-muted">загрузка…</span></div>
       </div>
     </div>
 
@@ -1942,6 +1979,7 @@ function showPage(name, linkEl) {
   if (name === 'vpn') { loadVpnServers(); loadFptn(); }
   if (name === 'dns') { loadDnsSettings(); loadDnsStatus(); }
   if (name === 'path') startPathPolling(); else stopPathPolling();
+  if (name === 'inbound') loadInbound();
   if (name === 'alerts') { loadAlertsConfig(); loadAlertLog(); }
   if (name === 'groups') loadGroups();
   if (name === 'subscriptions') loadSubscriptions();
@@ -2796,6 +2834,116 @@ async function factoryReset() {
   const r = await apiJ('POST', '/api/factory-reset');
   if (r?.ok) { toast('Настройки сброшены. Перезайдите.'); setTimeout(doLogout, 1500); }
   else toast('Ошибка', false);
+}
+
+// ─── Входящий доступ ──────────────────────────────────────────────────────────
+let inboundRules = [];
+
+async function loadInbound() {
+  const d = await apiJ('GET', '/api/inbound');
+  if (!d) return;
+  inboundRules = d.rules || [];
+  renderReachability(d);
+  renderInboundList(d);
+  loadListeners();
+}
+
+// Достижимость — первым и крупно. На CGNAT весь список ниже decoration, и
+// узнать это надо до вечера, потраченного на правило, которое не может
+// сработать, а не после.
+function renderReachability(d) {
+  const el = document.getElementById('inbound-reach');
+  if (!el) return;
+  const r = d.reachability || {};
+  const colour = r.reachable === true ? 'var(--green)'
+               : r.reachable === false ? 'var(--orange)' : 'var(--muted)';
+  el.innerHTML =
+    '<div class="card-title">Доходят ли входящие до шлюза</div>' +
+    '<div style="color:' + colour + ';font-weight:600;margin-bottom:6px">' +
+    escHtml(r.class || '—') + '</div>' +
+    '<div style="font-size:13px">' + escHtml(r.why || '') + '</div>' +
+    (d.topology !== 'inline'
+      ? '<div class="text-muted" style="font-size:12px;margin-top:8px">Режим ' +
+        escHtml(d.topology || '?') + ': границей сети служит роутер, ' +
+        'проброс настраивается на нём.</div>' : '');
+}
+
+function renderInboundList(d) {
+  const el = document.getElementById('inbound-list');
+  if (!el) return;
+  if (!inboundRules.length) {
+    // Закрытое состояние — это состояние, а не пустая таблица.
+    el.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);' +
+      'background:var(--bg3);border:1px solid var(--border);font-size:13px">' +
+      'Снаружи не открыто ничего. WAN закрыт: внутрь проходят только ответы ' +
+      'на то, что начато изнутри.</div>';
+    return;
+  }
+  let h = '<table class="dns-local-table"><thead><tr><th>Порт</th><th>Куда</th>' +
+          '<th>Название</th><th></th></tr></thead><tbody>';
+  inboundRules.forEach((r, i) => {
+    h += '<tr><td class="monospace">' + escHtml(r.proto) + '/' + r.wan_port +
+         '</td><td class="monospace">' + escHtml(r.to_ip) + ':' + r.to_port +
+         '</td><td>' + escHtml(r.name || '') + '</td><td>' +
+         '<label class="toggle" title="Включено"><input type="checkbox" ' +
+         (r.enabled !== false ? 'checked ' : '') +
+         'onchange="toggleInbound(' + i + ', this.checked)"><span class="slider"></span></label> ' +
+         '<button class="btn btn-secondary btn-sm" onclick="removeInbound(' + i + ')">Убрать</button>' +
+         '</td></tr>';
+  });
+  el.innerHTML = h + '</tbody></table>';
+}
+
+function addInbound() {
+  const g = id => document.getElementById(id).value.trim();
+  const rule = {proto: g('ib-proto'), wan_port: parseInt(g('ib-wport'), 10),
+                to_ip: g('ib-ip'), to_port: parseInt(g('ib-dport'), 10),
+                name: g('ib-name'), enabled: true};
+  if (!rule.wan_port || !rule.to_ip || !rule.to_port) {
+    toast('Заполните порт, адрес и порт устройства', false); return;
+  }
+  inboundRules.push(rule);
+  saveInbound();
+}
+
+function toggleInbound(i, on) { inboundRules[i].enabled = on; saveInbound(); }
+function removeInbound(i) { inboundRules.splice(i, 1); saveInbound(); }
+
+async function saveInbound() {
+  const out = document.getElementById('inbound-result');
+  const r = await apiJ('PUT', '/api/inbound', { rules: inboundRules });
+  if (!r || r.detail) {
+    out.innerHTML = '<div style="color:var(--red);font-size:13px">' +
+                    escHtml((r && r.detail) || 'не сохранилось') + '</div>';
+    loadInbound();
+    return;
+  }
+  // Что это стоит — одной фразой, в момент открытия, а не в документации.
+  out.innerHTML = (r.opened || []).map(t =>
+    '<div style="font-size:13px;margin-bottom:4px">' + escHtml(t) + '</div>').join('');
+  inboundRules = r.rules || inboundRules;
+  toast('Сохранено');
+  loadInbound();
+}
+
+async function loadListeners() {
+  const el = document.getElementById('inbound-listeners');
+  if (!el) return;
+  const d = await apiJ('GET', '/api/inbound/listeners');
+  if (!d) return;
+  let h = '<table class="dns-local-table"><thead><tr><th>Порт</th><th>Процесс</th>' +
+          '<th>Где</th><th>Кому доступен</th></tr></thead><tbody>';
+  (d.listeners || []).forEach(r => {
+    h += '<tr><td class="monospace">' + escHtml(r.proto) + '/' + r.port +
+         '</td><td>' + escHtml(r.process || '—') + '</td><td>' +
+         escHtml(r.where) + '</td><td>' + escHtml(r.exposure) + '</td></tr>';
+  });
+  h += '</tbody></table>';
+  if (d.loopback_only)
+    h += '<div class="text-muted" style="font-size:12px;margin-top:8px">' +
+         'Плюс ' + d.loopback_only + ' сокетов только на loopback — снаружи ' +
+         'недоступны вообще, поэтому не перечислены.</div>';
+  el.innerHTML = h;
 }
 
 // ─── Сетевой тракт ────────────────────────────────────────────────────────────
