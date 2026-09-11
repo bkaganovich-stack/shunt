@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -80,8 +80,11 @@ DEFAULT_SETTINGS: dict = {
     "alerts": {
         "enabled":      False,
         "webhook_url":  "",
-        "events":       ["vpn_down", "config_rollback", "geo_update_failed",
-                         "disk_high", "all_vpn_unavailable", "login_failed"],
+        # "attention" is the one that would have mattered in September: the
+        # gateway knew, and told only a log file.
+        "events":       ["attention", "vpn_down", "config_rollback",
+                         "geo_update_failed", "disk_high",
+                         "all_vpn_unavailable", "login_failed"],
         "cooldown_min": 30,
     },
     # v1.6 additions ─────────────────────────────────────────────────────────
@@ -2023,6 +2026,7 @@ async def get_status(u: str = Depends(auth_dep)):
             "force_aaplimg_vpn": s.get("force_aaplimg_vpn", True),
             "realtime_direct": s.get("realtime_direct", True),
             "wan_change": _recent_wan_change(),
+            "attention": _active_attention()[:4],
             "vpn_server_count": len(servers)}
 
 def _recent_wan_change(within_hours: int = 24) -> dict | None:
@@ -2900,6 +2904,62 @@ async def delete_snapshot(snap_id: str, u: str = Depends(auth_dep)):
     p = _snap_path(snap_id)
     if not p.exists(): raise HTTPException(404, "Snapshot not found")
     p.unlink(); return {"ok": True}
+
+# ── Attention: things a person should see ─────────────────────────────────────
+_attention_alerted: set = set()
+
+def _read_attention() -> list[dict]:
+    try:
+        items = json.loads((LOGS / "attention.json").read_text())
+    except (OSError, ValueError):
+        return []
+    return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+def _active_attention() -> list[dict]:
+    """
+    What is wrong right now, as sentences rather than log lines.
+
+    The health monitor and the watchdog write here; this reads. During the
+    outage the same information existed only as `egress dead` repeated into a
+    file nobody had been given a reason to open.
+    """
+    active = [i for i in _read_attention() if not i.get("cleared")]
+    # New concerns also go wherever the operator asked to be told.
+    for i in active:
+        key = "%s|%s" % (i.get("kind"), i.get("first_seen"))
+        if key not in _attention_alerted:
+            _attention_alerted.add(key)
+            fire_alert("attention", "%s — %s" % (i.get("text", ""), i.get("detail", "")))
+    return sorted(active, key=lambda i: i.get("first_seen", 0))
+
+@app.get("/api/health/diagnosis")
+async def health_diagnosis(u: str = Depends(auth_dep)):
+    """
+    The ladder as the monitor last walked it: which precondition is unmet, whose
+    problem it is, and what below it was therefore not even checked.
+    """
+    try:
+        d = json.loads((LOGS / "diagnosis.json").read_text())
+    except (OSError, ValueError):
+        d = None
+    return {"diagnosis": d, "attention": _active_attention()}
+
+@app.post("/api/attention/clear")
+async def attention_clear(u: str = Depends(auth_dep)):
+    """Acknowledge everything currently raised. The monitor raises it again on
+    its next cycle if it is still true, so this dismisses noise, not evidence."""
+    items = _read_attention()
+    now = int(time.time())
+    for i in items:
+        if not i.get("cleared"):
+            i["cleared"] = True
+            i["cleared_at"] = now
+            i["cleared_by"] = "operator"
+    try:
+        (LOGS / "attention.json").write_text(json.dumps(items, ensure_ascii=False))
+    except OSError as e:
+        raise HTTPException(500, str(e))
+    return {"ok": True, "cleared": len(items)}
 
 # ── Network path ───────────────────────────────────────────────────────────────
 @app.get("/api/path")

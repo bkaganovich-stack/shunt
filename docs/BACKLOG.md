@@ -93,7 +93,26 @@ configured path is dead".
 A form with fields and no verification would reproduce the same dead end in a
 prettier wrapper.
 
-## 3. Notice when the ground moves, and say so
+## 3. Notice when the ground moves, and say so — shipped in 2.6.0
+
+Built as a ladder: cable, address, gateway on the wire, path to the internet,
+names resolve, tunnel carries. The first unmet rung is the answer and everything
+below it is reported as "not checked" rather than as a second problem. Each rung
+says whose problem it is, and the egress watchdog now refuses to restart the
+tunnel when the break is above it -- which is what it did every two minutes for
+hours in September.
+
+What it found on the way in: the old watchdog's "direct path" reading was
+fiction in both directions. It pinged the provider's gateway, which answers no
+ICMP at all -- so the line read 0% loss while the tunnel's own tun was answering
+for it, and would read 100% now that ICMP goes out properly. Presence on the
+wire is read from the neighbour table instead, where that gateway shows up
+REACHABLE with its MAC.
+
+Still worth doing here later: a history of verdicts, so "this started at 14:02"
+is answerable, and letting the operator mute one rung they know about.
+
+The original item, for the record:
 
 The product knew it was broken. `egress dead`, `inline WAN unhealthy` — logged
 every minute, for hours, to a file nobody was reading, while the automatic

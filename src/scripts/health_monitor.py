@@ -19,10 +19,12 @@ What it guards (the failure modes seen in production):
 It intentionally does NOTHING while a topology switch (xray-topology.service)
 is running, to avoid fighting it.
 """
-import json, re, socket, subprocess, time
+import json, re, socket, subprocess, sys, time
 from pathlib import Path
 
 BASE        = Path("/opt/shunt")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import diagnose as dg  # noqa: E402
 CFG         = BASE / "config"
 NET_CONF    = CFG / "network.conf"
 STATE_FILE  = CFG / "health-state.json"
@@ -40,6 +42,9 @@ LEASES          = Path("/var/lib/misc/dnsmasq.leases")
 NETIF_LEASES    = Path("/run/systemd/netif/leases")
 WAN_CHANGES     = BASE / "logs" / "wan-changes.json"
 WAN_CURRENT     = BASE / "logs" / "wan-current.json"
+DIAGNOSIS       = BASE / "logs" / "diagnosis.json"
+ATTENTION       = BASE / "logs" / "attention.json"
+ATTENTION_MAX   = 20
 WAN_CHANGES_MAX = 50
 SHORT_LEASE_SEC = 30 * 60
 SERVICES        = ["shunt", "shunt-web", "dnsmasq", "sing-box"]
@@ -373,6 +378,85 @@ def prune_disk() -> None:
         "truncate -s 0 /opt/shunt/logs/access.log 2>/dev/null || true", timeout=60)
 
 # ── one monitoring cycle ──────────────────────────────────────────────────────
+def raise_attention(kind: str, text: str, detail: str = "") -> None:
+    """
+    Put something where a person will see it, not only in a log file.
+
+    `egress dead` went into a log every minute for hours during the outage and
+    nobody read it, because nothing had ever asked anyone to. Entries here reach
+    the interface, and the web process turns new ones into whatever alerting the
+    operator configured. Deduplicated by kind: the same concern restated sixty
+    times an hour is the noise this replaces, not an improvement on it.
+    """
+    try:
+        items = json.loads(ATTENTION.read_text()) if ATTENTION.exists() else []
+    except (OSError, ValueError):
+        items = []
+    if not isinstance(items, list):
+        items = []
+    now = int(time.time())
+    for it in items:
+        if isinstance(it, dict) and it.get("kind") == kind and not it.get("cleared"):
+            it["last_seen"] = now
+            it["count"] = it.get("count", 1) + 1
+            it["text"] = text
+            it["detail"] = detail
+            break
+    else:
+        items.append({"kind": kind, "text": text, "detail": detail,
+                      "first_seen": now, "last_seen": now, "count": 1,
+                      "cleared": False})
+    try:
+        ATTENTION.write_text(json.dumps(items[-ATTENTION_MAX:], ensure_ascii=False))
+    except OSError:
+        pass
+
+
+def clear_attention(kind: str) -> None:
+    """Mark a concern resolved rather than deleting it: 'it came back' is a
+    different sentence from 'it never happened', and the difference matters."""
+    try:
+        items = json.loads(ATTENTION.read_text()) if ATTENTION.exists() else []
+    except (OSError, ValueError):
+        return
+    changed = False
+    for it in items:
+        if isinstance(it, dict) and it.get("kind") == kind and not it.get("cleared"):
+            it["cleared"] = True
+            it["cleared_at"] = int(time.time())
+            changed = True
+    if changed:
+        try:
+            ATTENTION.write_text(json.dumps(items, ensure_ascii=False))
+        except OSError:
+            pass
+
+
+def run_diagnosis(state: dict, wan: str) -> dict:
+    """
+    Walk the ladder, announce what moved, and keep the verdict where it can be
+    read by the interface and by the watchdog.
+    """
+    if not wan:
+        return state
+    d = dg.ladder(wan)
+    try:
+        DIAGNOSIS.write_text(json.dumps(d, ensure_ascii=False))
+    except OSError:
+        pass
+
+    for msg in dg.environment_changes(state.get("environment") or {}, d["environment"]):
+        log("ENVIRONMENT: " + msg)
+        raise_attention("environment", msg)
+    state["environment"] = d["environment"]
+
+    if d["healthy"]:
+        clear_attention("path")
+    else:
+        raise_attention("path", d["summary"],
+                        "неисправность %s" % (d["owner"] or "—"))
+    return state
+
 def cycle(state: dict) -> dict:
     if topo_switch_running():
         return state   # never interfere mid-switch
@@ -397,6 +481,10 @@ def cycle(state: dict) -> dict:
     if lan and topo == "loop":
         if iface_ipv4(lan) != LOOP_IP or not default_route_ok():
             fix_netplan()
+
+    # 3b) the ladder: what is actually wrong, in the order things depend on
+    #     each other, so a consequence never gets reported as a cause.
+    state = run_diagnosis(state, wan)
 
     # 4) topology-specific reachability + the post-switch safety net
     if wan:

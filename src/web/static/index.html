@@ -809,6 +809,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
             <span class="slider"></span>
           </label>
         </div>
+        <div id="attention-banner" style="display:none;margin-top:12px;margin-bottom:4px;padding:12px 14px;border-radius:var(--radius);background:rgba(248,113,113,0.12);border:1px solid var(--red);font-size:13px"></div>
         <div id="wan-change-banner" style="display:none;margin-top:12px;margin-bottom:4px;padding:12px 14px;border-radius:var(--radius);background:rgba(240,173,78,0.12);border:1px solid var(--orange);font-size:13px"></div>
         <div id="fallback-banner" style="display:none;margin-top:12px;margin-bottom:4px;padding:12px 14px;border-radius:var(--radius);background:rgba(240,173,78,0.12);border:1px solid var(--orange);font-size:13px"></div>
 
@@ -862,6 +863,15 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <button class="btn btn-primary" onclick="pathTo()">Проверить</button>
         </div>
         <div id="path-answer" class="mt-4" style="display:none"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Что сейчас не так</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Условия проверяются по порядку и останавливаются на первом невыполненном.
+          Всё, что ниже обрыва, — следствие, а не улика: в сентябре каждый слой
+          обвинял тот, что под ним.</p>
+        <div id="path-ladder"><span class="text-muted">загрузка…</span></div>
       </div>
 
       <div class="card">
@@ -1983,6 +1993,7 @@ async function refreshStatus() {
   const rt = document.getElementById('realtime-toggle');
   if (rt) rt.checked = d.realtime_direct !== false;
   renderWanChange(d.wan_change);
+  renderAttention(d.attention);
 
   // Router guide dynamic IPs (topology-aware)
   const _setTxt = (id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
@@ -2807,7 +2818,61 @@ function row(k, v, cls) {
          '</span><span class="info-val ' + (cls || '') + '">' + v + '</span></div>';
 }
 
+// Одна забота — одна строка, а не шестьдесят одинаковых записей в час.
+function renderAttention(items) {
+  const el = document.getElementById('attention-banner');
+  if (!el) return;
+  if (!items || !items.length) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.innerHTML = items.map(i =>
+    '<div style="margin-bottom:4px"><b>' + escHtml(i.text || '') + '</b>' +
+    (i.detail ? ' — ' + escHtml(i.detail) : '') +
+    (i.count > 1 ? ' <span class="text-muted">(повторяется ' + i.count + ' раз)</span>' : '') +
+    '</div>').join('') +
+    '<div class="btn-row mt-4"><button class="btn btn-secondary btn-sm" ' +
+    'onclick="clearAttention()">Принято</button></div>';
+}
+
+async function clearAttention() {
+  const r = await apiJ('POST', '/api/attention/clear', {});
+  if (r?.ok) { toast('Отмечено как принятое'); refreshStatus(); }
+}
+
+async function loadLadder() {
+  const el = document.getElementById('path-ladder');
+  if (!el) return;
+  const d = await apiJ('GET', '/api/health/diagnosis');
+  const diag = d && d.diagnosis;
+  if (!diag) {
+    el.innerHTML = '<span class="text-muted">сторож ещё не отчитался</span>';
+    return;
+  }
+  let h = '';
+  if (diag.healthy)
+    h += '<div style="color:var(--green);margin-bottom:8px">Все условия выполнены.</div>';
+  else
+    h += '<div style="color:var(--red);margin-bottom:8px">' + escHtml(diag.summary) +
+         ' · неисправность <b>' + escHtml(diag.owner || '—') + '</b>' +
+         (diag.fixable_here ? '' : ' — на шлюзе не чинится') + '</div>';
+  (diag.rungs || []).forEach((r, i) => {
+    const mark = r.ok === true ? '<span style="color:var(--green)">✓</span>'
+               : r.ok === false ? '<span style="color:var(--red)">✕</span>'
+               : '<span class="text-muted">·</span>';
+    h += '<div class="info-row"><span class="info-key">' + mark + ' ' +
+         (i + 1) + '. ' + escHtml(r.title) + '</span>' +
+         '<span class="info-val ' + (r.ok === null ? 'text-muted' : '') + '">' +
+         escHtml(r.detail || '') + '</span></div>';
+  });
+  const env = diag.environment || {};
+  if (env.class)
+    h += '<div class="text-muted" style="font-size:12px;margin-top:8px">Сеть провайдера: ' +
+         escHtml(env.class) + (env.lease_band ? ', аренда ' + escHtml(env.lease_band) : '') +
+         '</div>';
+  el.innerHTML = h;
+}
+
 async function loadPath() {
+  loadLadder();
   const d = await apiJ('GET', '/api/path');
   if (!d) return;
   renderPathLink(d);
