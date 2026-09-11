@@ -58,6 +58,9 @@ DEFAULT_SETTINGS: dict = {
     "profile":      "all_except_ru",
     "geo_updated":  None,
     "force_aaplimg_vpn": True,
+    # Conferencing media (Zoom, Teams) leaves without the tunnel. See
+    # REALTIME_DOMAINS for why; turn off if an exit country is needed for them.
+    "realtime_direct":   True,
     "custom_rules": {"always_direct": [], "always_vpn": []},
     # Devices: keyed by MAC (or "ip:A.B.C.D" when MAC unavailable)
     # {"aa:bb:cc:dd:ee:ff": {"name":"...", "policy":"inherit", "ips":[]}}
@@ -567,6 +570,43 @@ def _get_active_vpn_outbound(settings: dict) -> tuple[list, bool, Optional[str]]
             pass
     return [], False, None
 
+# ── Realtime conferencing ─────────────────────────────────────────────────────
+# Video calls are the one kind of traffic a tunnel reliably makes worse. Measured
+# on this gateway, same target, same probe, 300 samples: direct lost 0%, the
+# tunnel lost 2-5% and added ~90 ms. Nothing is wrong with the tunnel -- that is
+# simply what an extra continent costs, and conferencing is the workload with no
+# retransmit to hide it behind. So these leave without it.
+#
+# Domains carry the signalling; media dials raw addresses with no name to sniff,
+# which is why the address blocks matter more than the domain list here. The
+# blocks are the large published ones the media actually lands on, not the full
+# vendor list -- that changes too often to freeze into a package, and belongs in
+# a "direct" source once imports exist.
+REALTIME_DOMAINS = [
+    "geosite:zoom",
+    "domain:teams.microsoft.com", "domain:teams.live.com",
+    "domain:teams.cloud.microsoft", "domain:skype.com", "domain:lync.com",
+    "domain:sfbassets.com", "domain:trouter.io", "domain:trouter.communication.microsoft.com",
+]
+REALTIME_IPS = [
+    # Zoom media
+    "149.137.0.0/17", "170.114.0.0/16", "206.247.0.0/16", "144.195.0.0/16",
+    "156.45.0.0/17", "166.108.64.0/18", "173.231.80.0/20", "147.124.96.0/19",
+    "64.125.62.0/24", "64.211.144.0/20", "65.39.152.0/24", "69.174.108.0/22",
+    "204.80.104.0/21", "209.9.211.0/24", "213.19.144.0/24", "221.122.88.0/21",
+    # Teams / Skype media
+    "52.112.0.0/14", "52.122.0.0/15", "13.107.64.0/18",
+]
+
+def _realtime_rules(enabled: bool) -> list[dict]:
+    """Send conferencing media straight out, ahead of the profile's catch-all."""
+    if not enabled:
+        return []
+    return [
+        {"type": "field", "domain": REALTIME_DOMAINS, "outboundTag": "direct"},
+        {"type": "field", "ip":     REALTIME_IPS,     "outboundTag": "direct"},
+    ]
+
 def build_xray_config(settings: dict) -> dict:
     profile        = settings.get("profile", "all_except_ru")
     custom         = settings.get("custom_rules", {"always_direct": [], "always_vpn": []})
@@ -598,6 +638,10 @@ def build_xray_config(settings: dict) -> dict:
         *_ft.build_group_policy_rules(settings, final),
         # Subscription rules (direct/vpn/block)
         *_build_subscription_rules(settings, final),
+        # After the explicit lists, device and group policies and subscriptions,
+        # so anything the operator stated on purpose still wins -- this only
+        # overrides the profile's "everything else goes through the tunnel".
+        *_realtime_rules(settings.get("realtime_direct", True)),
     ]
 
     if profile == "blocked_only":
@@ -1933,7 +1977,42 @@ async def get_status(u: str = Depends(auth_dep)):
             "nav": _nav_flags(s),
             "vpn": vpn_meta, "geo_updated": s.get("geo_updated"), "speeds": speeds,
             "force_aaplimg_vpn": s.get("force_aaplimg_vpn", True),
+            "realtime_direct": s.get("realtime_direct", True),
+            "wan_change": _recent_wan_change(),
             "vpn_server_count": len(servers)}
+
+def _recent_wan_change(within_hours: int = 24) -> dict | None:
+    """
+    The last time the provider moved us, if it was recent enough to explain
+    something the household noticed.
+
+    Written by the health monitor, read here: two processes, one small file,
+    because the thing worth reporting is observed once a minute and the
+    interface is not always running when it happens.
+    """
+    try:
+        hist = json.loads((LOGS / "wan-changes.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(hist, list) or not hist:
+        return None
+    cutoff = time.time() - within_hours * 3600
+    recent = [h for h in hist if isinstance(h, dict) and h.get("ts", 0) >= cutoff]
+    if not recent:
+        return None
+    last = recent[-1]
+    return {"when": last.get("when"), "from": last.get("from"),
+            "to": last.get("to"), "count": len(recent)}
+
+@app.get("/api/wan/changes")
+async def wan_changes(u: str = Depends(auth_dep)):
+    """Every address the provider has handed this gateway, most recent last."""
+    try:
+        hist = json.loads((LOGS / "wan-changes.json").read_text())
+    except (OSError, ValueError):
+        hist = []
+    return {"changes": hist if isinstance(hist, list) else [],
+            "recent": _recent_wan_change()}
 
 # ── Automatic fallback to direct routing ──────────────────────────────────────
 def _socks_probe(host: str, port) -> bool:
@@ -2535,6 +2614,13 @@ async def set_profile(req: ProfileReq, u: str = Depends(auth_dep)):
 async def set_aaplimg_vpn(req: AaplimgReq, u: str = Depends(auth_dep)):
     s = load_settings(); old_s = dict(s); s["force_aaplimg_vpn"] = req.enabled; save_settings(s)
     ok, err = apply_config(s, "aaplimg_toggle", _pre_settings=old_s)
+    return {"ok": ok, "error": err or None}
+
+@app.post("/api/realtime-direct")
+async def set_realtime_direct(req: AaplimgReq, u: str = Depends(auth_dep)):
+    """Whether conferencing media bypasses the tunnel. On by default."""
+    s = load_settings(); old_s = dict(s); s["realtime_direct"] = req.enabled; save_settings(s)
+    ok, err = apply_config(s, "realtime_direct_toggle", _pre_settings=old_s)
     return {"ok": ok, "error": err or None}
 
 # ── Custom Rules ───────────────────────────────────────────────────────────────

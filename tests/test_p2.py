@@ -678,3 +678,46 @@ class TestSnapshotV2:
         assert ok
         restored = json.loads(m.SETTINGS.read_text())
         assert restored["devices"]["aa:bb:cc:00:00:ff"]["policy"] == "always_vpn"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: the interface reports when the provider moved us
+# ─────────────────────────────────────────────────────────────────────────────
+class TestRecentWanChange:
+    def _write(self, tmp_path, monkeypatch, hist):
+        import json as _j
+        monkeypatch.setattr(m, "LOGS", tmp_path)
+        (tmp_path / "wan-changes.json").write_text(_j.dumps(hist))
+
+    def test_nothing_recorded_reports_nothing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m, "LOGS", tmp_path)
+        assert m._recent_wan_change() is None
+
+    def test_a_change_today_is_reported(self, tmp_path, monkeypatch):
+        import time as _t
+        self._write(tmp_path, monkeypatch, [
+            {"ts": int(_t.time()) - 3600, "when": "2026-09-11 09:00:00",
+             "from": "100.116.44.163/16", "to": "100.113.192.178/19"}])
+        c = m._recent_wan_change()
+        assert c["to"] == "100.113.192.178/19" and c["count"] == 1
+
+    def test_an_old_change_is_not_blamed_for_todays_trouble(self, tmp_path, monkeypatch):
+        import time as _t
+        self._write(tmp_path, monkeypatch, [
+            {"ts": int(_t.time()) - 5 * 86400, "when": "2026-09-06 09:00:00",
+             "from": "10.0.0.1/8", "to": "10.0.0.2/8"}])
+        assert m._recent_wan_change() is None
+
+    def test_several_changes_are_counted(self, tmp_path, monkeypatch):
+        import time as _t
+        now = int(_t.time())
+        self._write(tmp_path, monkeypatch, [
+            {"ts": now - 7200, "when": "a", "from": "1.1.1.1/16", "to": "2.2.2.2/20"},
+            {"ts": now - 3600, "when": "b", "from": "2.2.2.2/20", "to": "3.3.3.3/19"}])
+        c = m._recent_wan_change()
+        assert c["count"] == 2 and c["from"] == "2.2.2.2/20"
+
+    def test_a_damaged_file_is_not_a_crash(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m, "LOGS", tmp_path)
+        (tmp_path / "wan-changes.json").write_text("{not json")
+        assert m._recent_wan_change() is None

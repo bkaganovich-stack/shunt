@@ -19,7 +19,7 @@ What it guards (the failure modes seen in production):
 It intentionally does NOTHING while a topology switch (xray-topology.service)
 is running, to avoid fighting it.
 """
-import json, re, subprocess, time
+import json, re, socket, subprocess, time
 from pathlib import Path
 
 BASE        = Path("/opt/shunt")
@@ -34,8 +34,13 @@ AP_IP       = "192.168.99.1"
 
 INTERVAL        = 60     # seconds between cycles
 WAN_FAIL_LIMIT  = 10**9   # inline static: never auto-revert to loop
-ROUTER          = "192.168.50.1"
+LOOP_ROUTER     = "192.168.50.1"   # upstream router, loop topology only
 LOOP_IP         = "192.168.50.2"
+LEASES          = Path("/var/lib/misc/dnsmasq.leases")
+NETIF_LEASES    = Path("/run/systemd/netif/leases")
+WAN_CHANGES     = BASE / "logs" / "wan-changes.json"
+WAN_CHANGES_MAX = 50
+SHORT_LEASE_SEC = 30 * 60
 SERVICES        = ["shunt", "shunt-web", "dnsmasq", "sing-box"]
 DISK_PRUNE_PCT  = 90
 ACCESS_LOG      = BASE / "logs" / "access.log"
@@ -94,7 +99,158 @@ def carrier(iface: str) -> bool:
         return False
 
 def ping(host: str) -> bool:
+    """
+    Reaches a neighbour on a local segment. NOT a test of internet access --
+    see reaches_internet() for why.
+    """
     return subprocess.run(["ping", "-c", "1", "-W", "2", host], capture_output=True).returncode == 0
+
+# Packets carrying this mark are returned from the TPROXY chains and from the
+# tunnel's own routing rules, so a socket that sets it leaves through the WAN
+# the way an ordinary host's would.
+BYPASS_MARK = 0xff
+# SO_MARK is Linux-only and absent from the socket module on other platforms,
+# where the tests run. 36 is its value on every Linux architecture.
+SO_MARK = getattr(socket, "SO_MARK", 36)
+
+def reaches_internet(timeout: float = 4.0) -> bool:
+    """
+    True when a packet actually reaches the internet and something answers.
+
+    Emphatically not ping. On this gateway the tunnel's tun device answers ICMP
+    echo itself: `ping 192.0.2.1` -- a documentation address nobody on earth
+    replies to -- succeeds, and so does every other address. The WAN check here
+    used to be `ping 1.1.1.1`, which therefore could not fail, in either
+    direction: it reported a healthy WAN through a whole outage, and it would
+    have reported one with the cable out.
+
+    So: a real TCP handshake, on a socket marked to bypass the interception,
+    against two operators who are unlikely to be down together.
+    """
+    for host, port in (("1.1.1.1", 443), ("8.8.8.8", 53)):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.setsockopt(socket.SOL_SOCKET, SO_MARK, BYPASS_MARK)
+            s.settimeout(timeout)
+            s.connect((host, port))
+            return True
+        except OSError:
+            continue
+        finally:
+            try:
+                s.close()
+            except OSError:
+                pass
+    return False
+
+def neighbour_to_watch(topo: str, lan: str | None) -> str | None:
+    """
+    The neighbour worth pinging, derived rather than assumed.
+
+    This used to be the constant 192.168.50.1 -- the upstream router in the loop
+    topology. After the move to inline that address stopped being ours to reach,
+    and the check logged "router unreachable" every single minute for days. A
+    warning that is always true carries no information, and it buried the ones
+    that did: during the last incident this line ran alongside the real failure
+    and neither stood out.
+
+    Inline: our downstream neighbour is whoever took a lease from our own DHCP.
+    Loop:   it is the upstream router, where it has always been.
+    Neither available: return None and skip the check, rather than warn about an
+    address nobody expects to answer.
+    """
+    if topo != "inline":
+        return LOOP_ROUTER
+    prefix = ".".join(lan.split(".")[:3]) + "." if lan else None
+    newest, newest_exp = None, -1
+    try:
+        for ln in LEASES.read_text().splitlines():
+            f = ln.split()
+            if len(f) < 3:
+                continue
+            exp, ip = f[0], f[2]
+            if prefix and not ip.startswith(prefix):
+                continue
+            try:
+                exp = int(exp)
+            except ValueError:
+                continue
+            if exp > newest_exp:
+                newest, newest_exp = ip, exp
+    except OSError:
+        return None
+    return newest
+
+def iface_cidr(iface: str):
+    """Address with its prefix length -- the prefix matters as much as the
+    address, because a provider that moves you between /16 and /19 has moved
+    you between different pieces of its network, not just renumbered you."""
+    m = re.search(r"inet (\d+\.\d+\.\d+\.\d+/\d+)",
+                  run("ip", "-4", "-o", "addr", "show", iface).stdout)
+    return m.group(1) if m else None
+
+def parse_duration(v: str):
+    """systemd writes leases as '10min', '8min 45s', '1h 30min'. Returns seconds."""
+    total, seen = 0, False
+    for num, unit in re.findall(r"(\d+)\s*(usec|msec|min|h|m|s)?", v):
+        if not num:
+            continue
+        seen = True
+        total += int(num) * {"h": 3600, "min": 60, "m": 60, "s": 1,
+                             "msec": 0, "usec": 0, "": 1}[unit]
+    return total if seen else None
+
+def lease_lifetime(iface: str):
+    """How long the provider's lease lasts, or None when it cannot be read."""
+    try:
+        idx = Path(f"/sys/class/net/{iface}/ifindex").read_text().strip()
+        for ln in (NETIF_LEASES / idx).read_text().splitlines():
+            if ln.startswith("LIFETIME="):
+                return parse_duration(ln.split("=", 1)[1].strip())
+    except OSError:
+        return None
+    return None
+
+def note_wan_address(state: dict, wan: str) -> dict:
+    """
+    Say out loud when the ground moves.
+
+    A changed WAN address resets every connection through the gateway at once --
+    every call drops, every download restarts. The box knew this each time and
+    said nothing, so the only visible evidence was a household asking why the
+    video froze. On a provider handing out ten-minute leases this is not a rare
+    event to file away; it is the first thing to check.
+    """
+    cur = iface_cidr(wan)
+    if not cur:
+        return state
+    prev = state.get("wan_cidr")
+    if prev and prev != cur:
+        old_net = prev.split("/")[1]
+        new_net = cur.split("/")[1]
+        extra = "" if old_net == new_net else f" (и размер сети: /{old_net} → /{new_net})"
+        log(f"WAN address changed {prev} → {cur}{extra} — "
+            f"every connection through the gateway was reset")
+        record = {"ts": int(time.time()), "when": time.strftime("%F %T"),
+                  "from": prev, "to": cur}
+        try:
+            hist = json.loads(WAN_CHANGES.read_text()) if WAN_CHANGES.exists() else []
+        except (OSError, ValueError):
+            hist = []
+        hist.append(record)
+        try:
+            WAN_CHANGES.write_text(json.dumps(hist[-WAN_CHANGES_MAX:]))
+        except OSError:
+            pass
+    state["wan_cidr"] = cur
+
+    life = lease_lifetime(wan)
+    if life and life != state.get("lease_seconds"):
+        state["lease_seconds"] = life
+        if life <= SHORT_LEASE_SEC:
+            log(f"NOTE: the provider's lease lasts {life // 60} min and renews at "
+                f"half that. Each renewal is a chance for the address to move.")
+    return state
 
 def has_fwmark_rule() -> bool:
     return "fwmark 0x1 lookup 100" in run("ip", "rule", "show").stdout
@@ -199,8 +355,11 @@ def cycle(state: dict) -> dict:
             fix_netplan()
 
     # 4) topology-specific reachability + the post-switch safety net
+    if wan:
+        state = note_wan_address(state, wan)
     if topo == "inline" and wan:
-        wan_dead = (not carrier(wan)) or (iface_ipv4(wan) is None) or (not ping("1.1.1.1"))
+        wan_dead = ((not carrier(wan)) or (iface_ipv4(wan) is None)
+                    or (not reaches_internet()))
         n = state.get("wan_fail", 0) + 1 if wan_dead else 0
         state["wan_fail"] = n
         if wan_dead:
@@ -231,9 +390,13 @@ def cycle(state: dict) -> dict:
     except Exception:
         pass
 
-    # 7) heartbeat (router reachability — informational, can't fix a cut cable)
-    if not ping(ROUTER):
-        log(f"WARN: router {ROUTER} unreachable")
+    # 7) heartbeat (neighbour reachability — informational, can't fix a cut cable)
+    neighbour = neighbour_to_watch(topo, iface_ipv4(lan) if lan else None)
+    if neighbour != state.get("neighbour"):
+        log(f"neighbour to watch is now {neighbour or 'unknown — check skipped'}")
+        state["neighbour"] = neighbour
+    if neighbour and not ping(neighbour):
+        log(f"WARN: neighbour {neighbour} unreachable")
 
     return state
 

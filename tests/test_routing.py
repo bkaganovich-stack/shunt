@@ -148,6 +148,46 @@ class TestBuildXrayConfig:
         last = cfg["routing"]["rules"][-1]
         assert last["outboundTag"] == "direct"
 
+    def test_conferencing_leaves_without_the_tunnel(self):
+        # The measured reason: same target, same probe -- direct lost nothing,
+        # the tunnel lost 2-5% and added ~90 ms. Calls have no retransmit to
+        # hide that behind.
+        cfg = m.build_xray_config(self._base_settings(profile="all_except_ru"))
+        rules = cfg["routing"]["rules"]
+        zoom = [r for r in rules if "geosite:zoom" in r.get("domain", [])]
+        teams = [r for r in rules if "52.112.0.0/14" in r.get("ip", [])]
+        assert zoom and zoom[0]["outboundTag"] == "direct"
+        assert teams and teams[0]["outboundTag"] == "direct"
+
+    def test_conferencing_rules_precede_the_catch_all(self):
+        # A rule after the catch-all is a rule that never runs.
+        cfg = m.build_xray_config(self._base_settings(profile="all_except_ru"))
+        rules = cfg["routing"]["rules"]
+        zoom_idx = next(i for i, r in enumerate(rules)
+                        if "geosite:zoom" in r.get("domain", []))
+        assert zoom_idx < len(rules) - 1
+        assert rules[-1].get("network") == "tcp,udp"
+
+    def test_conferencing_can_be_turned_off(self):
+        cfg = m.build_xray_config(
+            self._base_settings(profile="all_except_ru", realtime_direct=False))
+        rules = cfg["routing"]["rules"]
+        assert not [r for r in rules if "geosite:zoom" in r.get("domain", [])]
+
+    def test_an_explicit_choice_still_beats_the_conferencing_default(self):
+        # Someone who deliberately sends Zoom through the tunnel -- for an exit
+        # country, say -- must keep getting that.
+        settings = self._base_settings(
+            profile="all_except_ru",
+            custom_rules={"always_direct": [], "always_vpn": ["domain:zoom.us"]})
+        cfg = m.build_xray_config(settings)
+        rules = cfg["routing"]["rules"]
+        explicit = next(i for i, r in enumerate(rules)
+                        if "domain:zoom.us" in r.get("domain", []))
+        default = next(i for i, r in enumerate(rules)
+                       if "geosite:zoom" in r.get("domain", []))
+        assert explicit < default
+
     def test_custom_rules_injected_before_geoip(self):
         settings = self._base_settings(
             profile="all_except_ru",

@@ -807,12 +807,20 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
             <span class="slider"></span>
           </label>
         </div>
+        <div id="wan-change-banner" style="display:none;margin-top:12px;margin-bottom:4px;padding:12px 14px;border-radius:var(--radius);background:rgba(240,173,78,0.12);border:1px solid var(--orange);font-size:13px"></div>
         <div id="fallback-banner" style="display:none;margin-top:12px;margin-bottom:4px;padding:12px 14px;border-radius:var(--radius);background:rgba(240,173,78,0.12);border:1px solid var(--orange);font-size:13px"></div>
 
         <div class="override-row">
           <div class="override-label">Apple CDN <span class="hint" tabindex="0" data-tip="Вкл. — трафик устройства идёт через VPN, выкл. — напрямую.">?</span></div>
           <label class="toggle" title="Apple CDN (aaplimg.com) через VPN">
             <input type="checkbox" id="aaplimg-toggle" onchange="setAaplimg(this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="override-row">
+          <div class="override-label">Видеозвонки мимо туннеля <span class="hint" tabindex="0" data-tip="Zoom, Teams и Skype идут напрямую. Через туннель у них выше задержка и 2–5% потерь пакетов — для голоса и видео это слышно и видно. Выключите, если звонкам нужна страна выхода.">?</span></div>
+          <label class="toggle" title="Zoom, Teams и Skype напрямую, без туннеля">
+            <input type="checkbox" id="realtime-toggle" onchange="setRealtimeDirect(this.checked)">
             <span class="slider"></span>
           </label>
         </div>
@@ -1912,6 +1920,9 @@ async function refreshStatus() {
   updateProfileUI(d.profile);
   const tog = document.getElementById('aaplimg-toggle');
   if (tog) tog.checked = d.force_aaplimg_vpn !== false;
+  const rt = document.getElementById('realtime-toggle');
+  if (rt) rt.checked = d.realtime_direct !== false;
+  renderWanChange(d.wan_change);
 
   // Router guide dynamic IPs (topology-aware)
   const _setTxt = (id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
@@ -4220,6 +4231,31 @@ function renderFallbackState(d) {
   } else {
     b.style.display = 'none';
   }
+}
+
+async function setRealtimeDirect(enabled) {
+  const r = await apiJ('POST', '/api/realtime-direct', { enabled });
+  if (r?.ok) {
+    toast(enabled ? 'Видеозвонки → напрямую' : 'Видеозвонки → через туннель');
+    refreshStatus();
+  } else {
+    toast(r?.error || 'Ошибка', false);
+    const tog = document.getElementById('realtime-toggle');
+    if (tog) tog.checked = !enabled;
+  }
+}
+
+// Смена адреса провайдера рвёт разом все соединения через шлюз. Раньше об этом
+// знал только журнал, и единственным видимым следом был вопрос «почему всё
+// подвисло». Теперь это написано там, где смотрят.
+function renderWanChange(c) {
+  const el = document.getElementById('wan-change-banner');
+  if (!el) return;
+  if (!c || !c.when) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.textContent = 'Адрес провайдера сменился ' + c.when + ': ' + c.from +
+    ' → ' + c.to + '. В этот момент оборвались все соединения через шлюз' +
+    (c.count > 1 ? ' (за сутки таких смен: ' + c.count + ')' : '') + '.';
 }
 
 async function setAaplimg(enabled) {
