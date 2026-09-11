@@ -15,6 +15,7 @@ VERSION = "2.3.3"
 import db as _db
 import features as _ft
 import sources as _src
+import netpath as _np
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -1347,6 +1348,40 @@ def _custom_matches(rule: str, target_domain: Optional[str], target_ip: Optional
         return q == d or q.endswith("." + d)
     return False
 
+def _matches_realtime(domain: Optional[str], ips: list[str]) -> Optional[str]:
+    """
+    Whether conferencing routing claims this target, and which half claimed it.
+
+    Built from the same two constants that generate the rules, so the answer the
+    interface gives cannot drift from the rules xray is running -- which it did
+    the moment those rules were added and this function did not exist: the page
+    said Zoom went through the tunnel while the packets went straight out.
+
+    `geosite:zoom` is not evaluated here; its addresses are, and Zoom media lands
+    inside the published blocks either way, so the answer comes out the same
+    without this file needing to read a geo database.
+    """
+    if domain:
+        d = domain.lower().rstrip(".")
+        for entry in REALTIME_DOMAINS:
+            if not entry.startswith("domain:"):
+                continue
+            name = entry[7:].lower()
+            if d == name or d.endswith("." + name):
+                return entry
+    for ip in ips:
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        for cidr in REALTIME_IPS:
+            try:
+                if addr in ipaddress.ip_network(cidr):
+                    return cidr
+            except ValueError:
+                continue
+    return None
+
 def route_test(target: str, settings: dict) -> dict:
     target = target.strip()
     profile       = settings.get("profile", "all_except_ru")
@@ -1400,6 +1435,12 @@ def route_test(target: str, settings: dict) -> dict:
             return result(final, f"custom:always_vpn ({rule})", rule_source="custom_rule")
 
     # Check device policies for current source (route test is source-agnostic, skip)
+
+    if settings.get("realtime_direct", True):
+        hit = _matches_realtime(domain, ips)
+        if hit:
+            return result("direct", f"realtime:{hit}",
+                          "Видеозвонки идут мимо туннеля", "system_override")
 
     if force_aaplimg and profile in ("blocked_only", "all_except_ru"):
         if domain and _domain_matches_apple_cdn(domain):
@@ -2763,6 +2804,47 @@ async def delete_snapshot(snap_id: str, u: str = Depends(auth_dep)):
     p = _snap_path(snap_id)
     if not p.exists(): raise HTTPException(404, "Snapshot not found")
     p.unlink(); return {"ok": True}
+
+# ── Network path ───────────────────────────────────────────────────────────────
+@app.get("/api/path")
+async def network_path(u: str = Depends(auth_dep)):
+    """
+    The chain end to end: link, address, lease, interception counters, egress.
+
+    One request rather than five, because the value is in seeing them together.
+    The outage that prompted this had a healthy link, a valid address, a running
+    tunnel and no traffic, and only the combination said so.
+    """
+    conf = _net_conf()
+    return _np.snapshot(conf.get("WAN_IF", ""), conf.get("LAN_IF") or None)
+
+@app.get("/api/path/to")
+async def network_path_to(target: str, u: str = Depends(auth_dep)):
+    """
+    Where one destination actually goes, at all three layers that decide.
+
+    Netfilter picks a packet up or lets it past; the kernel then picks a table;
+    xray then picks an outbound. Reading any one of those alone is how three
+    people in a row concluded the wrong thing during the last outage.
+    """
+    target = (target or "").strip()
+    if not target or not re.match(r"^[a-zA-Z0-9.:\-]+$", target):
+        raise HTTPException(400, "Invalid target")
+    s = load_settings()
+    verdict = route_test(target, s)
+    dests = verdict.get("resolved_ips") or ([target] if verdict.get("target_type")
+                                            in ("ip", "cidr") else [])
+    # Prefer IPv4 for the kernel lookup. A name that resolves to both usually
+    # lists v6 first, and this gateway has no v6 route -- so asking about the v6
+    # address produced an empty answer and looked like a broken page.
+    probe = next((d for d in dests if ":" not in d), dests[0] if dests else None)
+    kernel = _np.where_does_it_go(probe) if probe else {}
+    intercept = _np.interception_verdict(
+        probe, _np._run("iptables", "-t", "mangle", "-L", "XRAY_PREROUTING",
+                        "-v", "-n", "-x")) if probe else {}
+    return {"target": target, "xray": verdict, "kernel": kernel,
+            "interception": intercept, "resolved": dests, "probed": probe,
+            "ipv6_only": bool(dests) and probe is not None and ":" in probe}
 
 # ── Alerts ─────────────────────────────────────────────────────────────────────
 @app.get("/api/alerts/config")

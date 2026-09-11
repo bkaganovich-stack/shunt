@@ -537,6 +537,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
     <div class="nav-links">
       <div class="nav-link active" onclick="showPage('dashboard',this)">
         <span class="ico">📊</span> Панель управления</div>
+      <div class="nav-link" onclick="showPage('path',this)">
+        <span class="ico">🩺</span> Сетевой тракт</div>
       <div class="nav-link" onclick="showPage('vpn',this)">
         <span class="ico">🔑</span> VPN серверы</div>
       <div class="nav-link" onclick="showPage('profile',this)">
@@ -841,6 +843,49 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <button class="btn btn-primary" onclick="runRouteTest()" id="rt-btn">Проверить</button>
         </div>
         <div id="rt-result"></div>
+      </div>
+    </div>
+
+    <!-- ── СЕТЕВОЙ ТРАКТ ──────────────────────────────────────────────────── -->
+    <div id="page-path" class="page">
+      <h2>Сетевой тракт</h2>
+      <p class="page-desc">Где на самом деле идёт пакет — от кабеля до выхода</p>
+
+      <div class="card">
+        <div class="card-title">Куда пойдёт пакет</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Имя или адрес. Ответ — из трёх слоёв: перехват, выбор ядра, решение xray.
+          Читать один слой из трёх и есть способ ошибиться уверенно.</p>
+        <div style="display:flex;gap:8px">
+          <input id="path-target" type="text" placeholder="zoom.us или 8.8.8.8"
+                 style="flex:1" onkeydown="if(event.key==='Enter')pathTo()">
+          <button class="btn btn-primary" onclick="pathTo()">Проверить</button>
+        </div>
+        <div id="path-answer" class="mt-4" style="display:none"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Канал провайдера</div>
+        <div id="path-link"><span class="text-muted">загрузка…</span></div>
+        <div id="path-lease-note" class="mt-4" style="display:none;padding:12px 14px;
+             border-radius:var(--radius);background:rgba(251,146,60,0.12);
+             border:1px solid var(--orange);font-size:13px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Выход наружу</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Не «служба запущена», а сколько байт прошло за секунду измерения.</p>
+        <div id="path-egress"><span class="text-muted">загрузка…</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Правила перехвата</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Счётчики правил, которые решают, кого забирать в туннель.
+          Отсутствующее правило показывается как отсутствующее — именно одна
+          пропавшая строка здесь стоила суток.</p>
+        <div id="path-counters"><span class="text-muted">загрузка…</span></div>
       </div>
     </div>
 
@@ -1860,6 +1905,7 @@ function showPage(name, linkEl) {
   if (name === 'devices') loadDevices();
   if (name === 'vpn') { loadVpnServers(); loadFptn(); }
   if (name === 'dns') { loadDnsSettings(); loadDnsStatus(); }
+  if (name === 'path') startPathPolling(); else stopPathPolling();
   if (name === 'alerts') { loadAlertsConfig(); loadAlertLog(); }
   if (name === 'groups') loadGroups();
   if (name === 'subscriptions') loadSubscriptions();
@@ -2713,6 +2759,171 @@ async function factoryReset() {
   const r = await apiJ('POST', '/api/factory-reset');
   if (r?.ok) { toast('Настройки сброшены. Перезайдите.'); setTimeout(doLogout, 1500); }
   else toast('Ошибка', false);
+}
+
+// ─── Сетевой тракт ────────────────────────────────────────────────────────────
+// Опрос только пока страница открыта: снимок стоит секунды измерения выхода,
+// и делать это в фоне ради вкладки, на которую никто не смотрит, незачем.
+let pathTimer = null;
+
+function startPathPolling() {
+  if (pathTimer) return;
+  loadPath();
+  pathTimer = setInterval(loadPath, 5000);
+}
+function stopPathPolling() {
+  if (pathTimer) { clearInterval(pathTimer); pathTimer = null; }
+}
+
+function bytesHuman(n) {
+  if (n === null || n === undefined) return '—';
+  const u = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i ? 1 : 0) + ' ' + u[i];
+}
+function bpsHuman(n) {
+  if (n === null || n === undefined) return '—';
+  if (n < 1000) return n + ' бит/с';
+  if (n < 1000000) return (n / 1000).toFixed(1) + ' Кбит/с';
+  return (n / 1000000).toFixed(1) + ' Мбит/с';
+}
+function row(k, v, cls) {
+  return '<div class="info-row"><span class="info-key">' + k +
+         '</span><span class="info-val ' + (cls || '') + '">' + v + '</span></div>';
+}
+
+async function loadPath() {
+  const d = await apiJ('GET', '/api/path');
+  if (!d) return;
+  renderPathLink(d);
+  renderPathEgress(d.egress || {});
+  renderPathCounters(d.counters || []);
+}
+
+function renderPathLink(d) {
+  const l = (d.wan && d.wan.link) || {};
+  const a = (d.wan && d.wan.address) || {};
+  const lease = a.lease || {};
+  const t = a.timers || {};
+  let h = '';
+  if (!l.present) {
+    h = '<span class="text-muted">интерфейс не найден</span>';
+  } else {
+    // Несущая и скорость показываются порознь: их расхождение само по себе
+    // стоит увидеть — этот драйвер уже врал про скорость.
+    h += row('Интерфейс', l.iface, 'monospace');
+    h += row('Несущая', l.carrier ? '<span style="color:var(--green)">есть</span>'
+                                  : '<span style="color:var(--red)">нет</span>');
+    h += row('Скорость', l.speed_mbit ? l.speed_mbit + ' Мбит/с, ' + (l.duplex || '—')
+                                      : '<span class="text-muted">не сообщается</span>');
+    h += row('MTU', l.mtu || '—', 'monospace');
+    h += row('Ошибки приёма / передачи',
+             (l.rx_errors ?? '—') + ' / ' + (l.tx_errors ?? '—'), 'monospace');
+    h += row('Потеряно приём / передача',
+             (l.rx_dropped ?? '—') + ' / ' + (l.tx_dropped ?? '—'), 'monospace');
+    h += row('Принято / отдано',
+             bytesHuman(l.rx_bytes) + ' / ' + bytesHuman(l.tx_bytes), 'monospace');
+    h += row('Адрес', a.cidr || '—', 'monospace');
+    h += row('Шлюз провайдера', lease.gateway || '—', 'monospace');
+    if (lease.lifetime) {
+      let when = '';
+      if (t.renew_in != null) when = ', следующее через ' + Math.round(t.renew_in) + ' с';
+      else if (t.renew_timer_stale) when = ', отметка networkd устарела';
+      h += row('Аренда', Math.round(lease.lifetime / 60) + ' мин, обновление каждые ' +
+               Math.round((lease.t1 || lease.lifetime / 2) / 60) + ' мин' + when);
+    }
+    if (lease.dns && lease.dns.length)
+      h += row('DNS от провайдера', lease.dns.join(', '), 'monospace');
+  }
+  document.getElementById('path-link').innerHTML = h;
+  const note = document.getElementById('path-lease-note');
+  if (a.note) { note.style.display = ''; note.textContent = a.note; }
+  else note.style.display = 'none';
+}
+
+function renderPathEgress(e) {
+  const el = document.getElementById('path-egress');
+  if (!e.available) {
+    el.innerHTML = '<span class="text-muted">счётчики выхода недоступны</span>';
+    return;
+  }
+  const live = e.carrying
+    ? '<span style="color:var(--green)">несёт трафик</span>'
+    : '<span style="color:var(--yellow)">за секунду измерения — ни байта</span>';
+  let h = row('Сейчас', live);
+  h += row('Наружу / внутрь', bpsHuman(e.up_bps) + ' / ' + bpsHuman(e.down_bps), 'monospace');
+  h += row('Всего с запуска',
+           bytesHuman(e.up_bytes_total) + ' / ' + bytesHuman(e.down_bytes_total), 'monospace');
+  el.innerHTML = h;
+}
+
+function renderPathCounters(rows) {
+  let h = '';
+  rows.forEach(r => {
+    const v = r.present
+      ? '<span class="monospace">' + (r.packets || 0).toLocaleString('ru') +
+        ' пак. / ' + bytesHuman(r.bytes) + '</span>'
+      : '<span style="color:var(--red)">правила нет</span>';
+    h += row(r.label, v);
+  });
+  document.getElementById('path-counters').innerHTML = h ||
+    '<span class="text-muted">нет данных</span>';
+}
+
+async function pathTo() {
+  const target = (document.getElementById('path-target').value || '').trim();
+  const box = document.getElementById('path-answer');
+  if (!target) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.innerHTML = '<span class="text-muted">смотрю…</span>';
+  const d = await apiJ('GET', '/api/path/to?target=' + encodeURIComponent(target));
+  if (!d || d.detail) {
+    box.innerHTML = '<span style="color:var(--red)">' +
+                    ((d && d.detail) || 'не получилось') + '</span>';
+    return;
+  }
+  const x = d.xray || {}, k = d.kernel || {};
+  let h = '';
+  // Перехват идёт первым, потому что решает первым: TPROXY забирает пакет
+  // ДО маршрутизации, и потому обычный `ip route get` про транзитный пакет
+  // отвечает не про него. Порядок слоёв здесь — это порядок событий.
+  const it = d.interception || {};
+  if (it.intercepted === true)
+    h += row('Перехват', '<span style="color:var(--accent)">забирается в xray</span>');
+  else if (it.intercepted === false)
+    h += row('Перехват', '<span style="color:var(--green)">не перехватывается</span>' +
+             (it.why ? ' — ' + it.why : ''));
+  if (x.error) {
+    h += '<div style="color:var(--red)">' + x.error + '</div>';
+  } else {
+    if (d.resolved && d.resolved.length)
+      h += row('Разрешается в', d.resolved.join(', '), 'monospace');
+    const out = x.outbound === 'direct'
+      ? '<span style="color:var(--green)">напрямую</span>'
+      : '<span style="color:var(--accent)">через туннель</span>';
+    h += row('Решение xray', out + ' — <span class="monospace">' +
+             (x.matched_rule || '—') + '</span>');
+    if (x.note && x.note !== x.matched_rule) h += row('Почему', x.note);
+  }
+  const leg = (r, title) => {
+    if (!r || !r.dev) return row(title, '<span class="text-muted">нет маршрута</span>');
+    let v = 'через <span class="monospace">' + r.dev + '</span>';
+    if (r.gateway) v += ', шлюз <span class="monospace">' + r.gateway + '</span>';
+    v += ', таблица <span class="monospace">' + r.table_name + '</span>';
+    return row(title, v);
+  };
+  if (d.ipv6_only)
+    h += row('Замечание', 'имя разрешилось только в IPv6, а наружу IPv6 нет');
+  h += leg(k.intercepted, 'Ядро: обычный пакет');
+  if (!k.same_either_way) h += leg(k.bypassed, 'Ядро: с меткой обхода');
+  const chosen = (k.intercepted && k.intercepted.chosen_by) || [];
+  if (chosen.length) {
+    h += '<div class="info-row"><span class="info-key">Эту таблицу выбрали</span></div>' +
+         '<pre class="monospace" style="font-size:12px;margin:0;white-space:pre-wrap">' +
+         chosen.join('\n') + '</pre>';
+  }
+  box.innerHTML = h;
 }
 
 // ─── Route Tester ─────────────────────────────────────────────────────────────

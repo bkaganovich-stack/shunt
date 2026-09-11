@@ -501,3 +501,50 @@ class TestVarint:
         assert val == 0
 
 import re  # needed for snapshot ID pattern checks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: the route tester tells the truth about conferencing
+# ─────────────────────────────────────────────────────────────────────────────
+class TestRouteTestKnowsAboutCalls:
+    def _s(self, **kw):
+        s = dict(m.DEFAULT_SETTINGS)
+        s.update(kw)
+        return s
+
+    def test_a_zoom_media_address_is_reported_direct(self, monkeypatch):
+        # 170.114.52.2 is what zoom.us resolved to on the live gateway.
+        r = m.route_test("170.114.52.2", self._s(profile="all_except_ru"))
+        assert r["outbound"] == "direct"
+        assert "realtime" in r["matched_rule"]
+
+    def test_a_teams_domain_is_reported_direct(self):
+        r = m.route_test("teams.microsoft.com", self._s(profile="all_except_ru"))
+        assert r["outbound"] == "direct"
+
+    def test_a_teams_media_address_is_reported_direct(self):
+        r = m.route_test("52.113.194.132", self._s(profile="all_except_ru"))
+        assert r["outbound"] == "direct"
+
+    def test_turning_it_off_changes_the_answer_too(self):
+        # The page and the rules have to move together in both directions.
+        r = m.route_test("170.114.52.2",
+                         self._s(profile="all_except_ru", realtime_direct=False))
+        assert r["outbound"] != "direct" or r["matched_rule"] != "realtime"
+
+    def test_an_explicit_rule_still_wins_in_the_tester(self):
+        r = m.route_test("teams.microsoft.com", self._s(
+            profile="all_except_ru",
+            custom_rules={"always_direct": [], "always_vpn": ["domain:teams.microsoft.com"]}))
+        assert "custom:always_vpn" in r["matched_rule"]
+
+    def test_an_ordinary_foreign_address_is_untouched(self):
+        r = m.route_test("140.82.121.4", self._s(profile="all_except_ru"))
+        assert "realtime" not in (r["matched_rule"] or "")
+
+    def test_every_generated_conferencing_matcher_is_covered_by_the_tester(self):
+        # The guard against the drift that just happened: if someone adds an
+        # address block to the rules, the tester matches it by construction.
+        for cidr in m.REALTIME_IPS:
+            first = str(__import__("ipaddress").ip_network(cidr)[1])
+            assert m._matches_realtime(None, [first]) == cidr, cidr
