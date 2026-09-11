@@ -6,16 +6,18 @@ import re, shutil, signal, socket, struct, subprocess, tarfile, termios, time
 import urllib.parse, urllib.request
 import uuid as _uuid_mod
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.4.2"
+VERSION = "2.5.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
 import features as _ft
 import sources as _src
 import netpath as _np
+import dnspath as _dns
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -810,25 +812,26 @@ def apply_dns_config(dns: dict, settings: Optional[dict] = None) -> tuple[bool, 
         return False, str(e)
 
 def get_dns_status() -> dict:
-    """Return current DNS status: active upstream, dnsmasq state."""
+    """
+    dnsmasq's state, and whether each upstream actually answers.
+
+    This used to call connect() on a UDP socket, which touches no network and
+    cannot fail: it reported 192.0.2.1 as reachable in 0 ms and the gateway's
+    real resolver as unreachable, because `127.0.0.1#5053` made the address
+    parser throw. Now every upstream is asked a question.
+    """
     try:
         dns_active = subprocess.run(["systemctl", "is-active", "dnsmasq"],
                                     capture_output=True, text=True).stdout.strip()
-        # Test each upstream with a quick ping-level check
         s = load_settings()
-        upstreams = s.get("dns", {}).get("upstream", [])
-        upstream_status = []
-        for ip in upstreams:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.settimeout(1)
-                start = time.time()
-                sock.connect((ip, 53)); sock.close()
-                lat = int((time.time() - start) * 1000)
-                upstream_status.append({"ip": ip, "reachable": True, "latency_ms": lat})
-            except Exception:
-                upstream_status.append({"ip": ip, "reachable": False, "latency_ms": None})
-        return {"dnsmasq": dns_active, "upstreams": upstream_status}
+        ups = list(s.get("dns", {}).get("upstream", []))
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            probed = list(pool.map(lambda u: _dns.probe(u, timeout=2.0), ups))
+        return {"dnsmasq": dns_active,
+                "upstreams": [{"ip": r["server"],
+                               "reachable": bool(r.get("answering")),
+                               "latency_ms": r.get("latency_ms"),
+                               "error": r.get("error")} for r in probed]}
     except Exception as e:
         return {"dnsmasq": "unknown", "upstreams": [], "error": str(e)}
 
@@ -2755,6 +2758,96 @@ async def set_dns(req: DNSSettingsReq, u: str = Depends(auth_dep)):
     s["dns"] = dns; save_settings(s)
     ok, err = apply_dns_config(dns)
     return {"ok": ok, "error": err or None}
+
+@app.get("/api/dns/probe")
+async def dns_probe(u: str = Depends(auth_dep)):
+    """
+    Every resolver in the chain, asked a question it cannot have cached.
+
+    Probed in parallel because a page that takes eight seconds to load is a
+    page nobody opens during an outage, which is the only time it matters.
+    """
+    s = load_settings()
+    iface = _net_conf().get("WAN_IF", "")
+    lan = _get_lan_ip()
+    inv = _dns.inventory(s, iface, lan_ip=lan)
+    loop = asyncio.get_event_loop()
+
+    def probe_all():
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            return list(pool.map(
+                lambda row: {**row, **_dns.probe(row["server"], timeout=2.5)}, inv))
+
+    rows = await loop.run_in_executor(None, probe_all)
+    answering = [r for r in rows if r.get("answering")]
+    redirect = _dns.parse_redirect(
+        _np._run("iptables", "-t", "nat", "-L", "PREROUTING", "-v", "-n", "-x"))
+    return {"resolvers": rows,
+            "chain": _dns.describe_chain(s, lan_ip=lan),
+            "redirect": redirect,
+            "lease_resolvers": _dns.lease_resolvers(iface),
+            "answering": len(answering), "total": len(rows)}
+
+class DnsResolveReq(BaseModel):
+    name: str
+    via:  Optional[str] = None
+
+@app.post("/api/dns/resolve")
+async def dns_resolve(req: DnsResolveReq, u: str = Depends(auth_dep)):
+    """
+    Resolve one name through one resolver and say which one answered.
+
+    The old test used getaddrinfo, which asks whatever the gateway's own libc is
+    configured to ask and never says who that was -- so a working answer proved
+    nothing about the path the household's devices take.
+    """
+    name = (req.name or "").strip().rstrip(".")
+    if not name or not re.match(r"^[a-zA-Z0-9.\-]+$", name) or len(name) > 253:
+        raise HTTPException(400, "Invalid name")
+    via = (req.via or "").strip()
+    if via and not re.match(r"^[0-9a-fA-F.:]+(#\d+)?$", via):
+        raise HTTPException(400, "Invalid resolver")
+    if not via:
+        via = "%s#53" % (_get_lan_ip() or "127.0.0.1")
+    loop = asyncio.get_event_loop()
+    r = await loop.run_in_executor(
+        None, lambda: _dns.probe(via, name=name, timeout=4.0))
+    return {"name": name, "via": via, **r}
+
+class DnsLeaseReq(BaseModel):
+    target: str = "ru"      # "ru" — для .ru и .local, "general" — для всего
+
+@app.post("/api/dns/use-lease-resolvers")
+async def dns_use_lease(req: DnsLeaseReq, u: str = Depends(auth_dep)):
+    """
+    Adopt the resolvers the provider handed out with the lease.
+
+    They are the only name service on this box that does not depend on the
+    tunnel, and the tunnel cannot come up until a name resolves -- during the
+    outage they answered the whole time and nothing offered them. Adopting them
+    for everything means the provider sees every query, so that is a separate,
+    deliberate choice from using them for .ru only.
+    """
+    if req.target not in ("ru", "general"):
+        raise HTTPException(400, "target must be 'ru' or 'general'")
+    iface = _net_conf().get("WAN_IF", "")
+    found = _dns.lease_resolvers(iface)
+    if not found:
+        raise HTTPException(400, "В аренде нет резолверов")
+    s = load_settings(); old_s = dict(s)
+    dns = dict(s.get("dns", DEFAULT_SETTINGS["dns"]))
+    key = "upstream_ru" if req.target == "ru" else "upstream"
+    merged = list(dns.get(key, []))
+    for ip in found:
+        if ip not in merged:
+            merged.append(ip)
+    dns[key] = merged
+    errors = validate_dns_settings(dns)
+    if errors:
+        raise HTTPException(400, "; ".join(errors))
+    s["dns"] = dns; save_settings(s)
+    ok, err = apply_dns_config(dns, s)
+    return {"ok": ok, "error": err or None, "added": found, "field": key}
 
 @app.get("/api/dns/status")
 async def dns_status(u: str = Depends(auth_dep)):

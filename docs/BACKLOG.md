@@ -57,7 +57,24 @@ its parts:
 of this file three times in one day while he had root and knew what he was
 looking for.
 
-## 2. DNS that shows whether it works
+## 2. DNS that shows whether it works — shipped in 2.5.0
+
+What it found on the way in: the existing status check called connect() on a UDP
+socket, which touches no network and cannot fail. It reported 192.0.2.1 and
+203.0.113.99 -- documentation addresses nobody answers -- as reachable in 0 ms,
+and the gateway's only real resolver as unreachable, because `127.0.0.1#5053`
+made the address parser throw. A perfect inversion behind a green tick.
+
+The other thing it found: the obvious probe is the wrong one. Asking the LAN
+address on port 53 from the gateway answers "silent", because dnsmasq listens on
+5335 and what joins them is a redirect in nat PREROUTING that a locally-sent
+packet never passes through. Every device on the network resolves fine. That hop
+is checked by counting the packets the redirect has carried instead.
+
+Still worth doing here later: a history, so "it answered a minute ago" is
+visible, and per-resolver failure counts over time rather than one probe now.
+
+The original item, for the record:
 
 Configurable resolvers are half of it. The failure was never "the setting is
 wrong and cannot be changed" — it was "there is no way to tell that the

@@ -1378,19 +1378,33 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <p class="page-desc">Управление dnsmasq: upstream, split-DNS, локальные записи, кэш</p>
 
       <div class="card">
-        <div class="card-title">Статус DNS</div>
-        <div id="dns-status-row" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px"></div>
-        <div class="btn-row">
-          <button class="btn btn-secondary btn-sm" onclick="loadDnsStatus()">🔄 Обновить статус</button>
+        <div class="card-title">Путь имени</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Куда уходит запрос устройства и через кого возвращается ответ.</p>
+        <div id="dns-chain"><span class="text-muted">загрузка…</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Резолверы</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Каждому задан настоящий вопрос со случайным именем — чтобы измерять путь,
+          а не кэш. «Отвечает» значит ответил, а не «порт открыт».</p>
+        <div id="dns-resolvers"><span class="text-muted">загрузка…</span></div>
+        <div id="dns-lease-offer" class="mt-4" style="display:none"></div>
+        <div class="btn-row mt-4">
+          <button class="btn btn-secondary btn-sm" onclick="loadDnsProbe()">🔄 Опросить заново</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Тест DNS-запроса</div>
-        <div style="display:flex;gap:8px">
+        <div class="card-title">Разрешить имя</div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+          Через выбранный резолвер — видно, кто ответил и за сколько.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
           <input id="dns-test-input" type="text" placeholder="ozon.ru, google.com…"
-                 style="flex:1" onkeydown="if(event.key==='Enter')runDnsTest()">
-          <button class="btn btn-primary" onclick="runDnsTest()" id="dns-test-btn">Проверить</button>
+                 style="flex:1;min-width:180px" onkeydown="if(event.key==='Enter')runDnsTest()">
+          <select id="dns-test-via" style="min-width:180px"></select>
+          <button class="btn btn-primary" onclick="runDnsTest()" id="dns-test-btn">Спросить</button>
         </div>
         <div id="dns-test-result"></div>
       </div>
@@ -3542,41 +3556,113 @@ async function saveDns() {
   setTimeout(() => res.textContent = '', 5000);
 }
 
-async function loadDnsStatus() {
-  const el = document.getElementById('dns-status-row'); if (!el) return;
-  const r = await apiJ('GET', '/api/dns/status');
-  if (!r) return;
-  const dnsOk = r.dnsmasq === 'active';
-  let html = `<div class="dns-status-chip">
-    <span class="dot ${dnsOk ? 'dot-green' : 'dot-red'}"></span>
-    dnsmasq: ${r.dnsmasq || '—'}</div>`;
-  (r.upstreams || []).forEach(u => {
-    const cls = u.reachable ? 'dot-green' : 'dot-red';
-    html += `<div class="dns-status-chip"><span class="dot ${cls}"></span>
-      ${escHtml(u.ip)} ${u.reachable ? u.latency_ms+'ms' : 'недост.'}</div>`;
+async function loadDnsStatus() { return loadDnsProbe(); }
+
+// Опрашивает каждый резолвер настоящим запросом. Раньше здесь был connect()
+// на UDP-сокете, который сети не касается и не может провалиться: два
+// документационных адреса показывались доступными за 0 мс, а единственный
+// настоящий резолвер шлюза — недоступным.
+async function loadDnsProbe() {
+  const chainEl = document.getElementById('dns-chain');
+  const resEl = document.getElementById('dns-resolvers');
+  if (!chainEl || !resEl) return;
+  const d = await apiJ('GET', '/api/dns/probe');
+  if (!d) return;
+
+  let h = '';
+  (d.chain || []).forEach((hop, i) => {
+    h += '<div class="info-row"><span class="info-key">' + (i + 1) + '. ' +
+         escHtml(hop.step) + '</span><span class="info-val monospace">' +
+         escHtml(hop.to) + '</span></div>';
+    const note = [hop.via, hop.note].filter(Boolean).join(' · ');
+    if (note) h += '<div class="text-muted" style="font-size:12px;margin:-4px 0 8px">' +
+                   escHtml(note) + '</div>';
   });
-  el.innerHTML = html;
+  const rd = d.redirect || {};
+  if (rd.present === false)
+    h += '<div style="color:var(--red);font-size:13px;margin-top:8px">' +
+         'Правила перенаправления порта 53 нет — устройства в сети не попадут в dnsmasq.</div>';
+  else if (rd.present)
+    h += '<div class="text-muted" style="font-size:12px;margin-top:8px">Перенаправлено запросов: ' +
+         ((rd.udp_packets || 0) + (rd.tcp_packets || 0)).toLocaleString('ru') + '.</div>';
+  chainEl.innerHTML = h;
+
+  let t = '<table class="dns-local-table"><thead><tr><th>Резолвер</th><th>Роль</th>' +
+          '<th>Состояние</th></tr></thead><tbody>';
+  (d.resolvers || []).forEach(r => {
+    const ok = r.answering;
+    const state = ok
+      ? '<span style="color:var(--green)">отвечает</span> · ' + r.latency_ms +
+        ' мс · ' + escHtml(r.rcode_name || '')
+      : '<span style="color:var(--red)">молчит</span> · ' + escHtml(r.error || '');
+    t += '<tr><td class="monospace">' + escHtml(r.server) + '</td><td>' +
+         escHtml(r.label || '') + '</td><td>' + state + '</td></tr>';
+  });
+  t += '</tbody></table>';
+  resEl.innerHTML = t;
+
+  // Резолверы провайдера — единственный путь, не зависящий от туннеля, а
+  // туннель не поднимется, пока не разрешится имя. Во время прошлого сбоя они
+  // отвечали всё это время, и никто их не предложил.
+  const offer = document.getElementById('dns-lease-offer');
+  const unused = (d.lease_resolvers || []).filter(ip =>
+    !(d.resolvers || []).some(r => r.server === ip && r.in_use));
+  if (offer) {
+    if (unused.length) {
+      offer.style.display = '';
+      offer.innerHTML =
+        '<div style="padding:12px 14px;border-radius:var(--radius);background:var(--bg3);' +
+        'border:1px solid var(--border);font-size:13px">Провайдер выдал в аренде: <b class="monospace">' +
+        unused.map(escHtml).join(', ') + '</b>. Это единственный путь, не зависящий от туннеля.' +
+        '<div class="btn-row mt-4">' +
+        '<button class="btn btn-secondary btn-sm" onclick="useLeaseResolvers(\'ru\')">Использовать для .ru</button> ' +
+        '<button class="btn btn-secondary btn-sm" onclick="useLeaseResolvers(\'general\')">Использовать для всего</button>' +
+        '</div><div class="text-muted" style="font-size:12px">Для всего — значит провайдер видит каждый запрос.</div></div>';
+    } else offer.style.display = 'none';
+  }
+
+  const sel = document.getElementById('dns-test-via');
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = (d.resolvers || [])
+      .map(r => '<option value="' + escHtml(r.server) + '">' + escHtml(r.server) +
+                ' — ' + escHtml(r.label || '') + '</option>').join('');
+    if (prev) sel.value = prev;
+  }
+}
+
+async function useLeaseResolvers(target) {
+  const r = await apiJ('POST', '/api/dns/use-lease-resolvers', { target });
+  if (r?.ok) {
+    toast('Добавлены: ' + (r.added || []).join(', '));
+    loadDnsSettings(); loadDnsProbe();
+  } else toast(r?.error || r?.detail || 'Ошибка', false);
 }
 
 async function runDnsTest() {
   const inp = document.getElementById('dns-test-input');
   const btn = document.getElementById('dns-test-btn');
+  const via = document.getElementById('dns-test-via');
   const out = document.getElementById('dns-test-result');
-  const domain = inp.value.trim(); if (!domain) return;
+  const name = inp.value.trim(); if (!name) return;
   btn.disabled = true; btn.textContent = '…'; out.innerHTML = '';
-  const r = await apiJ('POST', '/api/dns/test', { target: domain });
-  btn.disabled = false; btn.textContent = 'Проверить';
+  const r = await apiJ('POST', '/api/dns/resolve',
+                       { name, via: via ? via.value : null });
+  btn.disabled = false; btn.textContent = 'Спросить';
   if (!r) return;
-  if (r.error) {
-    out.innerHTML = `<div class="route-result error"><div class="r-out">✕ Ошибка DNS</div>
-      <div class="r-rule">${escHtml(r.error)}</div></div>`; return;
+  if (r.detail || r.answering === false) {
+    out.innerHTML = '<div class="route-result error"><div class="r-out">✕ Ответа нет</div>' +
+      '<div class="r-rule">' + escHtml(r.detail || r.error || '') + '</div>' +
+      '<div class="r-rule">спрашивали: <span class="monospace">' +
+      escHtml(r.via || '') + '</span></div></div>';
+    return;
   }
-  const routeCls = r.route === 'direct' ? 'direct' : 'proxy';
-  out.innerHTML = `<div class="route-result ${routeCls}">
-    <div class="r-out">${escHtml(domain)}</div>
-    <div class="r-rule">IPs: <strong>${r.ips.join(', ') || '—'}</strong> · ${r.elapsed_ms} мс</div>
-    <div class="r-rule">Маршрут: <strong>${r.route||'—'}</strong> · правило: ${escHtml(r.matched_rule||'—')}</div>
-  </div>`;
+  out.innerHTML = '<div class="route-result direct">' +
+    '<div class="r-out">' + escHtml(r.name) + '</div>' +
+    '<div class="r-rule">ответил <span class="monospace">' + escHtml(r.via) +
+    '</span> за <strong>' + r.latency_ms + ' мс</strong> — ' + escHtml(r.rcode_name || '') + '</div>' +
+    '<div class="r-rule">адреса: <strong>' +
+    ((r.answers || []).map(escHtml).join(', ') || '—') + '</strong></div></div>';
 }
 
 // ─── Explain Connection ───────────────────────────────────────────────────────
