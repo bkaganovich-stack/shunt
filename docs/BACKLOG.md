@@ -124,6 +124,14 @@ Four things turned up, and the shape of the search is the lesson:
   carries the bypass mark and leaves through the WAN. The router's connectivity
   check works again, which removes the most plausible remaining cause of a
   periodic disruption nobody on this box could see.
+- **The two address changes are explained, and were not the calls.** The
+  subscriber's account had run out and was paid at about the time of the first
+  change; the provider rebuilt the session, which is why the new address came
+  from a different DHCP server with a different gateway and prefix. Both changes
+  fall on 10 September at 13:32 and 13:59 MSK, and both calls fall outside that
+  window -- so this closes the address question and leaves the five-minute one
+  open. 2.4.2 records the issuing server with every change, so the next billing
+  cycle explains itself instead of costing a conversation.
 - **The five-minute period is not yet explained, and four candidates are dead.**
   Ruled out by measurement rather than argument: the offload watchdog (fires on
   exactly that period, but exits without touching the NIC unless the kernel has

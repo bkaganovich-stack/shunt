@@ -212,6 +212,20 @@ def lease_lifetime(iface: str):
         return None
     return None
 
+def lease_issuer(iface: str) -> dict:
+    """Which DHCP server handed out the current lease, and which gateway it named."""
+    try:
+        idx = Path(f"/sys/class/net/{iface}/ifindex").read_text().strip()
+        out = {}
+        for ln in (NETIF_LEASES / idx).read_text().splitlines():
+            if ln.startswith("SERVER_ADDRESS="):
+                out["server"] = ln.split("=", 1)[1].strip()
+            elif ln.startswith("ROUTER="):
+                out["gateway"] = ln.split("=", 1)[1].strip()
+        return out
+    except OSError:
+        return {}
+
 def note_wan_address(state: dict, wan: str) -> dict:
     """
     Say out loud when the ground moves.
@@ -232,8 +246,24 @@ def note_wan_address(state: dict, wan: str) -> dict:
         extra = "" if old_net == new_net else f" (и размер сети: /{old_net} → /{new_net})"
         log(f"WAN address changed {prev} → {cur}{extra} — "
             f"every connection through the gateway was reset")
+        # Who issued it matters as much as what it is. When the address arrives
+        # from a *different* DHCP server, with a different gateway, that is the
+        # provider moving the subscriber -- a session rebuilt after a payment or
+        # an outage -- not a lease ticking over. Saying so turns a mystery into
+        # a sentence: this box saw exactly that on 2026-09-10, and working out
+        # why took a conversation that the record should have made unnecessary.
+        issuer = lease_issuer(wan)
+        was = state.get("wan_issuer", {})
+        moved = bool(was.get("server") and issuer.get("server")
+                     and was["server"] != issuer["server"])
         record = {"ts": int(time.time()), "when": time.strftime("%F %T"),
-                  "from": prev, "to": cur}
+                  "from": prev, "to": cur,
+                  "server_from": was.get("server"), "server_to": issuer.get("server"),
+                  "different_server": moved}
+        if moved:
+            log(f"the new address came from a different DHCP server "
+                f"({was.get('server')} → {issuer.get('server')}) — that is the "
+                f"provider rebuilding the session, not a lease renewal")
         try:
             hist = json.loads(WAN_CHANGES.read_text()) if WAN_CHANGES.exists() else []
         except (OSError, ValueError):
@@ -253,6 +283,7 @@ def note_wan_address(state: dict, wan: str) -> dict:
         except OSError:
             pass
     state["wan_cidr"] = cur
+    state["wan_issuer"] = lease_issuer(wan) or state.get("wan_issuer", {})
 
     life = lease_lifetime(wan)
     if life and life != state.get("lease_seconds"):

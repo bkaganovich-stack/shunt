@@ -4471,9 +4471,16 @@ function renderWanChange(c) {
   if (!el) return;
   if (!c || !c.when) { el.style.display = 'none'; return; }
   el.style.display = '';
-  el.textContent = 'Адрес провайдера сменился ' + c.when + ': ' + c.from +
+  let txt = 'Адрес провайдера сменился ' + c.when + ': ' + c.from +
     ' → ' + c.to + '. В этот момент оборвались все соединения через шлюз' +
     (c.count > 1 ? ' (за сутки таких смен: ' + c.count + ')' : '') + '.';
+  // Другой DHCP-сервер — это провайдер пересобрал сессию, а не аренда
+  // подошла к концу. Разница между этими двумя объяснениями стоила разговора.
+  if (c.different_server)
+    txt += ' Адрес выдал другой сервер провайдера (' + (c.server_from || '?') +
+           ' → ' + (c.server_to || '?') + '): похоже на пересборку сессии — ' +
+           'например, после оплаты или аварии, — а не на обычное продление.';
+  el.textContent = txt;
 }
 
 async function setAaplimg(enabled) {

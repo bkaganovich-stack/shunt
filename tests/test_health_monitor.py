@@ -194,3 +194,54 @@ class TestWanAddressChange:
         self._monitor(tmp_path, monkeypatch, None)
         st = hm.note_wan_address({"wan_cidr": "100.116.44.163/16"}, "enp1s0")
         assert st["wan_cidr"] == "100.116.44.163/16"
+
+
+class TestWhoIssuedTheAddress:
+    def _setup(self, tmp_path, monkeypatch, addr, issuer):
+        monkeypatch.setattr(hm, "WAN_CHANGES", tmp_path / "wan-changes.json")
+        monkeypatch.setattr(hm, "WAN_CURRENT", tmp_path / "wan-current.json")
+        monkeypatch.setattr(hm, "iface_cidr", lambda i: addr)
+        monkeypatch.setattr(hm, "lease_lifetime", lambda i: None)
+        monkeypatch.setattr(hm, "lease_issuer", lambda i: issuer)
+        logged = []
+        monkeypatch.setattr(hm, "log", lambda m: logged.append(m))
+        return logged
+
+    def test_a_different_server_is_called_out(self, tmp_path, monkeypatch):
+        # What happened on 2026-09-10: the new address came from 100.105.144.1
+        # instead of 100.116.0.1 -- the provider rebuilding the session after a
+        # payment, not a lease renewal. Working that out took a conversation.
+        import json
+        logged = self._setup(tmp_path, monkeypatch, "100.101.243.40/20",
+                             {"server": "100.105.144.1", "gateway": "100.101.240.1"})
+        hm.note_wan_address({"wan_cidr": "100.116.44.163/16",
+                             "wan_issuer": {"server": "100.116.0.1"}}, "enp1s0")
+        hist = json.loads((tmp_path / "wan-changes.json").read_text())
+        assert hist[-1]["different_server"] is True
+        assert hist[-1]["server_from"] == "100.116.0.1"
+        assert hist[-1]["server_to"] == "100.105.144.1"
+        assert any("different DHCP server" in m for m in logged)
+
+    def test_the_same_server_is_not_called_out(self, tmp_path, monkeypatch):
+        import json
+        logged = self._setup(tmp_path, monkeypatch, "100.116.44.200/16",
+                             {"server": "100.116.0.1"})
+        hm.note_wan_address({"wan_cidr": "100.116.44.163/16",
+                             "wan_issuer": {"server": "100.116.0.1"}}, "enp1s0")
+        hist = json.loads((tmp_path / "wan-changes.json").read_text())
+        assert hist[-1]["different_server"] is False
+        assert not any("different DHCP server" in m for m in logged)
+
+    def test_an_unknown_previous_server_claims_nothing(self, tmp_path, monkeypatch):
+        # First change after an upgrade: we never recorded the old issuer, so
+        # "a different server" is not something we are entitled to say.
+        import json
+        self._setup(tmp_path, monkeypatch, "10.0.0.2/24", {"server": "10.0.0.1"})
+        hm.note_wan_address({"wan_cidr": "10.0.0.1/24"}, "enp1s0")
+        hist = json.loads((tmp_path / "wan-changes.json").read_text())
+        assert hist[-1]["different_server"] is False
+
+    def test_the_issuer_is_remembered_for_next_time(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, "10.0.0.2/24", {"server": "10.0.0.1"})
+        st = hm.note_wan_address({}, "enp1s0")
+        assert st["wan_issuer"]["server"] == "10.0.0.1"

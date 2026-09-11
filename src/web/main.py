@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -2043,7 +2043,10 @@ def _recent_wan_change(within_hours: int = 24) -> dict | None:
         return None
     last = recent[-1]
     return {"when": last.get("when"), "from": last.get("from"),
-            "to": last.get("to"), "count": len(recent)}
+            "to": last.get("to"), "count": len(recent),
+            "different_server": bool(last.get("different_server")),
+            "server_from": last.get("server_from"),
+            "server_to": last.get("server_to")}
 
 @app.get("/api/wan/changes")
 async def wan_changes(u: str = Depends(auth_dep)):
