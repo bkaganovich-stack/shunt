@@ -204,6 +204,14 @@ Still open on the DNS question, and worth measuring before acting:
   end to end; distribution is by file for now.
 - **Multi-subscription egress registry.** Parked: blocked on subscriptions
   worth trusting rather than on anything technical.
+- **A note that warns beats a note that informs, and it should not.** The lease
+  note shipped in 2.4.0 said a short lease meant every renewal might move the
+  address. The box's own journal said three hundred renewals and no change, and
+  nine re-acquisitions in one afternoon that all returned the same address. The
+  reader spotted it immediately -- "home internet does not work that way" -- and
+  he was right. The rule this leaves behind: **if the gateway can count it, the
+  interface must report the count, not the possibility.** Worth auditing the
+  rest of the interface against that; this was unlikely to be the only one.
 - **Two transparent proxies on one box.** xray intercepts with TPROXY; sing-box
   runs a tun with `auto_route` and its own `final: proxy`. Both capture LAN
   traffic, and which one gets a given packet is not written down anywhere. The
