@@ -185,6 +185,21 @@ iptables -t mangle -A XRAY_PREROUTING -d 255.255.255.255 -j RETURN
 # This intercepts hardcoded resolvers (8.8.8.8, 8.8.4.4, etc.) before TProxy sees them.
 iptables -t mangle -A XRAY_PREROUTING -p udp --dport 53 -j RETURN
 iptables -t mangle -A XRAY_PREROUTING -p tcp --dport 53 -j RETURN
+# ── ICMP leaves without the tunnel ────────────────────────────────────────────
+# A SOCKS tunnel cannot carry ICMP, and sing-box says so plainly before dropping
+# it: "icmp is not supported by default outbound: proxy" -- 5562 times in one
+# day on this gateway. That is the downstream router asking every fifteen
+# seconds whether it has internet and being told, in effect, that it does not.
+# Two consequences, both bad: `ping` from anything behind the box is a lie, and
+# so is `ping` on the box itself, where the tun answers for every address --
+# including 192.0.2.1, which nobody on earth replies to. The first diagnostic
+# anyone reaches for was broken in both directions.
+#
+# Marking it sends it out of the WAN the way an ordinary host's would. Echo
+# requests carry nothing worth tunnelling; being able to tell whether the
+# network works is worth more.
+iptables -t mangle -A XRAY_PREROUTING -p icmp -j MARK --set-mark $XRAY_MARK
+iptables -t mangle -A XRAY_PREROUTING -p icmp -j RETURN
 # Skip Google FCM (Firebase Cloud Messaging) port 5228 — bypass xray entirely.
 # FCM is Google Home's persistent backend connection; routing it through xray caused
 # the tunnel to act as a middleman and drop the connection every ~2 minutes, causing
@@ -216,6 +231,11 @@ iptables -t mangle -A XRAY_OUTPUT -d 127.0.0.0/8   -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 10.0.0.0/8    -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 172.16.0.0/12 -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 192.168.0.0/16 -j RETURN
+# The box's own ICMP, for the same reason as above -- and this half is the one
+# that fooled our own monitoring: the WAN health check was `ping 1.1.1.1`, which
+# the tun answered locally, so it could not fail in either direction.
+iptables -t mangle -A XRAY_OUTPUT -p icmp -j MARK --set-mark $XRAY_MARK
+iptables -t mangle -A XRAY_OUTPUT -p icmp -j RETURN
 # Mark locally-generated traffic → route via loopback → xray
 iptables -t mangle -A XRAY_OUTPUT -p tcp -j MARK --set-mark $TPROXY_MARK
 iptables -t mangle -A XRAY_OUTPUT -p udp -j MARK --set-mark $TPROXY_MARK
