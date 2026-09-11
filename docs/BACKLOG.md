@@ -21,9 +21,20 @@ from that.
 
 ---
 
-## 1. Live view of the network path
+## 1. Live view of the network path — shipped in 2.4.0
 
-The most valuable item, and the one that would have saved the day.
+Built as the "Сетевой тракт" page. What it turned out to need that this list did
+not anticipate: **the interception layer, first**. TPROXY decides before the
+routing decision, so an `ip route get` answer alone describes a packet that was
+already taken somewhere else -- which is precisely how three wrong conclusions
+got made in one day. The page now answers in the order the decisions happen:
+netfilter, then xray, then the kernel.
+
+Still worth doing here later: per-destination history (was this answer different
+an hour ago?), and the same view for a chosen LAN device rather than for the
+gateway's own traffic.
+
+The original item, for the record:
 
 One page, updating live, showing the chain end to end rather than a summary of
 its parts:
