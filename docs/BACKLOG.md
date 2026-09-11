@@ -95,6 +95,36 @@ and can compare against on any change.
 
 ---
 
+## What the 2026-09-11 call drops added
+
+Zoom froze and Teams dropped through two calls, roughly every five minutes.
+Four things turned up, and the shape of the search is the lesson:
+
+- **Conferencing was in the tunnel**, all of it. Fixed: Zoom and Teams leave
+  directly, with a toggle. The measurement that justified it -- direct 0% loss,
+  tunnel 2-5% and +90 ms -- took two minutes to run and had never been run.
+- **The WAN check could not fail.** `ping 1.1.1.1` succeeded because the
+  tunnel's tun answers ICMP echo for every address, including documentation
+  addresses nobody replies to. Fixed, and worth remembering as a class: a check
+  that cannot fail is worse than no check, because it is believed.
+- **ICMP is broken for everything behind the gateway.** The router pings 8.8.8.8
+  every fifteen seconds -- 5562 times in a day -- and sing-box refuses every one
+  of them, because its SOCKS outbound does not carry ICMP. So the router
+  believes it has no internet, `ping` from any device on the LAN is a lie, and
+  the first diagnostic anyone reaches for is broken. Not yet fixed: it needs a
+  rule sending ICMP to the direct outbound, and the two transparent-proxy
+  datapaths on this box (xray TPROXY and sing-box tun/auto_route) want thinking
+  about first.
+- **The five-minute period is still unexplained.** Ruled out by measurement, not
+  by argument: the offload watchdog (fires on that period but touches nothing),
+  head-of-line blocking in the tunnel (losses are single packets, never runs),
+  AdGuard reconnecting (a connection through it lived 14 minutes across three
+  of its wake-ups), and xray's 300-second idle default on an active connection.
+  Still open: UDP through xray specifically, and whether the router reacts to
+  believing the internet is down.
+
+---
+
 ## 5. Inbound access, when the box is the edge
 
 In inline topology the gateway *is* the edge router, and `iptables.sh` closes
@@ -153,6 +183,10 @@ Still open on the DNS question, and worth measuring before acting:
   end to end; distribution is by file for now.
 - **Multi-subscription egress registry.** Parked: blocked on subscriptions
   worth trusting rather than on anything technical.
+- **Two transparent proxies on one box.** xray intercepts with TPROXY; sing-box
+  runs a tun with `auto_route` and its own `final: proxy`. Both capture LAN
+  traffic, and which one gets a given packet is not written down anywhere. The
+  ICMP hole above is the first visible cost of that ambiguity.
 - **ufw is enabled at boot and inactive.** A Debian default, not ours: the
   unit runs, `ufw` itself is off, so it writes nothing today. It is a loaded
   gun rather than a bug — `ufw enable` would insert its own chains and its
