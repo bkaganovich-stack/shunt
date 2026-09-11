@@ -33,6 +33,7 @@ from pathlib import Path
 
 SYSFS = Path("/sys/class/net")
 NETIF_LEASES = Path("/run/systemd/netif/leases")
+LOGS = Path("/opt/shunt/logs")
 
 # Routing tables, named. "table 2022" is not an answer anyone can act on; "the
 # tunnel's own table" is. Numbers come from sing-box's auto_route (2022) and
@@ -178,17 +179,59 @@ def parse_lease_timers(networkctl_json: str, uptime_sec: float) -> dict:
     return out
 
 
-def lease_note(lease: dict, short_sec: int = 1800) -> str | None:
-    """One sentence about the lease, when there is something to say about it."""
+def _times(n: int) -> str:
+    """«1 раз», «2 раза», «5 раз» — иначе фраза спотыкается на числе."""
+    if 11 <= n % 100 <= 14:
+        return "%d раз" % n
+    last = n % 10
+    if last == 1:
+        return "%d раз" % n
+    if last in (2, 3, 4):
+        return "%d раза" % n
+    return "%d раз" % n
+
+
+def lease_note(lease: dict, stable_since: float | None = None,
+               changes_24h: int = 0, now: float | None = None,
+               short_sec: int = 1800) -> str | None:
+    """
+    One sentence about the lease -- describing what happened, not what could.
+
+    An earlier version of this said a short lease meant every renewal was a
+    chance for the address to move, and that each move cut every connection. The
+    second half is true; the first half made it sound like a coin flip every
+    five minutes, and the gateway's own logs say otherwise: about three hundred
+    renewals in twenty-five hours without a single change, and nine
+    re-acquisitions in one afternoon of cable-pulling that returned the very
+    same address every time. Renewal normally keeps the address -- the server
+    holds the binding -- and an address only moves when the provider decides it
+    should.
+
+    So this reports the lease as a fact and the changes as a count. A number
+    that is nearly always zero is reassurance; the same number at three is worth
+    acting on. Neither is a warning about something that has not happened.
+    """
     life, t1 = lease.get("lifetime"), lease.get("t1")
     if not life:
         return None
+    now = now if now is not None else time.time()
     if life <= short_sec:
-        renew = "каждые %d мин" % (t1 // 60) if t1 else "на половине срока"
-        return ("Аренда на %d мин, обновляется %s. Каждое обновление — "
-                "возможность для адреса смениться, а смена адреса разом "
-                "обрывает все соединения через шлюз." % (life // 60, renew))
-    return "Аренда на %d ч — адрес меняется редко." % (life // 3600)
+        head = "Аренда на %d мин, продление каждые %d мин." % (
+            life // 60, (t1 or life // 2) // 60)
+    else:
+        head = "Аренда на %d ч." % (life // 3600)
+
+    if changes_24h:
+        return (head + " Продление обычно сохраняет адрес, но за последние "
+                "сутки он сменился %s — а смена адреса разом обрывает все "
+                "соединения через шлюз." % _times(changes_24h))
+    if stable_since:
+        hours = (now - stable_since) / 3600.0
+        if hours >= 1:
+            return (head + " Продление сохраняет адрес: за %d ч наблюдения "
+                    "ни одной смены." % int(hours))
+        return head + " Продление сохраняет адрес; наблюдение идёт меньше часа."
+    return head + " Продление обычно сохраняет адрес."
 
 
 def address_state(iface: str) -> dict:
@@ -201,7 +244,25 @@ def address_state(iface: str) -> dict:
                   _run("ip", "-4", "-o", "addr", "show", iface))
     out["cidr"] = m.group(1) if m else None
     out["lease"] = lease
-    out["note"] = lease_note(lease)
+    # What the address has actually done, from the monitor's record, so the note
+    # can report rather than speculate.
+    since, changed = None, 0
+    try:
+        cur = json.loads((LOGS / "wan-current.json").read_text())
+        if cur.get("cidr") == out["cidr"]:
+            since = cur.get("since")
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        hist = json.loads((LOGS / "wan-changes.json").read_text())
+        cutoff = time.time() - 86400
+        changed = sum(1 for h in hist
+                      if isinstance(h, dict) and h.get("ts", 0) >= cutoff)
+    except (OSError, ValueError, TypeError):
+        pass
+    out["stable_since"] = since
+    out["changes_24h"] = changed
+    out["note"] = lease_note(lease, stable_since=since, changes_24h=changed)
     uptime = _read(Path("/proc/uptime"))
     if uptime:
         try:

@@ -39,6 +39,7 @@ LOOP_IP         = "192.168.50.2"
 LEASES          = Path("/var/lib/misc/dnsmasq.leases")
 NETIF_LEASES    = Path("/run/systemd/netif/leases")
 WAN_CHANGES     = BASE / "logs" / "wan-changes.json"
+WAN_CURRENT     = BASE / "logs" / "wan-current.json"
 WAN_CHANGES_MAX = 50
 SHORT_LEASE_SEC = 30 * 60
 SERVICES        = ["shunt", "shunt-web", "dnsmasq", "sing-box"]
@@ -242,14 +243,26 @@ def note_wan_address(state: dict, wan: str) -> dict:
             WAN_CHANGES.write_text(json.dumps(hist[-WAN_CHANGES_MAX:]))
         except OSError:
             pass
+    # How long the address has held. Without it the interface can only warn
+    # about what a short lease might do; with it, it can say what it has
+    # actually done -- which on this provider is nothing at all for a day and
+    # a half, across some three hundred renewals.
+    if prev != cur or not WAN_CURRENT.exists():
+        try:
+            WAN_CURRENT.write_text(json.dumps({"cidr": cur, "since": int(time.time())}))
+        except OSError:
+            pass
     state["wan_cidr"] = cur
 
     life = lease_lifetime(wan)
     if life and life != state.get("lease_seconds"):
         state["lease_seconds"] = life
         if life <= SHORT_LEASE_SEC:
-            log(f"NOTE: the provider's lease lasts {life // 60} min and renews at "
-                f"half that. Each renewal is a chance for the address to move.")
+            # Stated as a fact, not as a warning: renewal keeps the address, and
+            # saying otherwise turned a normal short lease into an alarm.
+            log(f"NOTE: the provider's lease lasts {life // 60} min, renewed at "
+                f"half that. Renewal keeps the address; changes are logged "
+                f"separately when they happen.")
     return state
 
 def has_fwmark_rule() -> bool:

@@ -117,14 +117,43 @@ class TestLease:
         assert l["lifetime"] == 600 and l["t1"] == 300 and l["t2"] == 525
         assert l["dns"] == ["213.234.193.1", "85.21.2.1"]
 
-    def test_a_short_lease_is_explained_not_just_shown(self):
+    def test_a_short_lease_states_the_facts(self):
         note = np.lease_note(np.parse_lease_file(LEASE_FILE))
         assert "10 мин" in note and "каждые 5 мин" in note
+
+    def test_a_quiet_address_is_reassurance_not_a_warning(self):
+        # The gateway's own record: ~305 renewals in 25 hours, zero changes.
+        # An earlier version of this sentence implied a coin flip every five
+        # minutes, which the logs flatly contradict.
+        import time as _t
+        note = np.lease_note(np.parse_lease_file(LEASE_FILE),
+                             stable_since=_t.time() - 25.5 * 3600)
+        assert "25 ч" in note and "ни одной смены" in note
+        assert "обрывает" not in note
+
+    def test_the_consequence_is_named_only_when_it_happened(self):
+        note = np.lease_note(np.parse_lease_file(LEASE_FILE), changes_24h=2)
+        assert "2 раза" in note
         assert "обрывает все соединения" in note
+
+    def test_a_short_watch_does_not_claim_much(self):
+        import time as _t
+        note = np.lease_note(np.parse_lease_file(LEASE_FILE),
+                             stable_since=_t.time() - 600)
+        assert "меньше часа" in note
+
+    def test_without_a_record_it_says_only_what_is_generally_true(self):
+        note = np.lease_note(np.parse_lease_file(LEASE_FILE))
+        assert "обычно сохраняет адрес" in note
 
     def test_a_long_lease_says_so_briefly(self):
         note = np.lease_note({"lifetime": 86400, "t1": 43200})
-        assert "24 ч" in note and "редко" in note
+        assert "24 ч" in note
+
+    def test_the_count_agrees_with_russian_grammar(self):
+        for n, want in ((1, "1 раз"), (2, "2 раза"), (5, "5 раз"),
+                        (11, "11 раз"), (22, "22 раза")):
+            assert np._times(n) == want
 
     def test_no_lease_no_claim(self):
         assert np.lease_note({}) is None

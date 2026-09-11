@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db

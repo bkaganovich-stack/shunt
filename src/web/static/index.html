@@ -2837,9 +2837,16 @@ function renderPathLink(d) {
       h += row('DNS от провайдера', lease.dns.join(', '), 'monospace');
   }
   document.getElementById('path-link').innerHTML = h;
+  // Оранжевая рамка — только когда есть о чём предупреждать. Спокойный факт,
+  // поданный как тревога, приучает не верить рамке вообще.
   const note = document.getElementById('path-lease-note');
-  if (a.note) { note.style.display = ''; note.textContent = a.note; }
-  else note.style.display = 'none';
+  if (a.note) {
+    note.style.display = '';
+    note.textContent = a.note;
+    const worrying = (a.changes_24h || 0) > 0;
+    note.style.background = worrying ? 'rgba(251,146,60,0.12)' : 'var(--bg3)';
+    note.style.borderColor = worrying ? 'var(--orange)' : 'var(--border)';
+  } else note.style.display = 'none';
 }
 
 function renderPathEgress(e) {
