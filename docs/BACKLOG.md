@@ -296,10 +296,10 @@ person whose hands are on the hardware:
   or one whose network is the thing that is broken. The most work: a protocol,
   an app, and pairing that a household can do.
 - **The web interface on a phone over Wi-Fi.** Cheapest by far, because the
-  installer now joins a network during the install and keeps it: the box is
-  already on the household Wi-Fi the first time it boots, and a phone is
-  already on it too. Fails in exactly the case BLE covers -- when the network
-  is what is wrong.
+  installer asks for a network during the install and the installed system
+  keeps it: the box is already on the household Wi-Fi the first time it boots,
+  and a phone is already on it too. Fails in exactly the case BLE covers --
+  when the network is what is wrong.
 - **A small USB display with a graphical interface of our own.** Bought
   separately, so it costs nothing for anyone who does not want one. Gives
   unambiguous feedback at the machine: what it thinks it is, which port it
