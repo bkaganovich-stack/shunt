@@ -1,0 +1,24 @@
+# Shunt's own logs. access.log is written by xray, one line per connection,
+# and grows about 11 MB a day on a household gateway — it had reached 85 MB
+# with no rotation configured anywhere, because nothing had ever put a file
+# here.
+#
+# copytruncate, not create: xray holds the file open and writes to the inode,
+# so renaming it would leave xray logging into the rotated copy forever and
+# the fresh file permanently empty. Truncating in place is the only rotation
+# that reaches a process which does not reopen its log.
+#
+# Safe for the analytics ingester, which reads this file from a saved byte
+# offset every sixty seconds: it already treats a file that shrank as a
+# rotation and starts over. It reads up to 4 MB per run against 11 MB a day
+# of growth, so it cannot fall behind and lose a rotation's worth of lines.
+/opt/shunt/logs/*.log {
+    daily
+    rotate 4
+    size 10M
+    compress
+    notifempty
+    missingok
+    copytruncate
+    su root root
+}

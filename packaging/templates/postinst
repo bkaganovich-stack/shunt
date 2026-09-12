@@ -171,6 +171,45 @@ case "$1" in
     # routing entirely, which is a leak rather than a degradation).
     sysctl --system >/dev/null 2>&1 || true
 
+    # ── Things that grow ─────────────────────────────────────────────────────
+    # The journal cap only binds at the next rotation, and the gateway this was
+    # written for had 2.2 GB to lose -- a quarter of everything on its disk, in
+    # logs nobody had read, because journald.conf was empty and the 10%-of-the
+    # -filesystem default was never questioned. Applied here so the space comes
+    # back on the day the package says it should, and reported rather than done
+    # quietly: deleting two gigabytes of somebody's logs is not a side effect.
+    if [ -f /etc/systemd/journald.conf.d/90-shunt.conf ]; then
+        before=$(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | head -1)
+        systemctl restart systemd-journald >/dev/null 2>&1 || true
+        journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+        after=$(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | head -1)
+        [ -z "$before" ] || [ "$before" = "$after" ] || \
+            echo "shunt: journal capped at 200M (was $before, now $after)"
+    fi
+
+    # Same reasoning, one day later: logrotate's timer would reach access.log
+    # tomorrow, and it is 85 MB today. Run without --force, so this applies the
+    # policy just installed rather than overriding it.
+    [ -x /usr/sbin/logrotate ] && [ -f /etc/logrotate.d/shunt ] && \
+        /usr/sbin/logrotate /etc/logrotate.d/shunt >/dev/null 2>&1 || true
+
+    # Backups from before this was a package: hand edits to index.html, main.py
+    # and iptables.sh, and a 111 MB database index left by the rename. Nothing
+    # writes these any more -- the newest on the live gateway is from August --
+    # so there is no retention policy worth adding, only a heap worth pointing
+    # at. Not deleted: they are the administrator's, and one of them may still
+    # be the copy that matters.
+    if [ -d "$BASE/config" ]; then
+        stale_kb=$(find "$BASE/config" -maxdepth 1 -name '*.bak*' -type f \
+                   -printf '%k\n' 2>/dev/null | awk '{s+=$1} END{print s+0}')
+        if [ "${stale_kb:-0}" -gt 51200 ]; then
+            stale_n=$(find "$BASE/config" -maxdepth 1 -name '*.bak*' -type f 2>/dev/null | wc -l)
+            echo "shunt: $stale_n backup files in $BASE/config predate the package"
+            echo "  and take $((stale_kb/1024)) MB. Nothing writes them any more. To remove:"
+            echo "    sudo find $BASE/config -maxdepth 1 -name '*.bak*' -type f -delete"
+        fi
+    fi
+
     # Units dropped from the package. 2.0.0 shipped shunt-first-boot.service,
     # a leftover of the pre-package install method: it was enabled here, but its
     # ExecStart lived in a source tree the package does not create, so it failed

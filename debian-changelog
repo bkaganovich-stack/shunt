@@ -1,3 +1,34 @@
+shunt (2.11.0) stable; urgency=medium
+
+  * The journal is capped at 200 MB. systemd's default is 10% of the
+    filesystem -- 2.6 GB of a 26 GB eMMC -- and the live gateway had reached
+    2.2 GB, a quarter of everything on its disk, in logs nobody had read.
+    journald.conf on that machine was empty: the default had simply never been
+    questioned. The cap ships as a drop-in, so an administrator who wants a
+    different number says so in a file dpkg will not touch, and the postinst
+    applies it immediately and reports how much came back rather than deleting
+    two gigabytes of somebody's logs as a side effect.
+  * Shunt's own logs now rotate. access.log is written by xray, one line per
+    connection, about 11 MB a day, and it had reached 85 MB because nothing had
+    ever put a file in /etc/logrotate.d. Rotation uses copytruncate, because
+    xray holds the file open and writes to the inode: renaming it would leave
+    xray logging into the rotated copy forever and the fresh file permanently
+    empty. This is safe for the analytics ingester, which already treats a file
+    that shrank as a rotation, and which reads 4 MB a minute against 11 MB a
+    day of growth, so it cannot fall behind and lose a rotation's worth of
+    lines.
+  * conffiles and md5sums are generated from one list. They were two literals
+    naming the same file, and the day they drifted apart an edited conffile
+    would have been reported by debsums as corruption.
+  * The postinst reports, once and without deleting anything, the backups in
+    /opt/shunt/config that predate the package -- hand edits to index.html,
+    main.py and iptables.sh, plus a 111 MB database index left by the rename.
+    Nothing writes them any more; the newest is from August. There is no
+    retention policy to add, only a heap to point at, and it is not the
+    package's to destroy.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sat, 12 Sep 2026 22:20:00 +0300
+
 shunt (2.10.0) stable; urgency=medium
 
   * The package now contains the gateway. Ten files the running box needed

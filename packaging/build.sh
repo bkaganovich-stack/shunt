@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 P="$STAGE/shunt"
 install -d "$P/DEBIAN" "$P/opt/shunt/web/static" "$P/opt/shunt/scripts" \
            "$P/lib/systemd/system" "$P/usr/sbin" "$P/usr/share/doc/shunt" \
-           "$P/etc/sysctl.d"
+           "$P/etc/sysctl.d" "$P/etc/systemd/journald.conf.d" "$P/etc/logrotate.d"
 
 install -m 644 "$ROOT"/src/web/*.py            "$P/opt/shunt/web/"
 # main.py carries a shebang, so it gets the matching exec bit. The alternative
@@ -49,6 +49,8 @@ install -m 755 "$ROOT/packaging/shunt-setup" "$P/usr/sbin/"
 install -m 755 "$ROOT/packaging/shunt-nic-offload" "$ROOT/packaging/shunt-offload-watch" \
                "$ROOT/packaging/fptn-resolv-heal" "$P/usr/sbin/"
 install -m 644 "$ROOT/packaging/sysctl/90-shunt.conf" "$P/etc/sysctl.d/"
+install -m 644 "$ROOT/packaging/journald/90-shunt.conf" "$P/etc/systemd/journald.conf.d/"
+install -m 644 "$ROOT/packaging/logrotate/shunt" "$P/etc/logrotate.d/"
 install -d "$P/usr/share/man/man8"
 gzip -9nc "$ROOT/packaging/shunt-setup.8" > "$P/usr/share/man/man8/shunt-setup.8.gz"
 install -m 644 "$ROOT/README.md"            "$P/usr/share/doc/shunt/"
@@ -61,15 +63,20 @@ find "$P/opt" -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$P/opt" \( -name '*.bak*' -o -name '._*' -o -name '.DS_Store' \) -delete 2>/dev/null || true
 
 # Files under /etc are the administrator's to edit; dpkg keeps local changes
-# across upgrades only for those declared here.
-printf '/etc/sysctl.d/90-shunt.conf\n' > "$P/DEBIAN/conffiles"
+# across upgrades only for those declared here. One list, used both to declare
+# them and to keep them out of md5sums -- when those two drifted apart, an
+# edited conffile would have been reported as a corrupted file.
+CONFFILES="/etc/sysctl.d/90-shunt.conf
+/etc/systemd/journald.conf.d/90-shunt.conf
+/etc/logrotate.d/shunt"
+printf '%s\n' "$CONFFILES" > "$P/DEBIAN/conffiles"
 chmod 644 "$P/DEBIAN/conffiles"
 
 # md5sums lets dpkg --verify and debsums detect files altered after install.
 # Conffiles are excluded: dpkg tracks those separately, and an intentional edit
 # to one is not corruption.
 ( cd "$P" && find . -type f ! -path './DEBIAN/*' -printf '%P\0' \
-  | grep -zv '^etc/sysctl.d/90-shunt.conf$' \
+  | grep -zvxF "$(printf '%s\n' "$CONFFILES" | sed 's|^/||')" \
   | sort -z | xargs -0 md5sum > DEBIAN/md5sums )
 chmod 644 "$P/DEBIAN/md5sums"
 
