@@ -338,6 +338,27 @@ lost to measurement repeatedly. The test costs nothing and has a natural home:
 the second mini-PC, once imaged, comes up in this state on its own. Lift the
 exclusion only after traffic has actually gone through it.
 
+## 8. An installer that needs no network
+
+The image carries the two Shunt packages and nothing else. Their dependencies --
+fastapi, uvicorn, pydantic, hostapd, dnsmasq-base, avahi and the rest -- come
+from deb.debian.org during the install, which is the whole reason the installer
+has to configure a network before it can finish. Every question the household is
+asked at install time exists to serve that one fact.
+
+Remove the fact and the questions go with it. The dependency closure, minus
+whatever the netinst pool already carries, is a few tens of megabytes: staged
+into the image as a small local archive with a generated `Packages` file and
+installed from `file://`, it would let the installer run with `netcfg/enable`
+false, no cable, no Wi-Fi key, no prompt of any kind, on a machine that has
+never seen a network. Shunt configures the network on first boot anyway -- that
+is what it is for.
+
+The cost is in the build, not the install: resolving that closure needs the
+Debian package indices and a resolver honest about alternatives and virtual
+packages, and the build host here is a Mac with no apt. Worth doing, and worth
+doing only once it can be tested end to end on the second mini-PC.
+
 ## Earlier items, unchanged
 
 - **Sources**: the manifest format and registry ship as of 2.2.0, reading only.

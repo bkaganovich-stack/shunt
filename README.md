@@ -24,7 +24,7 @@ Any small always-on x86 machine with one or two network ports. Two ways onto it.
 ### An installer image
 
 `packaging/mkiso.sh` turns a Debian 13 amd64 netinst image into one that
-installs Debian and both Shunt packages without asking anything:
+installs Debian and both Shunt packages by itself:
 
 ```
 ./packaging/mkiso.sh --iso debian-13.6.0-amd64-netinst.iso \
@@ -39,8 +39,22 @@ starts from.
 
 Boot the machine from the stick. After a ten second pause it installs on its
 own and **erases that machine's internal disk** — the first fixed disk it
-finds, or the one named by `--disk`. It needs a working
-internet connection while it runs, and xorriso is all that is needed to build it.
+finds, or the one named by `--disk`. Only xorriso is needed to build it.
+
+It needs a working internet connection while it runs, because the two Shunt
+packages travel on the image but their dependencies come from the Debian
+mirror. With an Ethernet cable plugged into something that hands out DHCP it
+asks nothing at all. Without one — which is the normal case, since the cable
+that matters is usually still in the router doing its job — it stops exactly
+once, to let you choose a Wi-Fi network from the ones it can see and type the
+key, and then carries on unattended. The installed system keeps that network,
+so the box is reachable the moment it boots and the ISP cable can be moved
+across afterwards by somebody who is not standing at a monitor.
+
+The second menu entry is the same install with nothing asked under any
+circumstances. It is for a machine that has a cable and nobody in front of it;
+without a cable it is the entry that fails, because there is no way for it to
+ask which network to join.
 
 No image is published prebuilt, deliberately: one that everybody downloads would
 have to carry credentials that everybody knows. The script will not build
