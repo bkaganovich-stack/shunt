@@ -179,12 +179,16 @@ d-i keyboard-configuration/xkb-keymap select us
 ###
 ### But a gateway is usually installed onto a machine whose only Ethernet cable
 ### is still in the router, doing the job. "No wired link" is the NORMAL case,
-### not a failure. When there is none, the wireless interface is selected and
-### the question priority is raised to `high` for the rest of the run, which is
-### all it takes: the installer then does its own thing -- scans, offers the
-### networks it can see or manual entry, asks for the key, works out the
-### security type, connects -- and carries on unattended afterwards, because
-### every other question is already answered in this file.
+### not a failure -- so when none appears the wireless device is selected here
+### instead, and the boot menu's Wi-Fi entry lowers the question priority far
+### enough that netcfg runs its own dialogue: scan, choose a network or type
+### one, enter the key, work out the security type, connect. Everything else in
+### this file is already answered, so that is the only thing asked.
+###
+### The priority belongs on the kernel command line, not here. Setting it from
+### early_command reads well and does nothing: early_command runs before the
+### network drivers are necessarily loaded, so the test for a wireless device
+### finds none and the branch never executes.
 ###
 ### Credentials are deliberately NOT preseeded here. An earlier version of this
 ### took them at build time and wrote them into the image, which put the
@@ -220,9 +224,7 @@ d-i preseed/early_command string \
     if [ -z "$W" ]; then \
         for n in /sys/class/net/*; do \
             [ -e "$n/phy80211" ] || continue; \
-            W=$(basename $n); \
-            debconf-set debconf/priority high; \
-            break; \
+            W=$(basename $n); break; \
         done; \
     fi; \
     { [ -n "$W" ] && debconf-set netcfg/choose_interface "$W"; } || true
@@ -331,6 +333,21 @@ cp "$STAGE/preseed.cfg" "$TREE/preseed.cfg"
 # and a ten second pause. Long enough for someone who booted the wrong machine
 # to stop it, short enough that a headless box comes up on its own.
 KCMD="auto=true priority=critical file=/cdrom/preseed.cfg"
+# The same install, with the question priority lowered enough that netcfg runs
+# its own wireless dialogue: scan, pick a network or type one, enter the key.
+#
+# A separate entry rather than a clever runtime decision, because the clever
+# version did not work. Lowering the priority from preseed/early_command looked
+# right and fires too early: early_command runs before the network drivers are
+# necessarily loaded, so the check for a wireless device finds nothing and the
+# branch never runs. The result was an install that reached the passphrase
+# dialog it could not answer -- twice.
+#
+# Choosing a menu entry costs nothing here. Installing over Wi-Fi means somebody
+# is standing at the machine to type the key anyway; the unattended entry stays
+# untouched at critical priority for the case where a cable is plugged in and
+# nobody is watching.
+KCMD_WIFI="auto=true priority=medium file=/cdrom/preseed.cfg"
 
 cat > "$TREE/isolinux/isolinux.cfg" <<'CFG'
 # D-I config version 2.0
@@ -352,6 +369,11 @@ label shunt
     kernel /install.amd/vmlinuz
     append initrd=/install.amd/initrd.gz $KCMD --- quiet
 
+label wifi
+    menu label Install Shunt over ^Wi-Fi  --  asks which network, then ERASES THE DISK
+    kernel /install.amd/vmlinuz
+    append initrd=/install.amd/initrd.gz $KCMD_WIFI --- quiet
+
 label manual
     menu label ^Manual Debian install  --  nothing erased without asking
     kernel /install.amd/vmlinuz
@@ -372,6 +394,11 @@ set timeout=10
 
 menuentry 'Install Shunt  --  ERASES THE INTERNAL DISK' {
     linux  /install.amd/vmlinuz $KCMD --- quiet
+    initrd /install.amd/initrd.gz
+}
+
+menuentry 'Install Shunt over Wi-Fi  --  asks which network, then ERASES THE DISK' {
+    linux  /install.amd/vmlinuz $KCMD_WIFI --- quiet
     initrd /install.amd/initrd.gz
 }
 
@@ -456,10 +483,12 @@ else
 fi
 echo "  It installs unattended after a ten second pause and ERASES that disk."
 echo
-echo "  A cable is optional. With one plugged into something that hands out"
-echo "  DHCP the install is unattended from end to end. With none -- the usual"
-echo "  case, because the cable that matters is still in the router -- the"
-echo "  installer stops once to ask which Wi-Fi network to join, offering the"
-echo "  ones it can see, and carries on by itself afterwards. It keeps that"
-echo "  network, so the box is reachable as soon as it boots and the ISP cable"
-echo "  can be moved across later by someone who is not at a monitor."
+echo "  With a cable plugged into something that hands out DHCP, let the menu"
+echo "  time out: the install runs end to end without a keyboard."
+echo
+echo "  Without a cable -- the usual case, because the cable that matters is"
+echo "  still in the router -- choose the second entry, 'Install Shunt over"
+echo "  Wi-Fi'. It stops once to let you pick a network and type the key, then"
+echo "  carries on by itself. The installed system keeps that network, so the"
+echo "  box is reachable as soon as it boots and the ISP cable can be moved"
+echo "  across later by someone who is not standing at a monitor."
