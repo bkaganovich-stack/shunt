@@ -13,6 +13,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ISO="" ; OUT="" ; USERNAME="shunt" ; SSHKEY="" ; PWHASH="" ; PASSWORD=""
 DISK="" ; APTMIRROR="deb.debian.org" ; DEBDIR="$ROOT/dist"
+WIFI_SSID="" ; WIFI_PSK="" ; WIFI_PSK_FILE=""
 
 die() { echo "mkiso: $*" >&2; exit 1; }
 
@@ -30,6 +31,20 @@ usage() {
   --password PASS       plaintext, hashed here (needs openssl/mkpasswd; not on macOS)
   --disk DEVICE         install target, e.g. /dev/sda. Default: first non-removable disk
   --apt-mirror HOST     Debian mirror for the install (default: deb.debian.org)
+  --wifi-ssid NAME      join this Wi-Fi network during the install and keep it
+  --wifi-psk-file FILE  read the passphrase from a file (preferred: it stays
+                        out of your shell history and out of any transcript)
+  --wifi-psk PASS       the passphrase directly
+
+Wi-Fi matters more than it looks. A gateway is installed onto a machine whose
+only Ethernet cable is still in the router doing the job -- so the usual advice
+to "plug it in first" asks for a cable that does not exist yet. With a network
+baked in, the box installs over the air, is reachable the moment it finishes,
+and the cable gets moved over once, at the end.
+
+Anyone holding the resulting image can read that passphrase out of it. That is
+the same image that already carries an authorized key, so treat it as what it
+is: a key to your house, on a stick.
 
 At least one of --ssh-key, --password-hash, --password is required: an image
 that ships a known password is worse than no image.
@@ -48,6 +63,9 @@ while [ $# -gt 0 ]; do
         --password) PASSWORD="$2"; shift 2;;
         --disk) DISK="$2"; shift 2;;
         --apt-mirror) APTMIRROR="$2"; shift 2;;
+        --wifi-ssid) WIFI_SSID="$2"; shift 2;;
+        --wifi-psk) WIFI_PSK="$2"; shift 2;;
+        --wifi-psk-file) WIFI_PSK_FILE="$2"; shift 2;;
         -h|--help) usage 0;;
         *) echo "mkiso: unknown option $1" >&2; usage 1;;
     esac
@@ -59,6 +77,25 @@ command -v xorriso >/dev/null || die "xorriso is not installed"
 # The boot records are replayed by reference to this path, so it has to be one
 # that still resolves from wherever xorriso is run.
 ISO=$(cd "$(dirname "$ISO")" && pwd)/$(basename "$ISO")
+
+# ── Wi-Fi ─────────────────────────────────────────────────────────────────────
+# Read from a file by preference so the passphrase never reaches a shell history
+# or a terminal transcript. Trailing newline stripped: a file written by an
+# editor has one, and d-i would treat it as part of the key.
+if [ -n "$WIFI_PSK_FILE" ]; then
+    [ -r "$WIFI_PSK_FILE" ] || die "cannot read $WIFI_PSK_FILE"
+    WIFI_PSK=$(tr -d '\r\n' < "$WIFI_PSK_FILE")
+fi
+if [ -n "$WIFI_SSID" ] || [ -n "$WIFI_PSK" ]; then
+    [ -n "$WIFI_SSID" ] || die "--wifi-psk needs --wifi-ssid"
+    [ -n "$WIFI_PSK" ] || die "--wifi-ssid needs --wifi-psk or --wifi-psk-file"
+    # d-i rejects anything outside this range with the same unhelpful dialog the
+    # operator would otherwise meet on the machine, with no keyboard to fix it.
+    n=${#WIFI_PSK}
+    [ "$n" -ge 8 ] && [ "$n" -le 63 ] || die "the Wi-Fi passphrase is $n characters; \
+WPA needs between 8 and 63"
+    case "$WIFI_SSID" in *'"'*) die "the SSID may not contain a double quote";; esac
+fi
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 if [ -n "$PASSWORD" ]; then
@@ -146,6 +183,17 @@ else
     { [ -n "$D" ] && debconf-set partman-auto/disk "$D"; } || true'
 fi
 
+# Built as a fragment, like the SSH one, and substituted with awk rather than
+# sed: a Wi-Fi passphrase may legitimately contain &, | and / -- every character
+# sed would treat as syntax in a replacement.
+WIFIFRAG=""
+if [ -n "$WIFI_SSID" ]; then
+    WIFIFRAG="d-i netcfg/wireless_essid string $WIFI_SSID
+d-i netcfg/wireless_essid_again string $WIFI_SSID
+d-i netcfg/wireless_security_type select wpa
+d-i netcfg/wireless_wpa string $WIFI_PSK"
+fi
+
 SSHFRAG=""
 if [ -n "$SSHKEY" ]; then
     SSHFRAG='    mkdir -p /target/home/@USERNAME@/.ssh; \
@@ -174,13 +222,18 @@ cat > "$STAGE/preseed.cfg" <<'PRESEED'
 d-i debian-installer/locale string en_US.UTF-8
 d-i keyboard-configuration/xkb-keymap select us
 
-### Network. `auto` picks the first interface that has a link -- and on a box
-### with Wi-Fi that can be the wireless one, at which point the installer stops
-### and asks for a WPA passphrase the preseed has no way to answer. (Observed:
-### an install that reached "Некорректная ключевая фраза" because the Ethernet
-### link had not come up yet.) So: wait for a wired carrier and name it
-### explicitly, the same way the disk is chosen above. If no wired link appears,
-### `auto` remains as the fallback and the operator gets the usual questions.
+### Network. A wired link is preferred and named explicitly -- `auto` picks the
+### first interface with a carrier, and on a box with Wi-Fi that can be the
+### wireless one, at which point the installer stops on a WPA passphrase nobody
+### is there to type.
+###
+### But a gateway is usually installed onto a machine whose only Ethernet cable
+### is still in the router, doing the job. "No wired link" is therefore the
+### NORMAL case, not a failure. With a network baked into the image the
+### installer joins it over the air, finishes with no cable at all, and is
+### reachable the moment it boots -- which is also the rescue channel for
+### everything that follows. The cable is then moved across once, at the end, by
+### someone who does not have to be standing next to a monitor.
 # early_command runs before the network drivers are necessarily loaded, so it
 # waits only when there is something to wait FOR: a wired interface that exists
 # but has not negotiated yet. With no wired interface visible at all it gives up
@@ -202,12 +255,19 @@ d-i preseed/early_command string \
         [ -z "$SEEN" ] && break; \
         sleep 1; \
     done; \
+    if [ -z "$W" ]; then \
+        for n in /sys/class/net/*; do \
+            [ -e "$n/phy80211" ] || continue; \
+            W=$(basename $n); break; \
+        done; \
+    fi; \
     { [ -n "$W" ] && debconf-set netcfg/choose_interface "$W"; } || true
 d-i netcfg/choose_interface select auto
 # Give a slow-negotiating port time before anything is decided about it.
 d-i netcfg/link_wait_timeout string 30
 d-i netcfg/link_detection_timeout string 30
 d-i netcfg/dhcp_timeout string 60
+@WIFIFRAG@
 d-i netcfg/get_hostname string shunt
 d-i netcfg/get_domain string local
 d-i netcfg/hostname string shunt
@@ -291,7 +351,7 @@ sed -i.bak \
     "$STAGE/preseed.cfg"
 # The three multi-line fragments go in with awk, which does not mind newlines
 # in the replacement the way sed does.
-for marker in DISKLINE SSHFRAG KEYONLYFRAG; do
+for marker in DISKLINE SSHFRAG KEYONLYFRAG WIFIFRAG; do
     eval "value=\$$marker"
     value="${value//@USERNAME@/$USERNAME}"
     printf '%s' "$value" > "$STAGE/frag"
@@ -419,6 +479,13 @@ echo "mkiso: $OUT"
 echo "       $(du -h "$OUT" | cut -f1), shunt $VER, administrator '$USERNAME'"
 [ -z "$SSHKEY" ] || echo "       ssh key: $(basename "$SSHKEY")"
 [ "$PWHASH" != '*' ] || echo "       console password locked; sudo needs no password"
+if [ -n "$WIFI_SSID" ]; then
+    # The network, never the key: this line ends up in terminals and pasted
+    # into chats, and the key is the one thing in the image worth protecting.
+    echo "       wi-fi: joins '$WIFI_SSID' during the install and keeps it"
+else
+    echo "       wi-fi: none baked in -- this image needs a wired cable to install"
+fi
 echo "       target disk: ${DISK:-first non-removable disk in the machine}"
 echo
 echo "  Write it to a USB stick. Identify the device first -- naming the wrong"
@@ -433,8 +500,15 @@ else
 fi
 echo "  It installs unattended after a ten second pause and ERASES that disk."
 echo
-echo "  Plug an Ethernet cable in BEFORE booting it, into a port that hands out"
-echo "  DHCP -- a LAN port of the existing router will do. The installer needs"
-echo "  the network for the package mirror, and it will not use Wi-Fi: with no"
-echo "  wired link it stops and asks for a WPA passphrase that nothing can"
-echo "  answer unattended. If you see that question, the cable is the problem."
+if [ -n "$WIFI_SSID" ]; then
+    echo "  No cable needed. It joins '$WIFI_SSID' to install, and stays on it"
+    echo "  afterwards -- so the box is reachable the moment it finishes, and the"
+    echo "  ISP cable gets moved over once, at the end, with nobody standing at a"
+    echo "  monitor. A wired link, if one happens to be plugged in, still wins."
+else
+    echo "  Plug an Ethernet cable in BEFORE booting it, into a port that hands out"
+    echo "  DHCP -- a LAN port of the existing router will do. The installer needs"
+    echo "  the network for the package mirror, and with no wired link and no"
+    echo "  --wifi-ssid it stops on a WPA passphrase nothing can answer. If you see"
+    echo "  that question, either plug a cable in or rebuild with --wifi-ssid."
+fi
