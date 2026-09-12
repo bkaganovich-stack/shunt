@@ -17,8 +17,15 @@
 #
 # Egress is left STOPPED on the target. One AdGuard session, two machines: the
 # live box is carrying a household's internet, and taking its session away is
-# not a thing to do as a side effect of copying a file. It is enabled at cutover,
-# after the old one is stopped -- see the checklist this prints at the end.
+# not a thing to do as a side effect of copying a file.
+#
+# Stopped is not enough on its own, which is worth knowing before trusting this:
+# egress_watchdog.py runs `systemctl restart adguardvpn` when it thinks egress
+# is down, and on the target it would think exactly that. So the automatic
+# callers are MASKED, not merely disabled -- the watchdog timer, its service,
+# the health monitor's auto-fix, and the FPTN egress unit. A disabled unit is
+# one `systemctl start` away from taking the household offline; a masked one
+# refuses. The checklist at the end unmasks them in the right order.
 set -euo pipefail
 
 SRC="" ; DST="" ; KEY="" ; DRY=0
@@ -144,6 +151,16 @@ dst 'getent passwd agvpn >/dev/null || sudo adduser --system --group --home /var
 # units are masked on the live box and must be masked here for the same reason.
 dst 'sudo systemctl mask fptn-client.service hostapd.service >/dev/null 2>&1 || true'
 
+# Everything that could bring egress up by itself, stopped and masked BEFORE the
+# credentials land. The watchdog is the one that matters: it restarts adguardvpn
+# whenever egress looks down, and on a box that is not the gateway yet it always
+# will. Masked rather than disabled, because disabled still starts on request.
+echo "shunt-clone: masking the paths that would start egress by themselves"
+dst 'sudo systemctl disable --now shunt-agwatch.timer shunt-agwatch.service \
+        shunt-health.service shunt-fptn-egress.service >/dev/null 2>&1 || true
+     sudo systemctl mask shunt-agwatch.timer shunt-agwatch.service \
+        shunt-health.service shunt-fptn-egress.service >/dev/null 2>&1 || true'
+
 # Streamed host to host. Nothing touches this machine's disk, which matters
 # because two of these files are credentials.
 echo "shunt-clone: copying software, identity and settings"
@@ -164,11 +181,20 @@ dst 'sudo test -s /var/lib/agvpn/.local/share/adguardvpn-cli/adguardvpn-cli.conf
     || die "AdGuard session did not arrive"
 
 dst 'sudo systemctl daemon-reload'
-# Egress stays off. Deliberately, and this is the whole reason the script ends
-# with a checklist instead of a restart: the AdGuard session it just copied is
-# in use on the other machine right now.
-dst 'sudo systemctl disable --now adguardvpn.service shunt-fptn-egress.service >/dev/null 2>&1 || true'
+# adguardvpn.service arrived with the copy but nothing enabled it: the
+# multi-user.target.wants symlink is deliberately not in the file list, so it
+# cannot start at boot. It is not masked because its unit file now lives in
+# /etc/systemd/system and systemd refuses to mask over a real file there -- the
+# masked callers above are what actually holds the line.
+dst 'sudo systemctl disable --now adguardvpn.service >/dev/null 2>&1 || true'
 dst 'sudo systemctl restart shunt-web.service || true'
+
+# Said as a measurement rather than an assumption, because the whole point of
+# the masking above is that it holds.
+echo "shunt-clone: egress on the target is $(dst 'systemctl is-active adguardvpn.service 2>/dev/null || true') / $(dst 'systemctl is-enabled adguardvpn.service 2>/dev/null || true')"
+[ "$(dst 'systemctl is-active adguardvpn.service 2>/dev/null || true')" = "active" ] \
+    && die "adguardvpn came up on the target -- stop it before the live box notices"
+true
 
 echo
 echo "shunt-clone: done. $DST now holds the household's settings and both credentials."
@@ -180,8 +206,12 @@ echo "  Egress is stopped and disabled on the target. One AdGuard session cannot
 echo "  be connected from two machines, and the one that is connected is carrying"
 echo "  the house. At cutover, in this order:"
 echo
-echo "    1. move the ISP cable and the LAN adapter to the new box"
+echo "    1. move the ISP cable and the USB LAN adapter to the new box"
 echo "    2. on the OLD box:  sudo systemctl disable --now adguardvpn shunt-fptn-egress"
 echo "    3. on the NEW box:  sudo shunt-setup            # names ITS interfaces"
-echo "    4. on the NEW box:  sudo systemctl enable --now adguardvpn shunt-fptn-egress"
-echo "    5. open the web interface and check the dashboard measures, not assumes"
+echo "    4. on the NEW box:  sudo systemctl unmask shunt-agwatch.timer \\"
+echo "                            shunt-agwatch.service shunt-health.service \\"
+echo "                            shunt-fptn-egress.service"
+echo "    5. on the NEW box:  sudo systemctl enable --now adguardvpn \\"
+echo "                            shunt-fptn-egress shunt-health shunt-agwatch.timer"
+echo "    6. open the web interface and check the dashboard measures, not assumes"
