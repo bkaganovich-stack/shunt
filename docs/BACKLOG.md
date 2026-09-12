@@ -359,6 +359,36 @@ Debian package indices and a resolver honest about alternatives and virtual
 packages, and the build host here is a Mac with no apt. Worth doing, and worth
 doing only once it can be tested end to end on the second mini-PC.
 
+## 9. The running gateway is not the package
+
+Found while working out what a second box would have to be given to become a
+copy of the first. `dpkg -V shunt` is clean -- nothing packaged has been edited
+-- but seven files that the gateway needs are owned by no package at all:
+
+    /usr/local/bin/adguardvpn-cli                     the VPN client itself
+    /etc/systemd/system/adguardvpn.service            and its unit
+    /etc/systemd/system/shunt-nic-offload.service     the offload watchdog
+    /etc/systemd/system/shunt-offload-watch.service   .. and its companion
+    /etc/systemd/system/shunt-offload-watch.timer
+    /usr/lib/systemd/system/fptn-resolv-heal.service  the resolv.conf repair
+    /usr/sbin/fptn-resolv-heal
+
+plus two masks (`fptn-client.service`, `hostapd.service`) that Shunt depends on
+being in place, and which nothing records.
+
+Two of those units exist because of an incident each. The offload watchdog is
+there because the r8169 driver turns segmentation offload off behind our backs;
+the resolv-heal unit is there because FPTN rewrites /etc/resolv.conf inside its
+namespace and occasionally outside it. Neither reason is written down anywhere a
+reinstall would find, and a reinstall would produce a gateway missing both.
+
+`packaging/shunt-clone.sh` copies them, which makes the second box correct and
+leaves the underlying problem exactly where it was. The fix is to fold the five
+shunt-owned files into the package -- units into `systemd/`, the script into
+`src/scripts/`, the masks into the postinst -- and to install AdGuard and FPTN
+from a documented step rather than from memory. Then a fresh install is the
+gateway, and cloning is only about credentials and the household's settings.
+
 ## Earlier items, unchanged
 
 - **Sources**: the manifest format and registry ship as of 2.2.0, reading only.
