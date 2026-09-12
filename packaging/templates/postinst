@@ -90,20 +90,6 @@ case "$1" in
                 --shell /usr/sbin/nologin sing-box >/dev/null 2>&1 || true
     fi
 
-    # An admin-placed copy in /etc shadows the packaged unit in /lib. Only
-    # byte-identical copies are removed; an edited one is left and reported.
-    shadowed=""
-    for u in $UNITS; do
-        old="/etc/systemd/system/$u"; new="/lib/systemd/system/$u"
-        [ -f "$old" ] && [ -f "$new" ] || continue
-        if cmp -s "$old" "$new"; then rm -f "$old"; else shadowed="$shadowed $u"; fi
-    done
-    if [ -n "$shadowed" ]; then
-        echo "shunt: locally modified units in /etc/systemd/system take" >&2
-        echo "  precedence over the packaged copies and were left untouched:" >&2
-        for u in $shadowed; do echo "    $u" >&2; done
-    fi
-
     # The offload units were hand-placed in /etc before the package carried
     # them, and they point at /usr/local/sbin. They are not "locally modified"
     # in any sense worth preserving -- they are this package's own files,
@@ -131,6 +117,20 @@ case "$1" in
                  "/usr/sbin/$b and was left in place; nothing runs it now" >&2
         fi
     done
+
+    # An admin-placed copy in /etc shadows the packaged unit in /lib. Only
+    # byte-identical copies are removed; an edited one is left and reported.
+    shadowed=""
+    for u in $UNITS; do
+        old="/etc/systemd/system/$u"; new="/lib/systemd/system/$u"
+        [ -f "$old" ] && [ -f "$new" ] || continue
+        if cmp -s "$old" "$new"; then rm -f "$old"; else shadowed="$shadowed $u"; fi
+    done
+    if [ -n "$shadowed" ]; then
+        echo "shunt: locally modified units in /etc/systemd/system take" >&2
+        echo "  precedence over the packaged copies and were left untouched:" >&2
+        for u in $shadowed; do echo "    $u" >&2; done
+    fi
 
     # Masked rather than disabled: disabled still starts on request, and the
     # request here would come from a person debugging at 2am who reasonably
