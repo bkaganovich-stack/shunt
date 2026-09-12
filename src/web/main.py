@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.8.0"
+VERSION = "2.9.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -929,10 +929,27 @@ def apply_config(settings: dict, reason: str = "config_change",
 def _read_singbox() -> dict:
     return json.loads(SINGBOX_CFG.read_text())
 
+def port_is_listening(port: int) -> bool:
+    """Something is accepting connections on this port, right now."""
+    try:
+        out = subprocess.run(["ss", "-tlnH", "sport", "=", ":%d" % port],
+                             capture_output=True, text=True, timeout=5).stdout
+        return bool(out.strip())
+    except (OSError, subprocess.SubprocessError):
+        return False
+
 def _proxy_state() -> dict:
-    """Live SOCKS inbound state, read from the sing-box config (the source of truth)."""
+    """
+    What the SOCKS inbound is configured to be, and whether it is actually up.
+
+    The config file is the source of truth for the SETTINGS -- port, auth, which
+    address it binds. It is not evidence that anything is listening: if sing-box
+    refused the config the page would still report the proxy enabled. Those are
+    two different facts and they are now two different fields.
+    """
     st = {"enabled": False, "port": 1080, "listen": "0.0.0.0",
-          "auth_enabled": False, "username": "", "restrict_to_home": False}
+          "auth_enabled": False, "username": "", "restrict_to_home": False,
+          "listening": False}
     try:
         cfg = _read_singbox()
     except Exception:
@@ -945,6 +962,7 @@ def _proxy_state() -> dict:
                        "listen": listen, "auth_enabled": bool(users),
                        "username": (users[0].get("username", "") if users else ""),
                        "restrict_to_home": listen not in ("0.0.0.0", "::", "")})
+            st["listening"] = port_is_listening(st["port"])
             break
     return st
 
@@ -1798,19 +1816,34 @@ def get_xray_core_version() -> str:
     return get_xray_core_version._cache
 
 def get_xray_state() -> str:
+    """
+    The headline indicator, and it now reports a measurement.
+
+    It used to say "connected" whenever the service was running and a key was
+    configured -- which is a statement about the configuration file, not about
+    the network. During the September outage it stayed green for a day while
+    nothing resolved and nothing left the house. A dashboard that cannot go red
+    is decoration.
+    """
     r = subprocess.run(["systemctl", "is-active", "shunt"], capture_output=True, text=True)
     if r.stdout.strip() != "active":
         fire_alert("vpn_down", "shunt service not active")
         return "stopped"
     s = load_settings()
-    if s.get("active_vpn_id") or s.get("vpn_key"):
-        return "connected"
-    # AdGuard VPN can be the egress instead of a key-based server. Without this
-    # branch the dashboard reports "no key" while every packet is in fact being
-    # tunnelled, which reads as if the gateway were wide open.
-    if (s.get("adguard") or {}).get("enabled"):
-        return "connected" if _adguard_status().get("connected") else "error"
-    return "no_key"
+    # AdGuard VPN can be the egress instead of a key-based server; without
+    # counting it the dashboard reports "no key" while every packet is in fact
+    # being tunnelled, which reads as if the gateway were wide open.
+    has_egress = bool(s.get("active_vpn_id") or s.get("vpn_key")
+                      or (s.get("adguard") or {}).get("enabled"))
+    if not has_egress:
+        return "no_key"
+    # One consultation of the measurement, whichever egress is configured.
+    # Asking twice in two branches is how the stale case ended up reported as
+    # an error in one of them and as "not measured" in the other.
+    m = _measured_path()
+    if not m.get("known"):
+        return "unmeasured"
+    return "connected" if m.get("healthy") else "error"
 
 def parse_access_log_line(line: str) -> Optional[dict]:
     ts_m = re.match(r"(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})", line)
@@ -3803,18 +3836,57 @@ async def set_proxy(req: ProxyConfigReq, u: str = Depends(auth_dep)):
 # ── AdGuard VPN egress endpoints ──────────────────────────────────────────────
 _AGVPN = ["runuser", "-u", "agvpn", "--", "env", "HOME=/var/lib/agvpn", "adguardvpn-cli"]
 
-def _adguard_status() -> dict:
-    # The systemd-managed daemon isn't visible to a fresh `adguardvpn-cli status`
-    # (separate session), so derive connectivity from the service + SOCKS listener.
-    st = {"connected": False, "location": None}
+MEASUREMENT_STALE_SEC = 180
+
+def _measured_path() -> dict:
+    """
+    The ladder's last verdict, with its age.
+
+    The health monitor walks it every sixty seconds and writes it down; reading
+    that costs nothing and means every part of the interface answers from the
+    same measurement instead of each inventing its own opinion. An absent or
+    stale file is reported as "not measured", never as good news.
+    """
     try:
-        svc = subprocess.run(["systemctl", "is-active", "adguardvpn"],
-                             capture_output=True, text=True).stdout.strip()
+        d = json.loads((LOGS / "diagnosis.json").read_text())
+    except (OSError, ValueError):
+        return {"known": False}
+    age = time.time() - d.get("ts", 0)
+    if age > MEASUREMENT_STALE_SEC:
+        return {"known": False, "stale": True, "age": int(age)}
+    return {"known": True, "age": int(age), "healthy": bool(d.get("healthy")),
+            "first_unmet": d.get("first_unmet"), "summary": d.get("summary", ""),
+            "owner": d.get("owner")}
+
+def _adguard_status() -> dict:
+    """
+    Whether the tunnel is carrying, not whether its process is running.
+
+    This used to be `service is active AND something listens on 1081`, and both
+    halves were true throughout the September outage while nothing moved -- the
+    watchdog's own comment says so: "the SOCKS listener can stay UP while the
+    tunnel is dead". The interface showed a green light at a household with no
+    internet. The service state is still reported, as a fact about the service;
+    "connected" now means the egress was measured carrying traffic.
+    """
+    st = {"connected": False, "location": None, "service": "unknown",
+          "listener": False, "measured": False}
+    try:
+        st["service"] = subprocess.run(["systemctl", "is-active", "adguardvpn"],
+                                       capture_output=True, text=True).stdout.strip()
         lst = subprocess.run(["ss", "-tlnH", "sport", "=", ":1081"],
                              capture_output=True, text=True).stdout
-        st["connected"] = (svc == "active" and bool(lst.strip()))
+        st["listener"] = bool(lst.strip())
     except Exception:
         pass
+    m = _measured_path()
+    if m.get("known"):
+        st["measured"] = True
+        # A break anywhere in the chain means the tunnel is not carrying. Whose
+        # fault it is belongs in the summary, not in this boolean.
+        st["connected"] = bool(m.get("healthy"))
+        st["why"] = m.get("summary")
+        st["measured_age"] = m.get("age")
     return st
 
 def _set_adguard_location(loc: str) -> bool:

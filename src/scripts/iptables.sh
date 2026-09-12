@@ -186,11 +186,32 @@ iptables -t mangle -A XRAY_PREROUTING -d 240.0.0.0/4   -j RETURN
 # box then behaves as if the internet were unreachable while tcpdump shows the
 # replies arriving, which is as confusing as it sounds. Providers on RFC1918
 # WAN addresses never showed it, because 10.0.0.0/8 below already covered them.
-iptables -t mangle -A XRAY_PREROUTING -d 100.64.0.0/10 -j RETURN
-iptables -t mangle -A XRAY_PREROUTING -d 127.0.0.0/8   -j RETURN
-iptables -t mangle -A XRAY_PREROUTING -d 10.0.0.0/8    -j RETURN
-iptables -t mangle -A XRAY_PREROUTING -d 172.16.0.0/12 -j RETURN
-iptables -t mangle -A XRAY_PREROUTING -d 192.168.0.0/16 -j RETURN
+#
+# These use decline_dest, not a bare RETURN, for a reason worth stating plainly:
+# there are TWO transparent proxies on this box. xray intercepts here, in
+# netfilter, before the routing decision; sing-box runs a tun with auto_route
+# whose ip rules take whatever survives that decision. So "xray declines this"
+# and "this is not proxied" were never the same sentence -- a bare RETURN hands
+# the packet to the other proxy instead of to the kernel.
+#
+# Measured, not assumed: in one day sing-box's tun took 1124 connections that
+# xray had declined and sent 1201 of them into the tunnel, including ~324 to
+# port 5228 -- the Google FCM traffic excepted a few lines below precisely so
+# that it would NOT be proxied. The exception was being undone by the other
+# proxy the whole time. The same ambiguity is what let ICMP fall into a SOCKS
+# outbound that cannot carry it.
+#
+# The bypass mark closes it: ip rule 40 sends marked packets to the main table,
+# past both interception paths, so a decline is a decline.
+decline_dest() {
+    iptables -t mangle -A XRAY_PREROUTING -d "$1" -j MARK --set-mark $XRAY_MARK
+    iptables -t mangle -A XRAY_PREROUTING -d "$1" -j RETURN
+}
+decline_dest 100.64.0.0/10
+decline_dest 127.0.0.0/8
+decline_dest 10.0.0.0/8
+decline_dest 172.16.0.0/12
+decline_dest 192.168.0.0/16
 # Skip DHCP
 iptables -t mangle -A XRAY_PREROUTING -d 255.255.255.255 -j RETURN
 # Skip DNS port 53 — handled separately by nat PREROUTING REDIRECT to dnsmasq.
@@ -217,6 +238,7 @@ iptables -t mangle -A XRAY_PREROUTING -p icmp -j RETURN
 # the tunnel to act as a middleman and drop the connection every ~2 minutes, causing
 # "Connecting to Home" flashes on Google displays. Direct kernel forwarding + NAT is
 # much more stable. MASQUERADE below ensures the reply path is symmetric.
+iptables -t mangle -A XRAY_PREROUTING -p tcp --dport 5228 -j MARK --set-mark $XRAY_MARK
 iptables -t mangle -A XRAY_PREROUTING -p tcp --dport 5228 -j RETURN
 # TPROXY TCP and UDP to xray
 iptables -t mangle -A XRAY_PREROUTING -p tcp -j TPROXY \

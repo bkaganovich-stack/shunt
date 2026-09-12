@@ -721,3 +721,60 @@ class TestRecentWanChange:
         monkeypatch.setattr(m, "LOGS", tmp_path)
         (tmp_path / "wan-changes.json").write_text("{not json")
         assert m._recent_wan_change() is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: the headline indicator reports a measurement, not a config file
+# ─────────────────────────────────────────────────────────────────────────────
+class TestMeasuredState:
+    def _diag(self, tmp_path, monkeypatch, **kw):
+        import json as _j, time as _t
+        monkeypatch.setattr(m, "LOGS", tmp_path)
+        d = {"ts": int(_t.time()), "healthy": True, "first_unmet": None,
+             "summary": "всё в порядке", "owner": None}
+        d.update(kw)
+        (tmp_path / "diagnosis.json").write_text(_j.dumps(d))
+        return d
+
+    def test_a_healthy_measurement_reads_connected(self, tmp_path, monkeypatch):
+        self._diag(tmp_path, monkeypatch)
+        assert m._measured_path()["healthy"] is True
+
+    def test_no_measurement_is_not_good_news(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m, "LOGS", tmp_path)
+        assert m._measured_path() == {"known": False}
+
+    def test_a_stale_measurement_is_not_good_news_either(self, tmp_path, monkeypatch):
+        import json as _j, time as _t
+        monkeypatch.setattr(m, "LOGS", tmp_path)
+        (tmp_path / "diagnosis.json").write_text(_j.dumps(
+            {"ts": int(_t.time()) - 3600, "healthy": True}))
+        out = m._measured_path()
+        assert out["known"] is False and out["stale"] is True
+
+    def test_a_damaged_file_is_not_good_news_either(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m, "LOGS", tmp_path)
+        (tmp_path / "diagnosis.json").write_text("{not json")
+        assert m._measured_path()["known"] is False
+
+    def test_the_tunnel_is_connected_only_when_it_carries(self, tmp_path, monkeypatch):
+        # The service was active and 1081 was listening through the whole
+        # September outage. Both facts are still reported; neither makes the
+        # light green any more.
+        self._diag(tmp_path, monkeypatch, healthy=False, first_unmet="egress",
+                   summary="Туннель несёт трафик — не прошло")
+        monkeypatch.setattr(m.subprocess, "run",
+                            lambda *a, **k: type("R", (), {"stdout": "active"})())
+        st = m._adguard_status()
+        assert st["connected"] is False
+        assert st["measured"] is True
+        assert "не прошло" in st["why"]
+
+    def test_a_break_above_the_tunnel_is_also_not_connected(self, tmp_path, monkeypatch):
+        # Whose fault it is belongs in the summary, not in the boolean: with no
+        # cable the tunnel is not carrying either.
+        self._diag(tmp_path, monkeypatch, healthy=False, first_unmet="cable",
+                   summary="Кабель в порт WAN — несущей нет", owner="снаружи")
+        monkeypatch.setattr(m.subprocess, "run",
+                            lambda *a, **k: type("R", (), {"stdout": "active"})())
+        assert m._adguard_status()["connected"] is False

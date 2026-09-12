@@ -288,6 +288,16 @@ Still open on the DNS question, and worth measuring before acting:
   end to end; distribution is by file for now.
 - **Multi-subscription egress registry.** Parked: blocked on subscriptions
   worth trusting rather than on anything technical.
+- **The interface audit is done, and it found the headline indicator.** The
+  dashboard said "Подключено" whenever the service was running and a key was
+  configured — a statement about a configuration file, not about the network.
+  It stayed green for a day in September while nothing resolved and nothing
+  left the house. A dashboard that cannot go red is decoration. It now reports
+  the ladder's last measurement, with a fourth state for "not measured" so a
+  stale reading is never mistaken for good news. AdGuard's "connected" was the
+  same defect one layer down: service active plus a listening socket, both true
+  throughout the outage, exactly as the watchdog's own comment warned. The SOCKS
+  proxy page now separates "configured" from "listening" for the same reason.
 - **A note that warns beats a note that informs, and it should not.** The lease
   note shipped in 2.4.0 said a short lease meant every renewal might move the
   address. The box's own journal said three hundred renewals and no change, and
@@ -296,10 +306,21 @@ Still open on the DNS question, and worth measuring before acting:
   he was right. The rule this leaves behind: **if the gateway can count it, the
   interface must report the count, not the possibility.** Worth auditing the
   rest of the interface against that; this was unlikely to be the only one.
-- **Two transparent proxies on one box.** xray intercepts with TPROXY; sing-box
-  runs a tun with `auto_route` and its own `final: proxy`. Both capture LAN
-  traffic, and which one gets a given packet is not written down anywhere. The
-  ICMP hole above is the first visible cost of that ambiguity.
+- **Two transparent proxies on one box — written down in 2.9.0.** See
+  `docs/DATAPATH.md`. The division turned out to be simple and the consequence
+  of not stating it was not: a bare `RETURN` from the interception chain hands
+  the packet to the OTHER proxy rather than to the kernel, so "xray declines
+  this" never meant "this is not proxied". Measured over a day: sing-box's tun
+  took 1124 declined connections and tunnelled 1201 of them, about 324 of those
+  being the Google FCM traffic that `iptables.sh` excepts on purpose. That
+  exception had been undone the whole time. Every exception now carries the
+  bypass mark.
+
+  Left open deliberately: sing-box's `auto_route` is now close to vestigial —
+  zero connections in the four minutes after the change, against fifty an hour
+  before. Four minutes is not a day, so the tun stays until the `tun0` counter
+  has been flat over normal use, at which point the ambiguity can be removed at
+  its source instead of covered by marks.
 - **ufw is enabled at boot and inactive.** A Debian default, not ours: the
   unit runs, `ufw` itself is off, so it writes nothing today. It is a loaded
   gun rather than a bug — `ufw enable` would insert its own chains and its

@@ -2006,6 +2006,9 @@ const STATE_HTML = {
   connecting: '<span class="dot dot-yellow"></span> Подключение…',
   error:      '<span class="dot dot-red"></span> Ошибка',
   stopped:    '<span class="dot dot-gray"></span> Остановлено',
+  // Не «подключено» и не «ошибка»: сторож давно не отчитывался, и честный
+  // ответ — что состояние неизвестно, а не что всё хорошо.
+  unmeasured: '<span class="dot dot-gray"></span> Не измерено',
   no_key:     '<span class="dot dot-gray"></span> Ключ не задан',
 };
 
