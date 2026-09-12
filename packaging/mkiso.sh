@@ -104,6 +104,12 @@ chmod -R u+w "$TREE"
 [ -f "$TREE/install.amd/vmlinuz" ] || die "no install.amd/vmlinuz -- is this a Debian amd64 netinst ISO?"
 
 # ── Payload ───────────────────────────────────────────────────────────────────
+# Emptied first, not merged into. The source image is usually a stock netinst,
+# but it can equally be an installer this script built earlier -- which already
+# carries a /shunt directory with an older pair of .deb files. The preseed
+# installs /cdrom/shunt/*.deb, so a merge would ship two versions of the same
+# package in one image and let apt pick between them.
+rm -rf "$TREE/shunt"
 mkdir -p "$TREE/shunt"
 cp "${MAIN[0]}" "${CORE[0]}" "$TREE/shunt/"
 [ -z "$SSHKEY" ] || cp "$SSHKEY" "$TREE/shunt/authorized_keys"
