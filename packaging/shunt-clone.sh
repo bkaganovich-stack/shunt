@@ -71,16 +71,24 @@ dst() { ssh "${SSHOPTS[@]}" "$DST" "$@"; }
 # Not carried by the shunt package and not on the installer image. Every one of
 # these was placed by hand on the live gateway, which is the finding that made
 # this script longer than it looked: a fresh install is NOT the gateway.
+# From 2.10.0 the package carries seven of these itself, so on a source and
+# target that are both current only the two third-party binaries and the AdGuard
+# unit actually need to travel. The rest are listed because a source running an
+# older build still keeps them by hand, and because a list that only works
+# between two up-to-date machines is not much of a recovery tool. Anything
+# missing on the source is skipped and named rather than aborting the run.
 SOFTWARE=(
     /usr/local/bin/adguardvpn-cli
     /etc/systemd/system/adguardvpn.service
+    /usr/bin/fptn-client-cli
+    /lib/systemd/system/fptn-client.service
+    /usr/local/sbin/shunt-nic-offload
+    /usr/local/sbin/shunt-offload-watch
     /etc/systemd/system/shunt-nic-offload.service
     /etc/systemd/system/shunt-offload-watch.service
     /etc/systemd/system/shunt-offload-watch.timer
     /usr/lib/systemd/system/fptn-resolv-heal.service
     /usr/sbin/fptn-resolv-heal
-    /usr/bin/fptn-client-cli
-    /lib/systemd/system/fptn-client.service
 )
 # Credentials. These cannot be rebuilt from anything in the repository.
 IDENTITY=(
@@ -164,10 +172,20 @@ dst 'sudo systemctl disable --now shunt-agwatch.timer shunt-agwatch.service \
 # Streamed host to host. Nothing touches this machine's disk, which matters
 # because two of these files are credentials.
 echo "shunt-clone: copying software, identity and settings"
-# Leading slashes are stripped here rather than letting tar strip them and warn,
-# so that anything on tar's stderr is a real problem and is allowed to be seen.
-src "sudo tar -C / -cf - ${AGEXCL[*]} ${SOFTWARE[*]#/} ${IDENTITY[*]#/} ${SETTINGS[*]#/}" \
-  | dst 'sudo tar -C / -xpf -'
+# Asked of the source rather than assumed, because half of SOFTWARE is absent
+# on a gateway new enough to get it from the package -- and tar treats one
+# missing path as a reason to fail the whole archive.
+WANTED=("${SOFTWARE[@]}" "${IDENTITY[@]}" "${SETTINGS[@]}")
+PRESENT=$(src "for f in ${WANTED[*]}; do [ -e \"\$f\" ] && printf '%s ' \"\${f#/}\"; done")
+[ -n "$PRESENT" ] || die "none of the expected files exist on $SRC"
+for f in "${WANTED[@]}"; do
+    case " $PRESENT " in *" ${f#/} "*) ;; *) echo "  not on the source, skipped: $f";; esac
+done
+
+# Leading slashes are stripped above rather than letting tar strip them and
+# warn, so that anything on tar's stderr is a real problem and is allowed to
+# be seen.
+src "sudo tar -C / -cf - ${AGEXCL[*]} $PRESENT" | dst 'sudo tar -C / -xpf -'
 
 # ── Verify ────────────────────────────────────────────────────────────────────
 # A copy that silently truncated is the failure worth catching, and settings.json

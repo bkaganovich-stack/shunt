@@ -1,0 +1,12 @@
+[Unit]
+Description=Shunt — enable SG/TSO on the WAN port
+After=network-online.target shunt.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/shunt-nic-offload
+
+[Install]
+WantedBy=multi-user.target

@@ -6,7 +6,19 @@ BASE=/opt/shunt
 OLD=/opt/xray-proxy
 UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.service
        shunt-agwatch.service shunt-agwatch.timer shunt-mgmt-ap.service
-       shunt-fptn-egress.service shunt-geoupdate.timer"
+       shunt-fptn-egress.service shunt-geoupdate.timer
+       shunt-nic-offload.service shunt-offload-watch.service
+       shunt-offload-watch.timer fptn-resolv-heal.service"
+
+# Units the package must keep out of the way. Both exist for the same reason:
+# Shunt runs the same software itself, differently. hostapd is started by
+# shunt-mgmt-ap.service against a generated configuration, and the distribution
+# unit would race it for the radio; fptn-client runs inside a network namespace
+# under shunt-fptn-egress.service, and the distribution unit would put the
+# tunnel on the host instead, where it rewrites the gateway's own resolv.conf.
+# Masked on the live gateway since September and recorded nowhere until now --
+# a reinstall would have had both of them enabled and fighting.
+CONFLICTING="hostapd.service fptn-client.service"
 
 # Units this package used to ship and no longer does. They are disabled and
 # removed on every configure, so a box that installed 2.0.0 stops carrying an
@@ -91,6 +103,45 @@ case "$1" in
         echo "  precedence over the packaged copies and were left untouched:" >&2
         for u in $shadowed; do echo "    $u" >&2; done
     fi
+
+    # The offload units were hand-placed in /etc before the package carried
+    # them, and they point at /usr/local/sbin. They are not "locally modified"
+    # in any sense worth preserving -- they are this package's own files,
+    # written by hand in the only place available at the time -- so the test is
+    # what they execute rather than whether they match byte for byte. An /etc
+    # copy naming /usr/local/sbin is the predecessor of the unit now in /lib,
+    # and leaving it would shadow the packaged one forever.
+    for u in shunt-nic-offload.service shunt-offload-watch.service \
+             shunt-offload-watch.timer; do
+        old="/etc/systemd/system/$u"
+        [ -f "$old" ] || continue
+        grep -q '/usr/local/sbin/' "$old" 2>/dev/null || continue
+        rm -f "$old"
+        echo "shunt: replaced hand-placed $u with the packaged copy"
+    done
+    # Their executables, likewise -- but only when what the package installed is
+    # byte for byte what was there, so an administrator who edited a script in
+    # /usr/local/sbin keeps it and is told that it now wins over nothing.
+    for b in shunt-nic-offload shunt-offload-watch; do
+        [ -f "/usr/local/sbin/$b" ] && [ -f "/usr/sbin/$b" ] || continue
+        if cmp -s "/usr/local/sbin/$b" "/usr/sbin/$b"; then
+            rm -f "/usr/local/sbin/$b"
+        else
+            echo "shunt: /usr/local/sbin/$b differs from the packaged" \
+                 "/usr/sbin/$b and was left in place; nothing runs it now" >&2
+        fi
+    done
+
+    # Masked rather than disabled: disabled still starts on request, and the
+    # request here would come from a person debugging at 2am who reasonably
+    # assumes hostapd.service is how you start hostapd.
+    for u in $CONFLICTING; do
+        [ -e "/lib/systemd/system/$u" ] || [ -e "/usr/lib/systemd/system/$u" ] || continue
+        [ -L "/etc/systemd/system/$u" ] && continue
+        [ -f "/etc/systemd/system/$u" ] && continue
+        systemctl mask "$u" >/dev/null 2>&1 \
+            && echo "shunt: masked $u — Shunt runs it itself, differently"
+    done
 
     if [ "$MIGRATE" = 0 ] && [ ! -f "$BASE/config/network.conf" ]; then
         /usr/sbin/shunt-setup --detect-only || \

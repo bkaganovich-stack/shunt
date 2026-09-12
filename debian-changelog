@@ -1,3 +1,38 @@
+shunt (2.10.0) stable; urgency=medium
+
+  * The package now contains the gateway. Ten files the running box needed
+    belonged to no package at all -- both NIC-offload scripts and their three
+    units, the FPTN resolv.conf repair and its unit, and the two third-party
+    egress binaries with the AdGuard unit that names one of them. dpkg -V was
+    clean throughout, because nothing packaged had been edited; the files were
+    simply in no manifest, so nothing looked for them. A reinstall produced a
+    gateway that looked identical and was not: no segmentation offload on the
+    WAN port, no watchdog to withdraw it after a transmit fault, no repair for
+    the resolv.conf an interrupted FPTN session leaves behind.
+  * Seven of the ten are now installed by this package. shunt-nic-offload and
+    shunt-offload-watch move from /usr/local/sbin, which is the administrator's
+    to fill and not a package's, to /usr/sbin; their units move with them. The
+    hand-placed copies in /etc/systemd/system are removed on upgrade when they
+    name the old path, because leaving them would shadow the packaged units
+    forever.
+  * hostapd.service and fptn-client.service are masked, and unmasked again when
+    the package is removed. Shunt runs both itself, differently: hostapd
+    against a generated configuration under shunt-mgmt-ap.service, and
+    fptn-client inside a network namespace so that the tunnel cannot rewrite
+    the gateway's own resolv.conf. Both have been masked on the live gateway
+    since September and recorded nowhere.
+  * shunt-nic-offload now leaves wireless interfaces alone. It was written for
+    the inline gateway's WAN port and placed by hand on exactly that machine;
+    once a package installs it, it also lands on a box in loop topology where
+    WAN_IF is empty and the fallback names the Wi-Fi card. ethtool refuses
+    there, so the unit would have failed on every boot of every such box.
+  * The remaining three are documented in docs/EGRESS.md rather than packaged:
+    two third-party binaries with their own licences and a token belonging to
+    one household. Their versions and hashes are written down; their download
+    sources are not, which the file says plainly.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sat, 12 Sep 2026 21:40:00 +0300
+
 shunt (2.3.0) stable; urgency=medium
 
   * Writing DNS settings no longer deletes the DHCP server. apply_topology.py

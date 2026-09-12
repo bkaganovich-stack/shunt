@@ -1,8 +1,22 @@
 #!/bin/sh
 set -e
+# hostapd and fptn-client were masked by our postinst because Shunt ran both
+# itself. Once it no longer does, the reason is gone, and a machine left with
+# hostapd permanently masked by a package that is no longer installed is a trap
+# for whoever next tries to start it.
+unmask_conflicting() {
+    for u in hostapd.service fptn-client.service; do
+        [ "$(readlink -f "/etc/systemd/system/$u" 2>/dev/null)" = /dev/null ] || continue
+        systemctl unmask "$u" >/dev/null 2>&1 || true
+    done
+}
+
 case "$1" in
-  remove) systemctl daemon-reload >/dev/null 2>&1 || true ;;
+  remove)
+    unmask_conflicting
+    systemctl daemon-reload >/dev/null 2>&1 || true ;;
   purge)
+    unmask_conflicting
     systemctl daemon-reload >/dev/null 2>&1 || true
     # Configuration, database and logs are the administrator's data and are
     # only destroyed on an explicit purge.

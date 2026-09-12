@@ -154,6 +154,7 @@ from [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russi
 ```
 ./packaging/build.sh          # build the packages; needs only dpkg-dev
 ./packaging/mkiso.sh --help   # build an installer image; needs only xorriso
+./packaging/shunt-clone.sh --help  # copy one gateway's settings onto another
 python3 -m pytest tests/ -q   # 150 tests, redirected to a temp directory
 ```
 

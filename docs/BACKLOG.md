@@ -359,35 +359,33 @@ Debian package indices and a resolver honest about alternatives and virtual
 packages, and the build host here is a Mac with no apt. Worth doing, and worth
 doing only once it can be tested end to end on the second mini-PC.
 
-## 9. The running gateway is not the package
+## 9. The running gateway is not the package — shipped in 2.10.0
 
-Found while working out what a second box would have to be given to become a
-copy of the first. `dpkg -V shunt` is clean -- nothing packaged has been edited
--- but seven files that the gateway needs are owned by no package at all:
+Ten files the gateway needed belonged to no package. `dpkg -V shunt` was clean
+the whole time, because nothing packaged had been edited; they were simply in no
+manifest, so nothing looked for them. A reinstall produced a box that looked
+identical and was not.
 
-    /usr/local/bin/adguardvpn-cli                     the VPN client itself
-    /etc/systemd/system/adguardvpn.service            and its unit
-    /etc/systemd/system/shunt-nic-offload.service     the offload watchdog
-    /etc/systemd/system/shunt-offload-watch.service   .. and its companion
-    /etc/systemd/system/shunt-offload-watch.timer
-    /usr/lib/systemd/system/fptn-resolv-heal.service  the resolv.conf repair
-    /usr/sbin/fptn-resolv-heal
+Seven are now installed by the package: both NIC-offload scripts (moved from
+/usr/local/sbin, which is the administrator's to fill and not a package's, to
+/usr/sbin) with their three units, and the FPTN resolv.conf repair with its
+unit. The hand-placed copies in /etc are removed on upgrade when they name the
+old path, and the two masks the gateway depends on -- hostapd and fptn-client,
+both of which Shunt runs itself and differently -- are applied by the postinst
+and lifted again on removal.
 
-plus two masks (`fptn-client.service`, `hostapd.service`) that Shunt depends on
-being in place, and which nothing records.
+Packaging the offload unit also found a defect that only existed once it was
+packaged: it was written for the inline gateway's WAN port, and on a box in loop
+topology WAN_IF is empty, so the fallback named the Wi-Fi card and ethtool would
+have refused on every boot. It now leaves wireless interfaces alone.
 
-Two of those units exist because of an incident each. The offload watchdog is
-there because the r8169 driver turns segmentation offload off behind our backs;
-the resolv-heal unit is there because FPTN rewrites /etc/resolv.conf inside its
-namespace and occasionally outside it. Neither reason is written down anywhere a
-reinstall would find, and a reinstall would produce a gateway missing both.
-
-`packaging/shunt-clone.sh` copies them, which makes the second box correct and
-leaves the underlying problem exactly where it was. The fix is to fold the five
-shunt-owned files into the package -- units into `systemd/`, the script into
-`src/scripts/`, the masks into the postinst -- and to install AdGuard and FPTN
-from a documented step rather than from memory. Then a fresh install is the
-gateway, and cloning is only about credentials and the household's settings.
+The remaining three are the two third-party binaries and the AdGuard unit that
+names one of them, documented in `docs/EGRESS.md` rather than packaged: they
+carry their own licences and, in FPTN's case, a token belonging to one
+household. What that file cannot say is where either binary was downloaded
+from -- there is no apt source, no installer trace and nothing in the shell
+history. The hashes of what is running are recorded so a rebuild can at least
+verify it got the same bytes. Writing the source down is the open part.
 
 ## Earlier items, unchanged
 

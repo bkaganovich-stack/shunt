@@ -1,0 +1,5 @@
+#!/bin/sh
+[ -e /etc/resolv.conf.fptn-backup ] || exit 0
+chattr -i /etc/resolv.conf 2>/dev/null || true
+cp -f /etc/resolv.conf.fptn-backup /etc/resolv.conf
+rm -f /etc/resolv.conf.fptn-backup

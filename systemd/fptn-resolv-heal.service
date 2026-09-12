@@ -1,0 +1,13 @@
+[Unit]
+Description=FPTN: restore /etc/resolv.conf after an interrupted VPN session
+DefaultDependencies=no
+Before=network-pre.target systemd-resolved.service NetworkManager.service
+Wants=network-pre.target
+ConditionPathExists=/etc/resolv.conf.fptn-backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/fptn-resolv-heal
+
+[Install]
+WantedBy=sysinit.target

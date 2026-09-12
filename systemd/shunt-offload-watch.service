@@ -1,0 +1,6 @@
+[Unit]
+Description=Shunt — withdraw NIC offloads if the driver reports transmit faults
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/shunt-offload-watch

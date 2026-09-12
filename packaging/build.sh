@@ -39,6 +39,15 @@ for f in "$ROOT"/src/scripts/*; do install -m 755 "$f" "$P/opt/shunt/scripts/"; 
 chmod 750 "$P/opt/shunt/scripts/fptn-egress.sh"
 install -m 644 "$ROOT"/systemd/*.service "$ROOT"/systemd/*.timer "$P/lib/systemd/system/"
 install -m 755 "$ROOT/packaging/shunt-setup" "$P/usr/sbin/"
+# Three scripts that ran for months out of /usr/local/sbin and /usr/sbin, placed
+# by hand after the incidents that motivated them and owned by no package. A
+# reinstall did not have them, which made a fresh gateway quietly different from
+# the running one: no segmentation offload on the WAN port, and no repair for
+# the resolv.conf FPTN leaves behind when a session is cut. /usr/local is the
+# administrator's to fill, not a package's, so they move to /usr/sbin and the
+# units move with them.
+install -m 755 "$ROOT/packaging/shunt-nic-offload" "$ROOT/packaging/shunt-offload-watch" \
+               "$ROOT/packaging/fptn-resolv-heal" "$P/usr/sbin/"
 install -m 644 "$ROOT/packaging/sysctl/90-shunt.conf" "$P/etc/sysctl.d/"
 install -d "$P/usr/share/man/man8"
 gzip -9nc "$ROOT/packaging/shunt-setup.8" > "$P/usr/share/man/man8/shunt-setup.8.gz"
