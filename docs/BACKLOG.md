@@ -278,6 +278,66 @@ Still open on the DNS question, and worth measuring before acting:
   survives by retrying, which costs latency on every cold name. Not urgent now
   that Russian names never reach it.
 
+## 6. A way for the box to talk to the person standing next to it
+
+Raised while designing what should happen when the ISP cable is moved onto a
+freshly imaged box. The obvious answer -- notice the link, say so in the
+interface, offer a button -- was rejected for a good reason: it assumes somebody
+is looking at the interface at the moment they plug a cable in, and the whole
+point of the scenario is that they are not. They are at the router, which is
+frequently nowhere near a monitor. A headless appliance that can only speak
+through a web page cannot participate in a physical act.
+
+So the missing piece is not cable detection. It is a channel that reaches a
+person whose hands are on the hardware:
+
+- **Bluetooth LE to a phone app.** Works before any network exists, which is
+  the moment with the least other options -- a box that has just been flashed,
+  or one whose network is the thing that is broken. The most work: a protocol,
+  an app, and pairing that a household can do.
+- **The web interface on a phone over Wi-Fi.** Cheapest by far, because the
+  installer now joins a network during the install and keeps it: the box is
+  already on the household Wi-Fi the first time it boots, and a phone is
+  already on it too. Fails in exactly the case BLE covers -- when the network
+  is what is wrong.
+- **A small USB display with a graphical interface of our own.** Bought
+  separately, so it costs nothing for anyone who does not want one. Gives
+  unambiguous feedback at the machine: what it thinks it is, which port it
+  believes is the provider's, whether it has an address. This is the only one
+  of the three that answers "what is it doing right now" without a second
+  device.
+
+Worth building at least one before automatic behaviour keyed to physical events
+is added at all, because such behaviour is only safe when the person doing the
+plugging can see what the box concluded. This also anticipates hardware beyond
+this one mini-PC: single-board machines with no video output at all make the
+question sharper, not softer.
+
+Deliberately parked until then: adopting the ISP cable automatically. The
+detection already lands in a sane place -- a box installed over Wi-Fi with no
+cable comes up as `loop` with the wireless interface as its LAN link -- so
+nothing is broken by waiting.
+
+## 7. Loop topology over Wi-Fi
+
+A gateway plugged into a LAN port of the router hairpins traffic through itself.
+The same arrangement should work with no cable at all, with the box joined to
+the router's Wi-Fi -- slower and less reliable, and a genuinely nice way to meet
+a man-in-the-middle gateway before committing a household's internet to it.
+
+Two things point the same way. `shunt-setup` already chooses exactly this
+configuration on a box installed over Wi-Fi with no cable plugged in. And the
+objection recorded in the code -- "Wi-Fi can't serve as a TProxy LAN port",
+which excludes wireless interfaces in `apply_topology.py` and in the interface
+list -- looks right for inline and wrong for loop: loop routes rather than
+bridges, and the familiar limitation (a station cannot carry other MACs without
+4-address mode) is about bridging.
+
+That is reasoning, not measurement, and this file exists because reasoning has
+lost to measurement repeatedly. The test costs nothing and has a natural home:
+the second mini-PC, once imaged, comes up in this state on its own. Lift the
+exclusion only after traffic has actually gone through it.
+
 ## Earlier items, unchanged
 
 - **Sources**: the manifest format and registry ship as of 2.2.0, reading only.
