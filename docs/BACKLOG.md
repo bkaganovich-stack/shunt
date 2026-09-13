@@ -387,6 +387,39 @@ from -- there is no apt source, no installer trace and nothing in the shell
 history. The hashes of what is running are recorded so a rebuild can at least
 verify it got the same bytes. Writing the source down is the open part.
 
+## 10. The list will always lag, so measure the rest
+
+2.12.0 makes one profile answer both directions of blocking, because
+`ru-blocked` is built from what does not work FROM Russia rather than from who
+does the blocking. That covers most of it and it is not complete, and the gap
+has a name: **`claude.ai` is in the list and `anthropic.com` is not**. The web
+interface goes through the tunnel and the API goes straight out and fails. Of
+thirty companies probed that have restricted Russian users at some point,
+eleven are in the lists.
+
+No list will close that. The gap is closed by measurement, and the material is
+already here: the analytics database holds the domains the household actually
+visits, and both paths are available from the box -- direct with fwmark 0xff,
+tunnelled through `127.0.0.1:1081`.
+
+So: once a day, take the domains seen recently and probe each one both ways.
+Direct fails and tunnelled succeeds means blocked, whoever is doing it; both
+succeed means direct and nothing to do; both fail means the site is down and is
+not our business. Comparing the two paths is what separates a block from an
+outage, and one direct probe cannot.
+
+The honest limit is worth stating in the same breath: a foreign service that
+answers `403` over a perfectly healthy TLS session is invisible to a
+transparent proxy, which does not read into the stream. An active probe sees it
+because the probe is its own client; passive observation of the household's
+traffic does not. So this catches "refuses to connect" and "refuses the probe",
+not "serves a 403 only to a logged-in user".
+
+Costs to bound before building: a site that is merely down must not move into
+the tunnel, so require several failures in a row and re-probe to demote; and the
+learned list belongs in front of the household with dates and evidence, not
+silently in the datapath.
+
 ## Earlier items, unchanged
 
 - **Sources**: the manifest format and registry ship as of 2.2.0, reading only.

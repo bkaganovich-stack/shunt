@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.11.0"
+VERSION = "2.12.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -19,6 +19,7 @@ import sources as _src
 import netpath as _np
 import inbound as _in
 import dnspath as _dns
+import geosite as _geo
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -36,6 +37,8 @@ LOGS      = BASE / "logs"
 STATIC    = BASE / "web" / "static"
 SETTINGS  = CFG_DIR / "settings.json"
 XCFG      = CFG_DIR / "xray.json"
+GEOSITE_DAT = CFG_DIR / "geosite.dat"
+GEOIP_DAT   = CFG_DIR / "geoip.dat"
 SINGBOX_CFG = Path("/etc/sing-box/config.json")   # managed for the SOCKS proxy toggle
 SINGBOX_BIN = "/usr/bin/sing-box"
 PROXY_TAG   = "socks-tg"                            # SOCKS inbound tag owned by the Proxy UI
@@ -608,6 +611,22 @@ REALTIME_IPS = [
     "52.112.0.0/14", "52.122.0.0/15", "13.107.64.0/18",
 ]
 
+# The lists the two-sided profile is built from. `ru-blocked` is assembled from
+# what does not work FROM Russia, whichever side does the blocking: the RKN
+# registry and services that refuse Russian addresses both land in it. claude.ai
+# and chatgpt.com are in it although nobody in Russia blocks them -- their
+# owners do. That is the property that makes one list answer both halves of the
+# question, and it is why this profile does not need a second list of "foreign
+# companies that block us".
+BLOCKED_LISTS = ["geosite:ru-blocked", "geosite:antifilter-download-community"]
+
+# The mirror image: Russian services that refuse FOREIGN addresses -- ozon.ru,
+# rzd.ru, pochta.ru and 164 more. Sending these through a US exit breaks them,
+# which is what a hand-written force_ozon_direct setting used to paper over for
+# exactly one of them. The list covers the class and is updated weekly with
+# everything else.
+RU_ONLY_LISTS = ["geosite:category-ru", "geosite:ru-available-only-inside"]
+
 def _realtime_rules(enabled: bool) -> list[dict]:
     """Send conferencing media straight out, ahead of the profile's catch-all."""
     if not enabled:
@@ -655,13 +674,20 @@ def build_xray_config(settings: dict) -> dict:
     ]
 
     if profile == "blocked_only":
+        # Everything blocked in either direction goes through the tunnel and
+        # everything else goes straight out. The list this used to name --
+        # geosite:category-ru-blocked -- was renamed upstream to ru-blocked, and
+        # xray does not skip a rule it cannot resolve: it refuses the whole
+        # configuration with exit 23, so choosing this profile failed to start
+        # xray and rolled back, saying nothing about a list. apply_config now
+        # checks the names against the file before writing anything.
         rules += [
             *([{"type": "field",
                 "domain": ["domain:cdn-apple.com", "domain:itunes.apple.com", "domain:aaplimg.com"],
                 "outboundTag": final}] if force_aaplimg else []),
-            {"type": "field", "ip":     ["geoip:ru"],                   "outboundTag": "direct"},
-            {"type": "field", "domain": ["geosite:category-ru"],         "outboundTag": "direct"},
-            {"type": "field", "domain": ["geosite:category-ru-blocked"], "outboundTag": final},
+            {"type": "field", "ip":     ["geoip:ru"],      "outboundTag": "direct"},
+            {"type": "field", "domain": RU_ONLY_LISTS,     "outboundTag": "direct"},
+            {"type": "field", "domain": BLOCKED_LISTS,     "outboundTag": final},
         ]
         default = "direct"
     elif profile == "direct":
@@ -671,8 +697,8 @@ def build_xray_config(settings: dict) -> dict:
             *([{"type": "field",
                 "domain": ["domain:cdn-apple.com", "domain:itunes.apple.com", "domain:aaplimg.com"],
                 "outboundTag": final}] if force_aaplimg else []),
-            {"type": "field", "ip":     ["geoip:ru"],            "outboundTag": "direct"},
-            {"type": "field", "domain": ["geosite:category-ru"], "outboundTag": "direct"},
+            {"type": "field", "ip":     ["geoip:ru"],  "outboundTag": "direct"},
+            {"type": "field", "domain": RU_ONLY_LISTS, "outboundTag": "direct"},
         ]
         default = final
     else:
@@ -899,8 +925,19 @@ def restore_snapshot(snap_id: str) -> tuple[bool, str]:
 # ── Apply Config (safe, with auto-rollback) ────────────────────────────────────
 def apply_config(settings: dict, reason: str = "config_change",
                  _pre_settings: Optional[dict] = None) -> tuple[bool, str]:
-    snap_id = create_snapshot(f"pre_{reason}", settings=_pre_settings)
     cfg = build_xray_config(settings)
+    # Asked of the file before anything is written. A list renamed upstream --
+    # category-ru-blocked became ru-blocked, delivered by a weekly timer that
+    # nobody watches -- makes xray refuse the WHOLE configuration, not just the
+    # rule naming it. Without this the failure arrives as "xray failed to
+    # start", a rollback, and no hint that a geo list is the reason.
+    gone = _geo.missing(cfg, GEOSITE_DAT, GEOIP_DAT)
+    if gone:
+        return False, ("В гео-базе нет списков: %s. Конфигурация не изменена. "
+                       "Обновите базы (Обновить гео) или выберите другой профиль."
+                       % ", ".join(gone))
+
+    snap_id = create_snapshot(f"pre_{reason}", settings=_pre_settings)
     CFG_DIR.mkdir(parents=True, exist_ok=True)
     XCFG.write_text(json.dumps(cfg, indent=2))
     # settings.json is the single source of truth for what is open. Rewriting
@@ -1199,8 +1236,13 @@ def _parse_len_field(data: bytes, pos: int) -> tuple[bytes, int]:
 
 _geoip_ru_nets:    Optional[list] = None
 _geoip_ru_mtime:   float          = 0.0
-_geosite_ru_data:  Optional[dict] = None
-_geosite_ru_mtime: float          = 0.0
+# The categories route_test has to be able to answer about. Loaded in ONE pass
+# over the 70 MB file rather than one pass each, and only these: ru-blocked is
+# 74 739 domains and holding every list in the file would be pointless.
+_GEOSITE_WANTED = ("CATEGORY-RU", "RU-AVAILABLE-ONLY-INSIDE",
+                   "RU-BLOCKED", "ANTIFILTER-DOWNLOAD-COMMUNITY")
+_geosite_sets:     dict            = {}
+_geosite_ru_mtime: float           = 0.0
 
 def _load_geoip_ru() -> list:
     global _geoip_ru_nets, _geoip_ru_mtime
@@ -1265,16 +1307,30 @@ def _ip_in_geoip_ru(addr: str) -> bool:
         return any(ip in net for net in _load_geoip_ru())
     except ValueError: return False
 
-def _load_geosite_ru() -> dict:
-    global _geosite_ru_data, _geosite_ru_mtime
-    geosite_path = CFG_DIR / "geosite.dat"
-    try:   mtime = geosite_path.stat().st_mtime
-    except Exception: return {"full": set(), "domain": set(), "plain": [], "regex": []}
-    if _geosite_ru_data is not None and mtime == _geosite_ru_mtime:
-        return _geosite_ru_data
-    result: dict = {"full": set(), "domain": set(), "plain": [], "regex": []}
+def _empty_geosite() -> dict:
+    return {"full": set(), "domain": set(), "plain": [], "regex": []}
+
+
+def _load_geosite(cat: str) -> dict:
+    """
+    One category of geosite.dat, as matchable sets.
+
+    Was hardwired to CATEGORY-RU, which was fine while the only question the
+    route tester could answer was "is this Russian". It now has to answer "is
+    this on a blocklist" as well, and parsing a 70 MB file once per category
+    would be three passes for one answer -- so every category the tester needs
+    is collected in a single walk and kept until the file changes.
+    """
+    global _geosite_sets, _geosite_ru_mtime
+    cat = cat.upper()
+    try:   mtime = GEOSITE_DAT.stat().st_mtime
+    except Exception: return _empty_geosite()
+    if _geosite_sets and mtime == _geosite_ru_mtime:
+        return _geosite_sets.get(cat, _empty_geosite())
+
+    result: dict = {c: _empty_geosite() for c in _GEOSITE_WANTED}
     try:
-        data = geosite_path.read_bytes(); pos = 0; n = len(data)
+        data = GEOSITE_DAT.read_bytes(); pos = 0; n = len(data)
         while pos < n:
             try:
                 tag, pos = _varint(data, pos); wire = tag & 7; field = tag >> 3
@@ -1304,13 +1360,15 @@ def _load_geosite_ru() -> dict:
                         elif w == 1: p += 8
                         elif w == 5: p += 4
                         else: break
-                    if cc and cc.upper() == "CATEGORY-RU":
+                    key = (cc or "").upper()
+                    if key in result:
+                        bucket = result[key]
                         for dtype, dval in domains_raw:
-                            if dtype == 3:   result["full"].add(dval)
-                            elif dtype == 2: result["domain"].add(dval)
-                            elif dtype == 0: result["plain"].append(dval)
+                            if dtype == 3:   bucket["full"].add(dval)
+                            elif dtype == 2: bucket["domain"].add(dval)
+                            elif dtype == 0: bucket["plain"].append(dval)
                             elif dtype == 1:
-                                try:   result["regex"].append(re.compile(dval))
+                                try:   bucket["regex"].append(re.compile(dval))
                                 except Exception: pass
                 elif wire == 0: _, pos = _varint(data, pos)
                 elif wire == 1: pos += 8
@@ -1318,12 +1376,13 @@ def _load_geosite_ru() -> dict:
                 else: break
             except Exception: break
     except Exception: pass
-    _geosite_ru_data = result; _geosite_ru_mtime = mtime
-    return result
+    _geosite_sets = result; _geosite_ru_mtime = mtime
+    return result.get(cat, _empty_geosite())
 
-def _domain_in_geosite_ru(query: str) -> bool:
+
+def _domain_in_geosite(query: str, cat: str) -> bool:
     q = query.lower().rstrip(".")
-    gs = _load_geosite_ru()
+    gs = _load_geosite(cat)
     if q in gs["full"]: return True
     for d in gs["domain"]:
         if q == d or q.endswith("." + d): return True
@@ -1332,6 +1391,20 @@ def _domain_in_geosite_ru(query: str) -> bool:
     for r in gs["regex"]:
         if r.search(q): return True
     return False
+
+
+def _domain_in_geosite_ru(query: str) -> bool:
+    return _domain_in_geosite(query, "CATEGORY-RU")
+
+
+def _domain_in_any_geosite(query: str, refs: list[str]) -> Optional[str]:
+    """The first of these geosite: references that matches, or None."""
+    for ref in refs:
+        cat = ref.split(":", 1)[1] if ":" in ref else ref
+        if _domain_in_geosite(query, cat):
+            return ref
+    return None
+
 
 # ── Route Tester ──────────────────────────────────────────────────────────────
 _PRIVATE_NETS = [
@@ -1425,6 +1498,11 @@ def route_test(target: str, settings: dict) -> dict:
     _, has_vpn, _ = _get_active_vpn_outbound(settings)
     force_aaplimg = settings.get("force_aaplimg_vpn", True)
     final = "proxy" if has_vpn else "direct"
+    # build_xray_config forces this for the emergency profile; without the same
+    # line here the tester answers "proxy" for a gateway that is sending
+    # everything straight out.
+    if profile == "direct":
+        final = "direct"
 
     domain: Optional[str] = None
     ips:    list[str]      = []
@@ -1488,12 +1566,26 @@ def route_test(target: str, settings: dict) -> dict:
     for ip in ips:
         if _ip_in_geoip_ru(ip):
             return result("direct", "geoip:ru", f"{ip} is in geoip:ru", "geoip_database")
-    if domain and _domain_in_geosite_ru(domain):
-        return result("direct", "geosite:category-ru",
-                      f"{domain} is in geosite:category-ru", "geosite_database")
+    if domain:
+        hit = _domain_in_any_geosite(domain, RU_ONLY_LISTS)
+        if hit:
+            return result("direct", hit, f"{domain} есть в {hit}", "geosite_database")
 
     if profile == "blocked_only":
-        return result("direct", "catch-all", "Profile: blocked_only default=direct", "global_profile")
+        # The half this page used to leave out. It checked the two "keep it in
+        # Russia" lists and then answered "direct" for everything else --
+        # including every domain the profile actually sends through the tunnel,
+        # which is the entire point of the profile. A route tester that
+        # contradicts the routing is worse than none.
+        if domain:
+            hit = _domain_in_any_geosite(domain, BLOCKED_LISTS)
+            if hit:
+                return result(final, hit,
+                              f"{domain} есть в {hit} — заблокирован, идёт через туннель",
+                              "geosite_database")
+        return result("direct", "catch-all",
+                      "Профиль «только заблокированное»: остальное идёт напрямую",
+                      "global_profile")
 
     return result(final, "catch-all",
                   f"not matched by any rule → {final}", "global_profile_fallback")
@@ -3207,14 +3299,14 @@ async def get_alert_log(u: str = Depends(auth_dep)):
 # ── Geo Update ─────────────────────────────────────────────────────────────────
 @app.post("/api/geo-update")
 async def geo_update(u: str = Depends(auth_dep)):
-    global _geoip_ru_nets, _geosite_ru_data
+    global _geoip_ru_nets, _geosite_sets
     try:
         r = subprocess.run([str(SCRIPT / "update-geo.sh")],
                            capture_output=True, text=True, timeout=120)
         if r.returncode == 0:
             s = load_settings(); s["geo_updated"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
             save_settings(s)
-            _geoip_ru_nets = None; _geosite_ru_data = None
+            _geoip_ru_nets = None; _geosite_sets = {}
             subprocess.run(["systemctl", "restart", "shunt"])
             return {"ok": True, "output": r.stdout[-500:]}
         fire_alert("geo_update_failed", r.stderr[-200:])

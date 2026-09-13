@@ -216,11 +216,28 @@ class TestBuildXrayConfig:
         assert vpn_ip_rules, "Custom VPN IP rule not found"
 
     def test_blocked_only_profile(self):
+        # This asserted geosite:category-ru-blocked, which is the name upstream
+        # renamed to ru-blocked -- so the test agreed with the code and both
+        # were wrong, and xray refused the configuration in production while
+        # the suite stayed green. The names are checked against the real file
+        # now (see test_geosite.py); here we only state which lists the profile
+        # is made of.
         cfg = m.build_xray_config(self._base_settings(profile="blocked_only"))
         rules = cfg["routing"]["rules"]
-        blocked_rules = [r for r in rules
-                         if "geosite:category-ru-blocked" in r.get("domain", [])]
-        assert blocked_rules
+        assert any("geosite:ru-blocked" in r.get("domain", []) for r in rules)
+        assert any("geosite:ru-available-only-inside" in r.get("domain", [])
+                   for r in rules)
+
+    def test_blocked_only_sends_everything_else_direct(self):
+        cfg = m.build_xray_config(self._base_settings(profile="blocked_only"))
+        assert cfg["routing"]["rules"][-1]["outboundTag"] == "direct"
+
+    def test_all_except_ru_keeps_ru_only_services_off_the_tunnel(self):
+        # ozon.ru, rzd.ru and pochta.ru refuse foreign addresses, so a US exit
+        # breaks them in the profile that tunnels everything foreign too.
+        cfg = m.build_xray_config(self._base_settings(profile="all_except_ru"))
+        assert any("geosite:ru-available-only-inside" in r.get("domain", [])
+                   for r in cfg["routing"]["rules"])
 
     def test_quic_sniffing_enabled(self):
         cfg = m.build_xray_config(self._base_settings())
@@ -315,7 +332,8 @@ class TestRouteTester:
         """Verify that a domain in geosite:category-ru goes direct."""
         with patch("socket.getaddrinfo", side_effect=socket.gaierror("no DNS")), \
              patch.object(m, "_ip_in_geoip_ru", return_value=False), \
-             patch.object(m, "_domain_in_geosite_ru", return_value=True):
+             patch.object(m, "_domain_in_any_geosite",
+                          side_effect=lambda d, refs: refs[0]):
             result = m.route_test("vk.com", self._settings())
         assert result["outbound"] == "direct"
         assert "geosite:category-ru" in result["matched_rule"]
@@ -443,10 +461,28 @@ class TestApplyConfigSafe:
             call_count[0] += 1
             return r
         with patch("subprocess.run", side_effect=fake_run), \
-             patch("time.sleep"):
+             patch("time.sleep"), \
+             patch.object(m._geo, "missing", return_value=[]):
             ok, err = m.apply_config(m.DEFAULT_SETTINGS, "test")
         assert ok
         assert err == ""
+
+    def test_a_renamed_geo_list_refuses_before_touching_anything(self):
+        # The September failure, as a check. The old order wrote the file,
+        # restarted xray, watched it fail and rolled back -- and said "xray
+        # failed to start", which points at the tunnel rather than at a list.
+        before = m.XCFG.read_text()
+        with patch.object(m._geo, "missing",
+                          return_value=["geosite:category-ru-blocked"]), \
+             patch("subprocess.run") as run:
+            ok, err = m.apply_config(m.DEFAULT_SETTINGS, "test_missing_list")
+        assert not ok
+        assert "geosite:category-ru-blocked" in err
+        assert m.XCFG.read_text() == before      # nothing written
+        # build_xray_config shells out while it works, so "nothing ran" is the
+        # wrong claim; "the datapath was not restarted" is the one that matters.
+        assert not [c for c in run.call_args_list
+                    if list(c.args[0])[:2] == ["systemctl", "restart"]]
 
     def test_auto_rollback_on_failure(self):
         """If xray never becomes active, should auto-rollback."""
@@ -461,7 +497,8 @@ class TestApplyConfigSafe:
             return r
 
         with patch("subprocess.run", side_effect=fake_run), \
-             patch("time.sleep"):
+             patch("time.sleep"), \
+             patch.object(m._geo, "missing", return_value=[]):
             ok, err = m.apply_config(m.DEFAULT_SETTINGS, "test_rollback")
         assert not ok
         assert "rollback" in err.lower()

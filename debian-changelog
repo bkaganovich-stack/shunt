@@ -1,3 +1,38 @@
+shunt (2.12.0) stable; urgency=medium
+
+  * The "only blocked" profile works again. It asked for
+    geosite:category-ru-blocked; upstream renamed that list to ru-blocked, and
+    xray does not skip a rule it cannot resolve -- it refuses the whole
+    configuration with exit 23. So choosing the profile failed to start xray,
+    rolled back, and reported "xray failed to start", which points at the
+    tunnel rather than at a list delivered by a weekly timer. The test suite
+    agreed with the code and asserted the same dead name, so it stayed green
+    throughout.
+  * apply_config now reads the names out of geosite.dat and geoip.dat and
+    refuses a configuration they cannot satisfy, before writing anything or
+    restarting anything. A renamed list is named in the message.
+  * The profile covers both directions of blocking, which is what its name
+    always claimed. ru-blocked is assembled from what does not work FROM
+    Russia, whichever side does the blocking -- claude.ai and chatgpt.com are
+    in it although nobody in Russia blocks them -- so one list answers both
+    halves and no second list of "companies that block us" is needed.
+    antifilter-download-community adds the rest.
+  * Both tunnelling profiles now keep geosite:ru-available-only-inside direct:
+    ozon.ru, rzd.ru, pochta.ru and 164 more refuse foreign addresses, so a US
+    exit breaks them. A hand-written force_ozon_direct setting used to paper
+    over exactly one of them, and was never wired to anything.
+  * The route tester stopped contradicting the routing. For the "only blocked"
+    profile it checked the two keep-it-in-Russia lists and then answered
+    "direct" for everything else -- including every domain the profile actually
+    sends through the tunnel. It also answered "proxy" under the emergency
+    direct profile, which sends nothing through the tunnel at all.
+  * Measured before shipping: the added lists cost xray 9 MB of RSS (30 MB to
+    39 MB). ru-blocked-all, the full 1.37 million-domain registry dump, costs
+    540 MB and is not offered -- what it adds over ru-blocked is casino and
+    betting mirrors, not services a household is missing.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sun, 13 Sep 2026 16:40:00 +0300
+
 shunt (2.11.0) stable; urgency=medium
 
   * The journal is capped at 200 MB. systemd's default is 10% of the

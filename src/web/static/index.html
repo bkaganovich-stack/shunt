@@ -786,13 +786,15 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <div class="profile-option" id="p-blocked_only" onclick="selectProfile('blocked_only')">
             <span class="check">✓</span>
             <h4>🇷🇺 Только заблокированное</h4>
-            <p>Заблокированные в РФ сайты — через VPN.<br>
-               Российские и незаблокированные — напрямую.</p>
+            <p>Через VPN — всё, что не работает из России: и закрытое РКН,
+               и закрытое самими сервисами.<br>
+               Остальное — напрямую.</p>
           </div>
           <div class="profile-option" id="p-all_except_ru" onclick="selectProfile('all_except_ru')">
             <span class="check">✓</span>
             <h4>🌐 Всё кроме России</h4>
-            <p>Иностранные сайты — через VPN.<br>
+            <p>Через VPN — все иностранные сайты, даже те,
+               что открываются и так.<br>
                Российские IP и домены — напрямую.</p>
           </div>
           <div class="profile-option" id="p-all" onclick="selectProfile('all')">
