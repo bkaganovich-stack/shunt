@@ -130,6 +130,66 @@ class TestCustomRuleToXray:
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: build_xray_config
 # ─────────────────────────────────────────────────────────────────────────────
+class TestTrafficThatCarriesNoName:
+    """
+    Telegram broke within hours of the profile switch, and the reason is worth
+    a class of its own: MTProto dials its data centres by address, so nothing
+    is sniffed and no domain list decides any of it. A profile built only from
+    domain lists sent it straight out to be blocked.
+    """
+
+    def _s(self, profile="blocked_only"):
+        s = dict(m.DEFAULT_SETTINGS)
+        s["profile"] = profile
+        return s
+
+    # The suite has no settings fixture that produces a working tunnel -- with
+    # none configured every outbound collapses to direct, which would make
+    # "goes through the tunnel" unfalsifiable here. So the tunnel is asserted
+    # into existence for this class only.
+    def _with_tunnel(self):
+        return patch.object(m, "_get_active_vpn_outbound",
+                            return_value=([{"protocol": "socks", "tag": "proxy"}],
+                                          True, None))
+
+    def test_the_profile_routes_addresses_and_not_only_names(self):
+        with self._with_tunnel():
+            cfg = m.build_xray_config(self._s())
+        rules = cfg["routing"]["rules"]
+        ip_rules = [r for r in rules if "geoip:ru-blocked" in r.get("ip", [])]
+        dom_rules = [r for r in rules if "geosite:ru-blocked" in r.get("domain", [])]
+        assert ip_rules, "no address-based blocklist rule"
+        # The claim is not "some tag" but "addresses are treated like names".
+        assert ip_rules[0]["outboundTag"] == dom_rules[0]["outboundTag"] == "proxy"
+
+    def test_russian_addresses_are_still_decided_first(self):
+        # order is independent of whether a tunnel exists
+        # A Russian address on a blocklist is far more likely to be a service
+        # that refuses foreign addresses than one worth tunnelling, so the
+        # geoip:ru rule has to keep coming first.
+        with self._with_tunnel():
+            rules = m.build_xray_config(self._s())["routing"]["rules"]
+        pos = {}
+        for i, r in enumerate(rules):
+            if "geoip:ru" in r.get("ip", []):        pos.setdefault("ru", i)
+            if "geoip:ru-blocked" in r.get("ip", []): pos.setdefault("blocked", i)
+        assert pos["ru"] < pos["blocked"]
+
+    def test_the_tester_answers_for_a_bare_address(self):
+        with self._with_tunnel(), \
+             patch.object(m, "_ip_in_geoip_ru", return_value=False), \
+             patch.object(m, "_ip_in_geoip", lambda ip, refs: "ru-blocked" in refs[0]):
+            r = m.route_test("149.154.167.51", self._s())
+        assert r["outbound"] == "proxy"
+        assert "заблокированных адресов" in r["note"]
+
+    def test_a_profile_that_tunnels_everything_needs_no_such_rule(self):
+        with self._with_tunnel():
+            cfg = m.build_xray_config(self._s(profile="all_except_ru"))
+        assert not [r for r in cfg["routing"]["rules"]
+                    if "geoip:ru-blocked" in r.get("ip", [])]
+
+
 class TestRulesThatCanBeSwitchedOff:
     """
     A rule used to be a string, so the only way to stop it applying was to

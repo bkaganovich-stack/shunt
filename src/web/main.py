@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.13.0"
+VERSION = "2.14.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -656,6 +656,19 @@ REALTIME_IPS = [
 # companies that block us".
 BLOCKED_LISTS = ["geosite:ru-blocked", "geosite:antifilter-download-community"]
 
+# The same question asked of addresses, and the half that was missing. A
+# domain list only decides traffic that carries a name: xray sniffs SNI, and a
+# client that dials an address directly never sends one. Telegram is the whole
+# argument -- MTProto connects to its data centres by IP, so every domain list
+# in the world routes none of it, and the profile sent it straight out to be
+# blocked. The household noticed within hours, which is the correct amount of
+# time for a gateway to take to prove a design wrong.
+#
+# Measured before adding: 89 486 networks over both lists, 0.019% of IPv4. The
+# largest entries are Meta's (157.240.0.0/16, 57.144.0.0/14), which is exactly
+# right. This is not a quiet return to tunnelling everything.
+BLOCKED_IP_LISTS = ["geoip:ru-blocked", "geoip:ru-blocked-community"]
+
 # The mirror image: Russian services that refuse FOREIGN addresses -- ozon.ru,
 # rzd.ru, pochta.ru and 164 more. Sending these through a US exit breaks them,
 # which is what a hand-written force_ozon_direct setting used to paper over for
@@ -721,9 +734,13 @@ def build_xray_config(settings: dict) -> dict:
             *([{"type": "field",
                 "domain": ["domain:cdn-apple.com", "domain:itunes.apple.com", "domain:aaplimg.com"],
                 "outboundTag": final}] if force_aaplimg else []),
+            # geoip:ru stays ahead of the blocked lists on purpose: a Russian
+            # address that also appears on a blocklist is far more likely to be
+            # a service that refuses foreign addresses than one worth tunnelling.
             {"type": "field", "ip":     ["geoip:ru"],      "outboundTag": "direct"},
             {"type": "field", "domain": RU_ONLY_LISTS,     "outboundTag": "direct"},
             {"type": "field", "domain": BLOCKED_LISTS,     "outboundTag": final},
+            {"type": "field", "ip":     BLOCKED_IP_LISTS,  "outboundTag": final},
         ]
         default = "direct"
     elif profile == "direct":
@@ -1270,7 +1287,7 @@ def _parse_len_field(data: bytes, pos: int) -> tuple[bytes, int]:
     length, pos = _varint(data, pos)
     return data[pos:pos + length], pos + length
 
-_geoip_ru_nets:    Optional[list] = None
+_geoip_ru_nets:    Optional[dict] = None   # category -> networks
 _geoip_ru_mtime:   float          = 0.0
 # The categories route_test has to be able to answer about. Loaded in ONE pass
 # over the 70 MB file rather than one pass each, and only these: ru-blocked is
@@ -1280,14 +1297,25 @@ _GEOSITE_WANTED = ("CATEGORY-RU", "RU-AVAILABLE-ONLY-INSIDE",
 _geosite_sets:     dict            = {}
 _geosite_ru_mtime: float           = 0.0
 
-def _load_geoip_ru() -> list:
+_GEOIP_WANTED = ("RU", "RU-BLOCKED", "RU-BLOCKED-COMMUNITY")
+
+
+def _load_geoip(cat: str = "RU") -> list:
+    """
+    One category of geoip.dat as networks. Was hardwired to RU, for the same
+    reason the geosite loader was: the only question the tester could answer
+    was "is this Russian". It now has to answer "is this a blocked address"
+    too -- the half Telegram fell through, because MTProto dials data centres
+    by IP and no domain list decides a packet that carries no name.
+    """
     global _geoip_ru_nets, _geoip_ru_mtime
     geoip_path = CFG_DIR / "geoip.dat"
     try:   mtime = geoip_path.stat().st_mtime
     except Exception: return []
+    cat = cat.upper()
     if _geoip_ru_nets is not None and mtime == _geoip_ru_mtime:
-        return _geoip_ru_nets
-    networks: list = []
+        return _geoip_ru_nets.get(cat, [])
+    buckets: dict = {c: [] for c in _GEOIP_WANTED}
     try:
         data = geoip_path.read_bytes(); pos = 0; n = len(data)
         while pos < n:
@@ -1320,7 +1348,9 @@ def _load_geoip_ru() -> list:
                         elif w == 1: p += 8
                         elif w == 5: p += 4
                         else: break
-                    if cc and cc.upper() == "RU":
+                    key = (cc or "").upper()
+                    if key in buckets:
+                        networks = buckets[key]
                         for ip_b, plen in cidrs_raw:
                             try:
                                 if len(ip_b) == 4:
@@ -1334,14 +1364,24 @@ def _load_geoip_ru() -> list:
                 else: break
             except Exception: break
     except Exception: pass
-    _geoip_ru_nets = networks; _geoip_ru_mtime = mtime
-    return networks
+    _geoip_ru_nets = buckets; _geoip_ru_mtime = mtime
+    return buckets.get(cat, [])
+
 
 def _ip_in_geoip_ru(addr: str) -> bool:
+    return _ip_in_geoip(addr, ["geoip:ru"])
+
+
+def _ip_in_geoip(addr: str, refs: list[str]) -> bool:
     try:
         ip = ipaddress.ip_address(addr)
-        return any(ip in net for net in _load_geoip_ru())
-    except ValueError: return False
+    except ValueError:
+        return False
+    for ref in refs:
+        cat = ref.split(":", 1)[1] if ":" in ref else ref
+        if any(ip in net for net in _load_geoip(cat)):
+            return True
+    return False
 
 def _empty_geosite() -> dict:
     return {"full": set(), "domain": set(), "plain": [], "regex": []}
@@ -1622,6 +1662,14 @@ def route_test(target: str, settings: dict) -> dict:
             return result_with_note("direct", hit, f"{domain} есть в {hit}", "geosite_database")
 
     if profile == "blocked_only":
+        # An address the household dialled directly, with no name for the
+        # sniffer to read. This is the Telegram case, and leaving it out of the
+        # tester would hide exactly the failure that put it here.
+        for ip in ips:
+            if _ip_in_geoip(ip, BLOCKED_IP_LISTS):
+                return result_with_note(final, "geoip:ru-blocked",
+                                        f"{ip} в списке заблокированных адресов",
+                                        "geoip_database")
         # The half this page used to leave out. It checked the two "keep it in
         # Russia" lists and then answered "direct" for everything else --
         # including every domain the profile actually sends through the tunnel,

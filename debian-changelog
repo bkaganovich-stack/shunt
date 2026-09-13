@@ -1,3 +1,26 @@
+shunt (2.14.0) stable; urgency=medium
+
+  * Telegram works again, and the reason it stopped is the design fault worth
+    recording. 2.12.0 built the "only blocked" profile entirely out of domain
+    lists, and a domain list only decides traffic that carries a name: xray
+    reads SNI, and a client that dials an address directly never sends one.
+    MTProto connects to Telegram's data centres by IP, so no domain list routed
+    any of it and the profile sent it straight out to be blocked. The household
+    noticed within hours -- the correct amount of time for a gateway to take to
+    prove a design wrong.
+  * The profile now also routes on addresses: geoip:ru-blocked and
+    geoip:ru-blocked-community. Measured before adding rather than after: 89 486
+    networks, 0.019 per cent of IPv4, the largest entries being Meta's
+    157.240.0.0/16 and 57.144.0.0/14. This is not a quiet return to tunnelling
+    everything foreign.
+  * geoip:ru keeps its place ahead of the blocklists. A Russian address that
+    also appears on one is far more likely to be a service refusing foreign
+    addresses than something worth tunnelling.
+  * The route tester answers for a bare address too. Leaving it out would have
+    hidden exactly the failure that prompted this.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sun, 13 Sep 2026 22:05:00 +0300
+
 shunt (2.13.0) stable; urgency=medium
 
   * A manual routing rule can be switched off instead of deleted. Until now a
