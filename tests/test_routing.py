@@ -130,6 +130,26 @@ class TestCustomRuleToXray:
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: build_xray_config
 # ─────────────────────────────────────────────────────────────────────────────
+class TestWhatGetsLogged:
+    """
+    access.log has never carried a domain name, and the fix that looks obvious
+    is not one. Setting routeOnly false was tried against Xray 26.3.27 on the
+    live gateway: not one name appeared, because the access line for a
+    dokodemo-door TPROXY inbound is written from the original destination
+    whatever sniffing decides afterwards. Pinned here as True so nobody
+    "fixes" it again and quietly makes every direct connection pay for a
+    resolution that buys nothing. Sniffing itself works -- measured the same
+    afternoon, www.linkedin.com routes to the tunnel although its address is
+    on no address list.
+    """
+
+    def test_route_only_stays_on_until_something_proves_otherwise(self):
+        sniff = m.build_xray_config(dict(m.DEFAULT_SETTINGS))["inbounds"][0]["sniffing"]
+        assert sniff["routeOnly"] is True
+        assert sniff["enabled"] is True
+        assert "quic" in sniff["destOverride"]
+
+
 class TestTrafficThatCarriesNoName:
     """
     Telegram broke within hours of the profile switch, and the reason is worth

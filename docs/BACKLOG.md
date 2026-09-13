@@ -420,6 +420,36 @@ can only be found by probing addresses, and nothing collects those candidates
 yet. `traffic_hourly` records dst_host, which is a name when there was one and
 an address when there was not, so the material may already be there.
 
+## 11. Give the addresses in the log their names back
+
+`access.log` records destinations as addresses and never as names. The cause is
+`routeOnly` on the inbound: the sniffer reads the name, uses it to choose a
+route, and discards it. Fourteen versions of analytics have shown
+157.240.205.60 where they meant instagram, and the block probe took its
+candidates from the same table, which is how its first run probed addresses and
+reported 38 of 40 destinations as down.
+
+The obvious fix was tried and measured and does not work. With `routeOnly`
+false against Xray 26.3.27, not one name appeared: for a dokodemo-door TPROXY
+inbound the access line is written from the original destination whatever
+sniffing decides afterwards. It also made every direct connection pay for the
+gateway's resolver to pick an address the client had already chosen, so it was
+reverted. Sniffing itself is fine -- www.linkedin.com routes to the tunnel
+although its address is on no address list.
+
+The names have to come from somewhere else, and this gateway is already the
+place they exist: every client resolves through dnsmasq and `doh_proxy.py`,
+which handles the wire-format answer that contains both the name and the
+addresses it maps to. Recording that as a bounded address-to-name map, dumped
+periodically rather than written per query, would let the analytics ingester
+name what it counts and the probe take real domains as candidates.
+
+Two things to get right. The map has to be bounded and to expire, because a CDN
+address is reused by a different name within the hour and stale names are worse
+than none. And it belongs beside the log rather than inside the datapath: a
+resolver that has to write to a database before it can answer is a resolver that
+fails when the disk is busy.
+
 ## Earlier items, unchanged
 
 - **Sources**: the manifest format and registry ship as of 2.2.0, reading only.

@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.15.1"
+VERSION = "2.16.1"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -801,6 +801,26 @@ def build_xray_config(settings: dict) -> dict:
             "tag": "tproxy-in", "port": 12345,
             "protocol": "dokodemo-door",
             "settings": {"network": "tcp,udp", "followRedirect": True},
+            # routeOnly: the sniffed name is used to choose a route and then
+            # discarded. That is why nothing in access.log has ever carried a
+            # name, and why every page built on that log shows 157.240.205.60
+            # where it means instagram.
+            #
+            # The obvious fix does not work, and this comment exists so nobody
+            # spends the afternoon again: setting routeOnly false was tried on
+            # the live gateway against Xray 26.3.27 and NOT ONE name appeared
+            # in the log. For a dokodemo-door TPROXY inbound the access line is
+            # written from the original destination whatever sniffing later
+            # decides. It was reverted rather than left, because with the
+            # destination replaced by a name every direct connection pays for
+            # the gateway's resolver to pick an address the client had already
+            # chosen -- a real cost for no benefit at all.
+            #
+            # Sniffing itself is fine, measured the same afternoon:
+            # www.linkedin.com and www.openai.com route to the tunnel although
+            # neither address is on any address list, so the name is read and
+            # used. Getting it INTO the log needs the names from somewhere
+            # else -- the resolver this gateway already runs. See backlog 11.
             "sniffing": {"enabled": True,
                          "destOverride": ["http", "tls", "quic"],
                          "routeOnly": True},

@@ -1,3 +1,41 @@
+shunt (2.16.1) stable; urgency=medium
+
+  * 2.16.0's attempt to get domain names into access.log is reverted, because
+    it was measured on the live gateway and did nothing. With routeOnly false
+    and Xray 26.3.27, not one name appeared: for a dokodemo-door TPROXY inbound
+    the access line is written from the original destination whatever sniffing
+    decides afterwards. What the setting did do was make every direct
+    connection pay for the gateway's resolver to pick an address the client had
+    already chosen -- a real cost for no benefit, so it is gone, and both the
+    code and the tests now say why so the afternoon is not spent again.
+  * Sniffing itself is fine, which was worth establishing while looking:
+    www.linkedin.com and www.openai.com route to the tunnel although neither
+    address appears on any address list, so the name is read and used. It is
+    only never written down.
+  * Backlog item 11 records the mechanism that would actually work: this
+    gateway runs the resolver every client uses, so the addresses in the log
+    can be given names from the answers it already handles.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 01:55:00 +0300
+
+shunt (2.16.0) stable; urgency=medium
+
+  * access.log records destinations by name. It never has: the inbound sniffed
+    the name, used it to choose a route and threw it away, because routeOnly
+    was set. Fourteen versions of analytics have been showing 157.240.205.60
+    where they meant instagram, and the block probe added in 2.15.0 took its
+    candidates from the same table and therefore probed addresses -- which is
+    how it came to report 38 of 40 destinations as down on its first run.
+  * The cost is stated rather than discovered: with the destination replaced by
+    a name, the outbound resolves that name itself. For tunnelled traffic that
+    is an improvement -- the SOCKS server resolves at the far end, which is
+    what a tunnel is for. For direct traffic the gateway's resolver picks the
+    address instead of the client's, so a client that had already chosen a CDN
+    node may be sent to a different one. analytics.log_domains turns it back
+    off for anybody that matters to.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 01:30:00 +0300
+
 shunt (2.15.1) stable; urgency=medium
 
   * The first live run of the block probe reported 38 of 40 destinations as

@@ -630,6 +630,10 @@ class TestXrayConfigWithDevices:
         assert src[0]["outboundTag"] == "direct"
 
     def test_quic_sniffing_preserved(self):
+        # routeOnly is why no domain name has ever reached access.log: the
+        # name is read, used to pick a route, and discarded. Turning it off
+        # was measured and changed nothing -- see TestWhatGetsLogged in
+        # test_routing.py.
         cfg = self._build({})
         sniff = cfg["inbounds"][0]["sniffing"]
         assert "quic" in sniff["destOverride"]
