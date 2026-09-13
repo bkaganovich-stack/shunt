@@ -348,7 +348,7 @@ def should_run_now(task: dict) -> bool:
 
 SCHEDULER_TASK_TYPES = (
     "geo_update", "backup", "subscription_update",
-    "health_check", "log_rotate",
+    "health_check", "log_rotate", "block_probe",
 )
 
 
@@ -372,9 +372,91 @@ async def run_scheduled_task(task: dict, settings: dict) -> tuple[str, str]:
         if t == "log_rotate":
             r = await loop.run_in_executor(None, _task_log_rotate)
             return r
+        if t == "block_probe":
+            r = await loop.run_in_executor(None, _task_block_probe)
+            return r
         return "error", f"unknown task type: {t}"
     except Exception as e:
         return "error", str(e)[:200]
+
+
+def _probe_paths(settings: dict) -> tuple[str, str]:
+    """
+    The two paths a probe compares: (wan interface, socks endpoint).
+
+    The direct one is bound to the WAN port rather than left to routing,
+    because routing is the thing under test -- asking the gateway to reach a
+    host "normally" would send the probe through whatever rule already exists
+    and answer a question nobody asked.
+    """
+    wan = ""
+    try:
+        for line in (BASE / "config" / "network.conf").read_text().splitlines():
+            if line.startswith("WAN_IF="):
+                wan = line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    if settings.get("egress_active") == "fptn":
+        eg = settings.get("fptn", {})
+    else:
+        eg = settings.get("adguard", {})
+    socks = "%s:%s" % (eg.get("socks_host", "127.0.0.1"), eg.get("socks_port", 1081))
+    return wan, socks
+
+
+def _task_block_probe() -> tuple[str, str]:
+    """
+    Compare both paths for the domains the household uses, and route what only
+    works through the tunnel.
+
+    The lists this gateway routes by will always lag -- claude.ai was on them
+    and anthropic.com was not, so the API answered 403 while the web interface
+    worked. This closes that gap by measuring rather than by waiting for
+    somebody upstream to notice.
+    """
+    import main as _main       # deferred, as everywhere else in this file
+    import blockprobe as _bp
+    import db as _db
+
+    settings = _main.load_settings()
+    cfg = settings.get("probe", {}) or {}
+    if not cfg.get("enabled", True):
+        return "ok", "проверка выключена"
+
+    wan, socks = _probe_paths(settings)
+    if not wan:
+        return "error", "не определён WAN-порт: некуда направить прямую пробу"
+
+    known = settings.get("discovered", [])
+    before = set(_bp.routed_domains(known))
+    hosts = _db.top_hosts(hours=int(cfg.get("window_hours", 168)), limit=500)
+
+    record, counts = _bp.run_once(
+        hosts, known,
+        _bp.curl_runner(interface=wan),
+        _bp.curl_runner(via_socks=socks),
+        limit=int(cfg.get("limit", 40)),
+        min_streak=int(cfg.get("min_streak", 2)),
+        timeout=int(cfg.get("timeout", 12)))
+
+    fresh = _main.load_settings()
+    fresh["discovered"] = record
+    _main.save_settings(fresh)
+
+    after = set(_bp.routed_domains(record))
+    detail = ("проверено %d: заблокировано %d, доступно %d, лежит %d"
+              % (sum(counts.values()), counts.get("blocked", 0),
+                 counts.get("open", 0), counts.get("down", 0)))
+    if after != before:
+        # Only when the routing actually changes. A run that confirms what was
+        # already true must not restart the datapath a household is using.
+        ok, err = _main.apply_config(fresh, "block_probe")
+        added = sorted(after - before); gone = sorted(before - after)
+        detail += "; в туннель: %s; обратно напрямую: %s" % (
+            ", ".join(added) or "—", ", ".join(gone) or "—")
+        if not ok:
+            return "error", detail + "; применение не удалось: " + err
+    return "ok", detail
 
 
 def _task_geo_update() -> tuple[str, str]:

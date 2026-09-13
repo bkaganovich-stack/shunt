@@ -1399,6 +1399,22 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <button class="btn btn-primary" onclick="saveRules()">✓ Сохранить правила</button>
         <span id="rules-result" class="text-muted" style="font-size:13px"></span>
       </div>
+
+      <div class="card">
+        <h3>🔎 Найдено проверкой</h3>
+        <p class="text-muted" style="font-size:13px;margin:4px 0 10px">
+          Списки блокировок всегда отстают. Шлюз сам проверяет домены, которыми
+          вы пользуетесь, двумя путями — напрямую и через туннель — и отправляет
+          в туннель то, что работает только через него. Домен уезжает в туннель
+          не раньше, чем покажет себя заблокированным дважды подряд.
+        </p>
+        <div id="discovered-meta" class="text-muted" style="font-size:12px;margin-bottom:8px"></div>
+        <div id="discovered-list" class="rules-list"></div>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn btn-secondary btn-sm" onclick="runProbe()">Проверить сейчас</button>
+          <span id="discovered-result" class="text-muted" style="font-size:13px"></span>
+        </div>
+      </div>
     </div>
 
     <!-- ── DEVICES ───────────────────────────────────────────────────────── -->
@@ -3254,6 +3270,7 @@ async function loadRules() {
   _rulesData = r;
   renderRulesList('direct', r.always_direct || []);
   renderRulesList('vpn',    r.always_vpn    || []);
+  loadDiscovered();
 }
 
 // Rules arrive as {rule, enabled}; a settings.json written before 2.13.0 holds
@@ -3315,6 +3332,57 @@ function removeRule(type, idx) {
   const list = type === 'direct' ? _rulesData.always_direct : _rulesData.always_vpn;
   list.splice(idx, 1);
   renderRulesList(type, list);
+}
+
+async function loadDiscovered() {
+  const r = await apiJ('GET', '/api/discovered');
+  if (!r) return;
+  const meta = document.getElementById('discovered-meta');
+  const when = r.last_run ? new Date(r.last_run * 1000).toLocaleString('ru-RU') : 'ещё не запускалась';
+  const every = { '@hourly':'раз в час', '@daily':'раз в сутки',
+                  '@weekly':'раз в неделю', '@monthly':'раз в месяц' }[r.schedule]
+                || (r.schedule ? ('по расписанию ' + r.schedule) : 'проверка не запланирована');
+  meta.textContent = `В туннеле по результатам проверки: ${r.routed}. Проверка ${every}; последняя — ${when}.`;
+  const el = document.getElementById('discovered-list');
+  if (!r.rows.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:4px 0">Пока ничего не найдено</div>';
+    return;
+  }
+  el.innerHTML = r.rows.map(row => {
+    const on = row.enabled !== false;
+    const routed = row.routed && on;
+    const seen = row.last_checked ? new Date(row.last_checked * 1000).toLocaleDateString('ru-RU') : '—';
+    return `
+    <div class="rule-tag${routed ? '' : ' off'}">
+      <button class="r-off" onclick="toggleDiscovered('${escHtml(row.domain)}')"
+              title="${on ? 'Не отправлять в туннель' : 'Отправлять в туннель'}">${on ? '◉' : '◎'}</button>
+      <span class="r-val">${escHtml(row.domain)}</span>
+      <span style="color:var(--muted);font-size:11px;white-space:nowrap">
+        напрямую ${escHtml(String(row.direct))} · туннель ${escHtml(String(row.tunnel))} · ${seen}
+      </span>
+      <button class="r-del" onclick="forgetDiscovered('${escHtml(row.domain)}')" title="Забыть">×</button>
+    </div>`;
+  }).join('');
+}
+
+async function toggleDiscovered(domain) {
+  await apiJ('POST', `/api/discovered/${encodeURIComponent(domain)}/toggle`);
+  loadDiscovered();
+}
+
+async function forgetDiscovered(domain) {
+  if (!confirm(`Забыть ${domain}? Следующая проверка может найти его снова.`)) return;
+  await apiJ('DELETE', `/api/discovered/${encodeURIComponent(domain)}`);
+  loadDiscovered();
+}
+
+async function runProbe() {
+  const res = document.getElementById('discovered-result');
+  res.textContent = 'Проверяю оба пути…'; res.className = 'text-muted';
+  const r = await apiJ('POST', '/api/discovered/run');
+  res.textContent = (r?.ok ? '✓ ' : '✕ ') + (r?.detail || 'не удалось');
+  res.className = r?.ok ? 'text-green' : 'text-red';
+  loadDiscovered();
 }
 
 async function saveRules() {

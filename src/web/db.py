@@ -180,6 +180,27 @@ def upsert_traffic_batch(entries: list) -> None:
         """, entries)
 
 
+def top_hosts(hours: int = 168, limit: int = 500) -> list[str]:
+    """
+    The destinations the household actually used, busiest first.
+
+    This is the candidate list for the block probe, and the ordering is the
+    whole value of it: a run that starts with the domain somebody opened once
+    last week spends its budget on nothing anybody will miss.
+    """
+    cutoff = time.strftime("%Y-%m-%d %H", time.gmtime(time.time() - hours * 3600))
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT dst_host, SUM(count) AS total
+            FROM traffic_hourly
+            WHERE hour >= ?
+            GROUP BY dst_host
+            ORDER BY total DESC
+            LIMIT ?
+        """, (cutoff, limit)).fetchall()
+    return [r["dst_host"] for r in rows if r["dst_host"]]
+
+
 def get_traffic_summary(hours: int = 24) -> dict:
     """Return aggregated traffic stats for the last N hours."""
     cutoff = time.strftime("%Y-%m-%d %H", time.gmtime(time.time() - hours * 3600))

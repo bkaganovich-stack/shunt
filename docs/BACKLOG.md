@@ -387,38 +387,38 @@ from -- there is no apt source, no installer trace and nothing in the shell
 history. The hashes of what is running are recorded so a rebuild can at least
 verify it got the same bytes. Writing the source down is the open part.
 
-## 10. The list will always lag, so measure the rest
+## 10. The list will always lag, so measure the rest — shipped in 2.15.0
 
-2.12.0 makes one profile answer both directions of blocking, because
-`ru-blocked` is built from what does not work FROM Russia rather than from who
-does the blocking. That covers most of it and it is not complete, and the gap
-has a name: **`claude.ai` is in the list and `anthropic.com` is not**. The web
-interface goes through the tunnel and the API goes straight out and fails. Of
-thirty companies probed that have restricted Russian users at some point,
-eleven are in the lists.
+`geosite:ru-blocked` carries claude.ai and has never carried anthropic.com, so
+the web interface went through the tunnel and the API answered 403. Of thirty
+companies probed by hand that have restricted Russian users, eleven were on the
+lists. No list closes that; measurement does.
 
-No list will close that. The gap is closed by measurement, and the material is
-already here: the analytics database holds the domains the household actually
-visits, and both paths are available from the box -- direct with fwmark 0xff,
-tunnelled through `127.0.0.1:1081`.
+The gateway now probes both paths -- bound to the WAN port, and through the
+active egress SOCKS -- for the domains the household actually uses, and compares.
+Direct fails and tunnel works is a block, whoever is doing it. Both work is
+open. Both fail is a site that is down. Two consecutive blocked runs before
+anything is routed; one working run undoes it; everything on the record is
+re-probed, because a feature that can only add to a list slowly tunnels
+everything. The interval is an ordinary scheduler task, so daily and weekly are
+the control that already existed.
 
-So: once a day, take the domains seen recently and probe each one both ways.
-Direct fails and tunnelled succeeds means blocked, whoever is doing it; both
-succeed means direct and nothing to do; both fail means the site is down and is
-not our business. Comparing the two paths is what separates a block from an
-outage, and one direct probe cannot.
+Measured before shipping: api.anthropic.com and web.telegram.org are found,
+github, slack, figma, docker and coursera are correctly left alone.
 
-The honest limit is worth stating in the same breath: a foreign service that
-answers `403` over a perfectly healthy TLS session is invisible to a
-transparent proxy, which does not read into the stream. An active probe sees it
-because the probe is its own client; passive observation of the household's
-traffic does not. So this catches "refuses to connect" and "refuses the probe",
-not "serves a 403 only to a logged-in user".
+**What it still cannot see, left open on purpose.** A redirect that ends at a
+polite 200: claude.ai answers 302 to an "app unavailable in region" page, so
+both paths look like success. Catching it would mean comparing where the two
+paths land, and the first thing that would catch is every locale redirect in
+the world. The lists carry claude.ai already. Also unchanged: a service that
+serves 403 only to a logged-in browser session is beyond a probe that is its
+own client.
 
-Costs to bound before building: a site that is merely down must not move into
-the tunnel, so require several failures in a row and re-probe to demote; and the
-learned list belongs in front of the household with dates and evidence, not
-silently in the datapath.
+**Still to do:** the probe decides by domain, and the Telegram lesson says that
+is only half. Traffic dialled by address -- a client with no name to sniff --
+can only be found by probing addresses, and nothing collects those candidates
+yet. `traffic_hourly` records dst_host, which is a name when there was one and
+an address when there was not, so the material may already be there.
 
 ## Earlier items, unchanged
 

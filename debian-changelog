@@ -1,3 +1,42 @@
+shunt (2.15.0) stable; urgency=medium
+
+  * The gateway now finds blocked destinations by measuring instead of waiting
+    for a list. Twice a schedule of the household's choosing it takes the
+    domains they actually use, probes each one down both paths -- bound to the
+    WAN port, and through the active egress SOCKS -- and compares. Direct fails
+    and the tunnel works means blocked, whoever is doing it; both work means
+    open; both fail means the site is down and is not the gateway's business.
+    One probe cannot tell a block from an outage, which is why there are two.
+  * The interval is a scheduler task like every other recurring job, so
+    "@daily" and "@weekly" are the control the household already knows from geo
+    updates rather than a second one invented for this.
+  * A domain has to look blocked on two consecutive runs before anything is
+    routed, and a single working run stops it again. Being too eager to stop is
+    the safe mistake: a site that was down for one probe must not move a
+    household's traffic into a tunnel, and a domain unblocked in September must
+    not stay tunnelled because it was blocked in June. Everything on the record
+    is re-probed, because a feature that can only add to a list slowly tunnels
+    everything.
+  * A site that answers directly costs one probe, not two: the verdict is
+    already decided, and asking the tunnel would spend a request to learn
+    nothing.
+  * What it finds is in front of the household on the routing page, with both
+    observations and the date, and each domain can be switched off one at a
+    time -- a feature that moves traffic on its own has to show its reasons.
+  * Measured on the live gateway before shipping: api.anthropic.com is found
+    blocked (403 direct, 404 tunnelled) and web.telegram.org is found blocked
+    (no answer direct, 200 tunnelled), while github, slack, figma, docker and
+    coursera are correctly left alone. That first one is the gap this exists
+    for -- claude.ai has been on the lists all along and anthropic.com never
+    was.
+  * The blind spot is documented rather than guessed at: a redirect that ends
+    at a polite 200 is invisible. claude.ai answers 302 to an
+    "app unavailable in region" page, so both paths look like success. Catching
+    that would mean comparing where the two paths land, which would flag every
+    locale redirect in the world.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sun, 13 Sep 2026 23:55:00 +0300
+
 shunt (2.14.0) stable; urgency=medium
 
   * Telegram works again, and the reason it stopped is the design fault worth

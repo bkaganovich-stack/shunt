@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.14.0"
+VERSION = "2.15.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -20,6 +20,7 @@ import netpath as _np
 import inbound as _in
 import dnspath as _dns
 import geosite as _geo
+import blockprobe as _bp
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -113,6 +114,13 @@ DEFAULT_SETTINGS: dict = {
     # Scheduler tasks: [{id, name, type, enabled, schedule, last_run_ts,
     #                    last_result, last_error}]
     "scheduler_tasks": [],
+    # What the block probe has found, and how it looks for it. The interval is
+    # deliberately NOT here: it belongs to a scheduler task like every other
+    # recurring job, so "check daily" and "check weekly" are the same control
+    # the household already has for geo updates rather than a second one.
+    "discovered": [],
+    "probe": {"enabled": True, "limit": 40, "min_streak": 2,
+              "window_hours": 168, "timeout": 12},
     # Terminal mode
     "terminal": {
         "mode":             "full",  # disabled|diagnostic|allowlist|full
@@ -685,6 +693,11 @@ def _realtime_rules(enabled: bool) -> list[dict]:
         {"type": "field", "ip":     REALTIME_IPS,     "outboundTag": "direct"},
     ]
 
+def _discovered_domains(settings: dict) -> list[str]:
+    """Domains the probe measured as blocked and nobody switched off."""
+    return _bp.routed_domains(settings.get("discovered", []))
+
+
 def build_xray_config(settings: dict) -> dict:
     profile        = settings.get("profile", "all_except_ru")
     custom         = settings.get("custom_rules", {"always_direct": [], "always_vpn": []})
@@ -741,6 +754,12 @@ def build_xray_config(settings: dict) -> dict:
             {"type": "field", "domain": RU_ONLY_LISTS,     "outboundTag": "direct"},
             {"type": "field", "domain": BLOCKED_LISTS,     "outboundTag": final},
             {"type": "field", "ip":     BLOCKED_IP_LISTS,  "outboundTag": final},
+            # What measurement found that no list carries. Placed last of the
+            # tunnel rules, so a name the lists already decide is decided by
+            # them and this only covers the gap.
+            *([{"type": "field",
+                "domain": ["domain:" + d for d in _discovered_domains(settings)],
+                "outboundTag": final}] if _discovered_domains(settings) else []),
         ]
         default = "direct"
     elif profile == "direct":
@@ -1670,6 +1689,17 @@ def route_test(target: str, settings: dict) -> dict:
                 return result_with_note(final, "geoip:ru-blocked",
                                         f"{ip} в списке заблокированных адресов",
                                         "geoip_database")
+        if domain:
+            for row in settings.get("discovered", []):
+                if row.get("domain") != domain or not row.get("routed"):
+                    continue
+                if not row.get("enabled", True):
+                    continue
+                return result_with_note(
+                    final, "probe:discovered",
+                    "проверка: напрямую %s, через туннель %s"
+                    % (row.get("direct"), row.get("tunnel")), "block_probe")
+
         # The half this page used to leave out. It checked the two "keep it in
         # Russia" lists and then answered "direct" for everything else --
         # including every domain the profile actually sends through the tunnel,
@@ -2936,6 +2966,61 @@ async def set_custom_rules(req: CustomRulesReq, u: str = Depends(auth_dep)):
     save_settings(s)
     ok, err = apply_config(s, "custom_rules_change", _pre_settings=old_s)
     return {"ok": ok, "error": err or None}
+
+# ── What measurement found ─────────────────────────────────────────────────────
+# In front of the household rather than silently in the datapath: a feature that
+# moves traffic into a tunnel on its own has to show what it decided and why,
+# and be switchable off one domain at a time.
+
+@app.get("/api/discovered")
+async def get_discovered(u: str = Depends(auth_dep)):
+    s = load_settings()
+    rows = sorted(s.get("discovered", []),
+                  key=lambda r: (not r.get("routed"), r.get("domain", "")))
+    task = next((t for t in s.get("scheduler_tasks", [])
+                 if t.get("type") == "block_probe"), None)
+    return {"rows": rows,
+            "routed": len(_discovered_domains(s)),
+            "probe": s.get("probe", {}),
+            "schedule": (task or {}).get("schedule"),
+            "last_run": (task or {}).get("last_run_ts")}
+
+
+@app.post("/api/discovered/{domain}/toggle")
+async def toggle_discovered(domain: str, u: str = Depends(auth_dep)):
+    s = load_settings(); old = dict(s)
+    row = next((r for r in s.get("discovered", []) if r.get("domain") == domain), None)
+    if not row: raise HTTPException(404, "Domain not found")
+    row["enabled"] = not row.get("enabled", True)
+    save_settings(s)
+    # Only reapply when this domain was actually routing something; switching a
+    # domain nobody routes must not restart the datapath.
+    if row.get("routed"):
+        ok, err = apply_config(s, "discovered_toggle", _pre_settings=old)
+        return {"ok": ok, "error": err or None, "enabled": row["enabled"]}
+    return {"ok": True, "error": None, "enabled": row["enabled"]}
+
+
+@app.delete("/api/discovered/{domain}")
+async def forget_discovered(domain: str, u: str = Depends(auth_dep)):
+    s = load_settings(); old = dict(s)
+    rows = s.get("discovered", [])
+    row = next((r for r in rows if r.get("domain") == domain), None)
+    if not row: raise HTTPException(404, "Domain not found")
+    s["discovered"] = [r for r in rows if r.get("domain") != domain]
+    save_settings(s)
+    if row.get("routed") and row.get("enabled", True):
+        ok, err = apply_config(s, "discovered_forget", _pre_settings=old)
+        return {"ok": ok, "error": err or None}
+    return {"ok": True, "error": None}
+
+
+@app.post("/api/discovered/run")
+async def run_discovered_probe(u: str = Depends(auth_dep)):
+    result, detail = await _ft.run_scheduled_task({"type": "block_probe"},
+                                                  load_settings())
+    return {"ok": result == "ok", "detail": detail}
+
 
 # ── Route Test ─────────────────────────────────────────────────────────────────
 @app.post("/api/route-test")
