@@ -340,6 +340,11 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
 .rule-tag .r-del { cursor: pointer; color: var(--muted); font-size: 16px; line-height: 1;
                    padding: 0 2px; border: none; background: none; }
 .rule-tag .r-del:hover { color: var(--red); }
+.rule-tag .r-off { cursor: pointer; color: var(--muted); font-size: 12px; line-height: 1;
+                   padding: 0 2px; border: none; background: none; }
+.rule-tag .r-off:hover { color: var(--text); }
+.rule-tag.off { opacity: 0.5; }
+.rule-tag.off .r-val { text-decoration: line-through; color: var(--muted); }
 .rule-add-row { display: flex; gap: 8px; margin-top: 8px; }
 .rule-add-row input { flex: 1; }
 
@@ -3251,6 +3256,13 @@ async function loadRules() {
   renderRulesList('vpn',    r.always_vpn    || []);
 }
 
+// Rules arrive as {rule, enabled}; a settings.json written before 2.13.0 holds
+// bare strings, and those mean enabled.
+function ruleOf(r) {
+  return (typeof r === 'string') ? { rule: r, enabled: true }
+                                 : { rule: r.rule, enabled: r.enabled !== false };
+}
+
 function renderRulesList(type, rules) {
   const el = document.getElementById(`rules-${type}-list`);
   if (!el) return;
@@ -3258,11 +3270,23 @@ function renderRulesList(type, rules) {
     el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:4px 0">Нет правил</div>';
     return;
   }
-  el.innerHTML = rules.map((r, i) => `
-    <div class="rule-tag">
-      <span class="r-val">${escHtml(r)}</span>
+  el.innerHTML = rules.map((raw, i) => {
+    const r = ruleOf(raw);
+    return `
+    <div class="rule-tag${r.enabled ? '' : ' off'}">
+      <button class="r-off" onclick="toggleRule('${type}',${i})"
+              title="${r.enabled ? 'Выключить — правило останется в списке' : 'Включить'}">${r.enabled ? '◉' : '◎'}</button>
+      <span class="r-val">${escHtml(r.rule)}</span>
       <button class="r-del" onclick="removeRule('${type}',${i})" title="Удалить">×</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+function toggleRule(type, idx) {
+  const list = type === 'direct' ? _rulesData.always_direct : _rulesData.always_vpn;
+  const r = ruleOf(list[idx]);
+  list[idx] = { rule: r.rule, enabled: !r.enabled };
+  renderRulesList(type, list);
 }
 
 function addRule(type) {
@@ -3272,7 +3296,7 @@ function addRule(type) {
   document.getElementById(errId).textContent = '';
   if (!val) return;
   const list = type === 'direct' ? _rulesData.always_direct : _rulesData.always_vpn;
-  if (list.includes(val)) {
+  if (list.some(r => ruleOf(r).rule === val)) {
     document.getElementById(errId).textContent = 'Правило уже добавлено'; return;
   }
   // Basic client-side validation (mirrors server)
@@ -3282,7 +3306,7 @@ function addRule(type) {
   if (!ok) {
     document.getElementById(errId).textContent = 'Неверный формат'; return;
   }
-  list.push(val);
+  list.push({ rule: val, enabled: true });
   renderRulesList(type, list);
   document.getElementById(inputId).value = '';
 }

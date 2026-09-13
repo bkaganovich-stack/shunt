@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.12.0"
+VERSION = "2.13.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -180,6 +180,8 @@ def _migrate_settings(s: dict) -> dict:
     s.setdefault("version", VERSION)
     s["custom_rules"].setdefault("always_direct", [])
     s["custom_rules"].setdefault("always_vpn", [])
+    for _k in ("always_direct", "always_vpn"):
+        s["custom_rules"][_k] = _norm_rules(s["custom_rules"][_k])
     return s
 
 def load_settings() -> dict:
@@ -461,7 +463,41 @@ def _custom_rule_to_xray(rule: str) -> tuple[str, str]:
         pass
     return "domain", f"domain:{rule}"
 
-def _rules_to_xray_entry(rules: list[str], outbound: str) -> list[dict]:
+def _norm_rules(rules) -> list[dict]:
+    """
+    Custom rules as {rule, enabled}, whichever form they were stored in.
+
+    They used to be plain strings, so the only way to stop one applying was to
+    delete it -- which loses the rule and the reason it was written. That is a
+    bad trade when the question is "is this still needed": the honest way to
+    find out is to switch it off, watch, and switch it back. Port forwards have
+    had an `enabled` flag since 2.8.0 for exactly this reason, so this is the
+    house form rather than a new idea.
+
+    Strings are still accepted and still mean enabled, because a settings.json
+    written by any earlier version is full of them and a rule that silently
+    stopped applying after an upgrade would be the worst possible way to
+    introduce a switch.
+    """
+    out = []
+    for r in rules or []:
+        if isinstance(r, dict):
+            text = str(r.get("rule", "")).strip()
+            if text:
+                out.append({"rule": text, "enabled": bool(r.get("enabled", True))})
+        elif isinstance(r, str) and r.strip():
+            out.append({"rule": r.strip(), "enabled": True})
+    return out
+
+
+def _enabled_rules(rules) -> list[str]:
+    return [r["rule"] for r in _norm_rules(rules) if r["enabled"]]
+
+
+def _rules_to_xray_entry(rules, outbound: str) -> list[dict]:
+    # Only what is switched on reaches the datapath. A rule switched off in the
+    # interface must not be on the wire -- the same sentence as for inbound.
+    rules = _enabled_rules(rules)
     if not rules: return []
     domain_vals, ip_vals = [], []
     for r in rules:
@@ -1541,12 +1577,20 @@ def route_test(target: str, settings: dict) -> dict:
     if domain and _is_private_domain(domain):
         return result("direct", "geosite:private", f"{domain} is private domain", "system")
 
-    for rule in custom.get("always_direct", []):
-        if _custom_matches(rule, domain, ips[0] if ips else None):
-            return result("direct", f"custom:always_direct ({rule})", rule_source="custom_rule")
-    for rule in custom.get("always_vpn", []):
-        if _custom_matches(rule, domain, ips[0] if ips else None):
-            return result(final, f"custom:always_vpn ({rule})", rule_source="custom_rule")
+    # A switched-off rule does not route anything, but it is exactly what
+    # someone testing a domain wants to hear about: the whole point of the
+    # switch is to turn a rule off and find out whether anything needed it.
+    # Saying nothing would make the page look like the rule had been deleted.
+    disabled_hit = ""
+    for lst, tag in (("always_direct", "direct"), ("always_vpn", final)):
+        for item in _norm_rules(custom.get(lst, [])):
+            if not _custom_matches(item["rule"], domain, ips[0] if ips else None):
+                continue
+            if item["enabled"]:
+                return result(tag, f"custom:{lst} ({item['rule']})",
+                              rule_source="custom_rule")
+            disabled_hit = disabled_hit or ("подошло бы выключенное правило "
+                                            f"{lst}: {item['rule']}")
 
     # Check device policies for current source (route test is source-agnostic, skip)
 
@@ -1560,16 +1604,22 @@ def route_test(target: str, settings: dict) -> dict:
         if domain and _domain_matches_apple_cdn(domain):
             return result(final, "apple-cdn-override", rule_source="system_override")
 
+    def result_with_note(outbound, rule, note="", src=""):
+        r = result(outbound, rule, note, src)
+        if disabled_hit:
+            r["note"] = (r["note"] + " — " if r["note"] else "") + disabled_hit
+        return r
+
     if profile == "all":
-        return result(final, "catch-all", f"Profile: all traffic via {final}", "global_profile")
+        return result_with_note(final, "catch-all", f"Profile: all traffic via {final}", "global_profile")
 
     for ip in ips:
         if _ip_in_geoip_ru(ip):
-            return result("direct", "geoip:ru", f"{ip} is in geoip:ru", "geoip_database")
+            return result_with_note("direct", "geoip:ru", f"{ip} is in geoip:ru", "geoip_database")
     if domain:
         hit = _domain_in_any_geosite(domain, RU_ONLY_LISTS)
         if hit:
-            return result("direct", hit, f"{domain} есть в {hit}", "geosite_database")
+            return result_with_note("direct", hit, f"{domain} есть в {hit}", "geosite_database")
 
     if profile == "blocked_only":
         # The half this page used to leave out. It checked the two "keep it in
@@ -1580,14 +1630,14 @@ def route_test(target: str, settings: dict) -> dict:
         if domain:
             hit = _domain_in_any_geosite(domain, BLOCKED_LISTS)
             if hit:
-                return result(final, hit,
+                return result_with_note(final, hit,
                               f"{domain} есть в {hit} — заблокирован, идёт через туннель",
                               "geosite_database")
-        return result("direct", "catch-all",
+        return result_with_note("direct", "catch-all",
                       "Профиль «только заблокированное»: остальное идёт напрямую",
                       "global_profile")
 
-    return result(final, "catch-all",
+    return result_with_note(final, "catch-all",
                   f"not matched by any rule → {final}", "global_profile_fallback")
 
 # ── Connection Explain ─────────────────────────────────────────────────────────
@@ -2052,8 +2102,12 @@ class TopologyReq(BaseModel):
     lan_subnet: str = "192.168.100"  # inline: /24 base for the gateway↔router link
     wan_mac: str = ""             # inline: clone this MAC on WAN (ISP MAC-binding)
 class CustomRulesReq(BaseModel):
-    always_direct: list[str]
-    always_vpn:    list[str]
+    # Entries are either "domain:example.com" or {"rule": ..., "enabled": ...};
+    # the list is deliberately untyped so an older client that still sends bare
+    # strings keeps working. _norm_rules settles the shape, validate_custom_rule
+    # settles the text.
+    always_direct: list
+    always_vpn:    list
 class DeviceNameReq(BaseModel):   name: str
 class DevicePolicyReq(BaseModel): policy: str
 class VPNServerAddReq(BaseModel): key: str; name: str = ""; priority: int = 99
@@ -2818,14 +2872,19 @@ async def get_custom_rules(u: str = Depends(auth_dep)):
 
 @app.put("/api/custom-rules")
 async def set_custom_rules(req: CustomRulesReq, u: str = Depends(auth_dep)):
+    normalised = {"always_direct": _norm_rules(req.always_direct),
+                  "always_vpn":    _norm_rules(req.always_vpn)}
     errors = []
-    for lst, rule in [("always_direct", r) for r in req.always_direct] + \
-                     [("always_vpn",    r) for r in req.always_vpn]:
-        ok, msg = validate_custom_rule(rule)
-        if not ok: errors.append(f"[{lst}] {msg}")
+    for lst, items in normalised.items():
+        for item in items:
+            # A rule is validated whether or not it is switched on. Storing a
+            # malformed rule that only breaks when somebody enables it months
+            # later is how a form turns into a trap.
+            ok, msg = validate_custom_rule(item["rule"])
+            if not ok: errors.append(f"[{lst}] {msg}")
     if errors: raise HTTPException(400, "; ".join(errors))
     s = load_settings(); old_s = dict(s)
-    s["custom_rules"] = {"always_direct": req.always_direct, "always_vpn": req.always_vpn}
+    s["custom_rules"] = normalised
     save_settings(s)
     ok, err = apply_config(s, "custom_rules_change", _pre_settings=old_s)
     return {"ok": ok, "error": err or None}

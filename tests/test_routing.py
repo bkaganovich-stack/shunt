@@ -130,6 +130,66 @@ class TestCustomRuleToXray:
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: build_xray_config
 # ─────────────────────────────────────────────────────────────────────────────
+class TestRulesThatCanBeSwitchedOff:
+    """
+    A rule used to be a string, so the only way to stop it applying was to
+    delete it -- which loses the rule and the reason it was written. The
+    question these tests pin down is "what does off mean": not on the wire, not
+    forgotten, and still mentioned when someone asks where a domain would go.
+    """
+
+    def test_a_bare_string_still_means_enabled(self):
+        # Every settings.json written before this change is full of them.
+        assert m._norm_rules(["domain:a.com"]) == [
+            {"rule": "domain:a.com", "enabled": True}]
+
+    def test_both_forms_can_sit_in_one_list(self):
+        out = m._norm_rules(["domain:a.com",
+                             {"rule": "domain:b.com", "enabled": False}])
+        assert [r["enabled"] for r in out] == [True, False]
+
+    def test_blank_and_broken_entries_are_dropped_not_crashed_on(self):
+        assert m._norm_rules(["", "   ", {}, {"rule": ""}, None]) == []
+
+    def test_a_switched_off_rule_is_not_on_the_wire(self):
+        s = dict(m.DEFAULT_SETTINGS)
+        s["custom_rules"] = {"always_direct": [
+            {"rule": "domain:on.com", "enabled": True},
+            {"rule": "domain:off.com", "enabled": False}], "always_vpn": []}
+        cfg = m.build_xray_config(s)
+        domains = [d for r in cfg["routing"]["rules"] for d in r.get("domain", [])]
+        assert "domain:on.com" in domains
+        assert "domain:off.com" not in domains
+
+    def test_a_list_of_only_switched_off_rules_adds_no_rule_at_all(self):
+        assert m._rules_to_xray_entry(
+            [{"rule": "domain:off.com", "enabled": False}], "direct") == []
+
+    def test_the_tester_says_a_switched_off_rule_would_have_matched(self):
+        # The whole point of the switch is to turn a rule off and find out
+        # whether anything needed it. A page that said nothing would look
+        # exactly like the rule had been deleted.
+        s = dict(m.DEFAULT_SETTINGS)
+        s["profile"] = "all_except_ru"
+        s["custom_rules"] = {"always_direct": [
+            {"rule": "domain:example.com", "enabled": False}], "always_vpn": []}
+        with patch("socket.getaddrinfo", side_effect=socket.gaierror("no DNS")), \
+             patch.object(m, "_ip_in_geoip_ru", return_value=False), \
+             patch.object(m, "_domain_in_any_geosite", return_value=None):
+            r = m.route_test("example.com", s)
+        assert r["outbound"] != "direct" or r["matched_rule"] != "custom:always_direct"
+        assert "выключенное правило" in r["note"]
+        assert "domain:example.com" in r["note"]
+
+    def test_an_enabled_rule_still_wins_and_says_nothing_extra(self):
+        s = dict(m.DEFAULT_SETTINGS)
+        s["custom_rules"] = {"always_direct": ["domain:example.com"], "always_vpn": []}
+        with patch("socket.getaddrinfo", side_effect=socket.gaierror("no DNS")):
+            r = m.route_test("example.com", s)
+        assert r["outbound"] == "direct"
+        assert "выключенное" not in r["note"]
+
+
 class TestBuildXrayConfig:
     def _base_settings(self, **kwargs) -> dict:
         s = dict(m.DEFAULT_SETTINGS)

@@ -1,3 +1,26 @@
+shunt (2.13.0) stable; urgency=medium
+
+  * A manual routing rule can be switched off instead of deleted. Until now a
+    rule was a bare string and the only way to stop it applying was to remove
+    it, which loses the rule and the reason somebody wrote it. That is the
+    wrong trade for the question it is usually asked in -- "is this still
+    needed?" -- whose honest answer comes from switching the rule off,
+    watching, and switching it back. Nineteen rules on the live gateway exist
+    to work around a profile that has just been replaced, and every one of them
+    now has a way to be tested rather than guessed at.
+  * Rules are stored as {rule, enabled}, the same shape port forwards have had
+    since 2.8.0. Bare strings are still read and still mean enabled, so a
+    settings.json from any earlier version keeps working -- a rule that
+    silently stopped applying after an upgrade would be the worst possible way
+    to introduce a switch. A rule is validated whether or not it is switched
+    on, because storing a malformed rule that only breaks when somebody enables
+    it months later turns a form into a trap.
+  * The route tester names a switched-off rule that would have matched. Saying
+    nothing would make the page look exactly as if the rule had been deleted,
+    which is the one thing the switch exists to avoid.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sun, 13 Sep 2026 20:10:00 +0300
+
 shunt (2.12.0) stable; urgency=medium
 
   * The "only blocked" profile works again. It asked for
