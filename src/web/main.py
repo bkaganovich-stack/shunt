@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.15.0"
+VERSION = "2.15.1"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -694,8 +694,18 @@ def _realtime_rules(enabled: bool) -> list[dict]:
     ]
 
 def _discovered_domains(settings: dict) -> list[str]:
-    """Domains the probe measured as blocked and nobody switched off."""
+    """Names the probe measured as blocked and nobody switched off."""
     return _bp.routed_domains(settings.get("discovered", []))
+
+
+def _discovered_addresses(settings: dict) -> list[str]:
+    """
+    Addresses likewise. Kept apart because xray routes them with a different
+    field, and because most of what the traffic log holds IS an address: a
+    client that dials one never sent a name for xray to record. Telegram is
+    the case that made this necessary rather than tidy.
+    """
+    return _bp.routed_addresses(settings.get("discovered", []))
 
 
 def build_xray_config(settings: dict) -> dict:
@@ -760,6 +770,8 @@ def build_xray_config(settings: dict) -> dict:
             *([{"type": "field",
                 "domain": ["domain:" + d for d in _discovered_domains(settings)],
                 "outboundTag": final}] if _discovered_domains(settings) else []),
+            *([{"type": "field", "ip": _discovered_addresses(settings),
+                "outboundTag": final}] if _discovered_addresses(settings) else []),
         ]
         default = "direct"
     elif profile == "direct":
@@ -1689,9 +1701,11 @@ def route_test(target: str, settings: dict) -> dict:
                 return result_with_note(final, "geoip:ru-blocked",
                                         f"{ip} в списке заблокированных адресов",
                                         "geoip_database")
-        if domain:
-            for row in settings.get("discovered", []):
-                if row.get("domain") != domain or not row.get("routed"):
+        # Matched against the name when there is one and the address when there
+        # is not -- the tester is asked about both, and the record holds both.
+        wanted = {domain} if domain else set(ips)
+        for row in settings.get("discovered", []):
+                if row.get("domain") not in wanted or not row.get("routed"):
                     continue
                 if not row.get("enabled", True):
                     continue

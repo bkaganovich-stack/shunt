@@ -30,6 +30,7 @@ This catches "refuses to connect" and "refuses the probe". It does not catch
 """
 from __future__ import annotations
 
+import ipaddress
 import subprocess
 import time
 
@@ -76,6 +77,14 @@ def probe(host: str, runner, timeout: int = 12) -> dict:
     return {"state": OK, "code": code, "detail": ""}
 
 
+def is_address(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
 def curl_runner(via_socks: str = "", interface: str = ""):
     """A runner that shells out to curl. Returns (status_code|None, error)."""
     def run(host: str, timeout: int):
@@ -94,6 +103,13 @@ def curl_runner(via_socks: str = "", interface: str = ""):
                "-m", str(timeout), "--max-redirs", "3"]
         if via_socks:  cmd += ["--socks5-hostname", via_socks]
         if interface:  cmd += ["--interface", interface]
+        # Most of what the household's traffic log holds is addresses, not
+        # names: xray records the destination it connected to, and a client
+        # that dials an address never sent a name to record. An address has no
+        # certificate that will match it, so verification is skipped for those
+        # -- the question being asked is "does this connection get through",
+        # not "is this the right server". Names are still verified.
+        if is_address(host): cmd.append("-k")
         cmd.append("https://%s/" % host)
         try:
             r = subprocess.run(cmd, capture_output=True, text=True,
@@ -126,7 +142,16 @@ def candidates(hosts: list[str], known: list[dict], limit: int = 40,
         h = (h or "").strip().lower().rstrip(".")
         if not h or h in out or "." not in h:
             continue
-        if h.endswith(skip_suffixes):
+        if is_address(h):
+            try:
+                ip = ipaddress.ip_address(h)
+            except ValueError:
+                continue
+            # Private and loopback addresses are decided by geoip:private long
+            # before any of this and cannot be blocked by anybody.
+            if ip.is_private or ip.is_loopback or ip.is_multicast:
+                continue
+        elif h.endswith(skip_suffixes):
             continue
         if h in seen:
             continue                      # already has a verdict; re-checked below
@@ -187,9 +212,25 @@ def probe_set(hosts: list[str], known: list[dict], limit: int = 40) -> list[str]
     only way that happens is by asking again. A feature that can only ever add
     to a list is a feature that slowly tunnels everything.
     """
-    on_record = [d["domain"] for d in known if d.get("enabled", True)][:limit]
-    room = max(0, limit - len(on_record))
-    return on_record + candidates(hosts, known, limit=room)
+    # A third of the budget is held back for names that have never been seen.
+    # Without it the record starves the run the moment it reaches the budget:
+    # forty known domains would fill every pass forever and nothing new would
+    # ever be looked at, which is the quiet way for this feature to stop working
+    # while still reporting success.
+    reserve = max(1, limit // 3)
+    # Oldest first, so a long record is covered over several runs rather than
+    # the same head of it every time.
+    ordered = [d["domain"] for d in
+               sorted((d for d in known if d.get("enabled", True)),
+                      key=lambda d: d.get("last_checked", 0))]
+    on_record = ordered[:max(0, limit - reserve)]
+    fresh = candidates(hosts, known, limit=limit - len(on_record))
+    # If there were fewer new names than the reserve held back, the rest of the
+    # budget goes back to the record rather than going unused.
+    spare = limit - len(on_record) - len(fresh)
+    if spare > 0:
+        on_record += ordered[len(on_record):len(on_record) + spare]
+    return on_record + fresh
 
 
 def run_once(hosts: list[str], known: list[dict], direct_runner, tunnel_runner,
@@ -214,7 +255,20 @@ def run_once(hosts: list[str], known: list[dict], direct_runner, tunnel_runner,
     return merge(known, results, min_streak=min_streak, now=now), counts
 
 
-def routed_domains(known: list[dict]) -> list[str]:
-    """The domains this feature is currently sending through the tunnel."""
+def routed(known: list[dict]) -> list[str]:
+    """Everything this feature is currently sending through the tunnel."""
     return [d["domain"] for d in known
             if d.get("routed") and d.get("enabled", True)]
+
+
+def routed_domains(known: list[dict]) -> list[str]:
+    return [h for h in routed(known) if not is_address(h)]
+
+
+def routed_addresses(known: list[dict]) -> list[str]:
+    """
+    The addresses, kept apart because xray routes them with a different field.
+    Telegram is why this exists: MTProto dials data centres by address, so the
+    thing most worth finding is precisely the thing a domain rule cannot carry.
+    """
+    return [h for h in routed(known) if is_address(h)]

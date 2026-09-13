@@ -132,7 +132,20 @@ class TestARun:
 
     def test_the_budget_is_not_exceeded(self):
         known = [{"domain": "a.com", "enabled": True}, {"domain": "b.com", "enabled": True}]
-        assert bp.probe_set(["c.com", "d.com"], known, limit=2) == ["a.com", "b.com"]
+        assert len(bp.probe_set(["c.com", "d.com"], known, limit=2)) == 2
+
+    def test_a_full_record_does_not_starve_new_names(self):
+        # The quiet way for this to stop working: once the record reaches the
+        # budget it fills every run and nothing new is ever looked at, while
+        # the task keeps reporting success.
+        known = [{"domain": "d%02d.com" % i, "enabled": True} for i in range(40)]
+        got = bp.probe_set(["fresh.com"], known, limit=40)
+        assert "fresh.com" in got and len(got) == 40
+
+    def test_the_record_is_covered_oldest_first(self):
+        known = [{"domain": "new.com", "enabled": True, "last_checked": 900},
+                 {"domain": "old.com", "enabled": True, "last_checked": 100}]
+        assert bp.probe_set([], known, limit=2)[0] == "old.com"
 
     def test_a_working_site_costs_one_probe_not_two(self):
         asked = []
@@ -165,3 +178,49 @@ class TestARun:
         rec, counts = bp.run_once(["a.com"], rec, ok_d, t)
         assert counts[bp.OPEN] == 1
         assert bp.routed_domains(rec) == []
+
+
+class TestTrafficThatHasNoName:
+    """
+    Most of what the traffic log holds is addresses, not names: xray records
+    the destination it connected to, and a client that dialled an address never
+    sent a name. The first live run found this the hard way -- 38 of 40
+    candidates were addresses, every probe failed on a certificate that could
+    not match, and the gateway reported the whole internet as down.
+    """
+
+    def test_an_address_is_recognised(self):
+        assert bp.is_address("149.154.167.51")
+        assert bp.is_address("2001:db8::1")
+        assert not bp.is_address("example.com")
+
+    def test_private_addresses_are_never_candidates(self):
+        got = bp.candidates(["192.168.1.5", "127.0.0.1", "10.0.0.1",
+                             "149.154.167.51"], [])
+        assert got == ["149.154.167.51"]
+
+    def test_addresses_and_names_are_routed_by_different_fields(self):
+        r = {"149.154.167.51": (bp.BLOCKED, obs(bp.FAILED), obs(bp.OK, 200)),
+             "anthropic.com":  (bp.BLOCKED, obs(bp.REFUSED, 403), obs(bp.OK, 404))}
+        rec = bp.merge(bp.merge([], r), r)
+        assert bp.routed_domains(rec) == ["anthropic.com"]
+        assert bp.routed_addresses(rec) == ["149.154.167.51"]
+        assert sorted(bp.routed(rec)) == ["149.154.167.51", "anthropic.com"]
+
+    def test_certificate_checking_is_skipped_for_addresses_only(self):
+        seen = {}
+        def fake_run(cmd, **kw):
+            seen[cmd[-1]] = "-k" in cmd
+            class R: stdout = "200"; stderr = ""; returncode = 0
+            return R()
+        import subprocess as sp
+        orig = sp.run
+        sp.run = fake_run
+        try:
+            runner = bp.curl_runner(interface="enp1s0")
+            runner("149.154.167.51", 5)
+            runner("example.com", 5)
+        finally:
+            sp.run = orig
+        assert seen["https://149.154.167.51/"] is True
+        assert seen["https://example.com/"] is False

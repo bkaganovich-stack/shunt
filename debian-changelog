@@ -1,3 +1,26 @@
+shunt (2.15.1) stable; urgency=medium
+
+  * The first live run of the block probe reported 38 of 40 destinations as
+    down, which is the kind of answer that is obviously wrong and therefore
+    useful. Almost everything in the traffic log is an ADDRESS rather than a
+    name: xray records the destination it connected to, and a client that
+    dialled an address never sent a name to record. Every probe was asking for
+    https://<address>/ and failing on a certificate that cannot match one.
+  * Addresses are now probed without certificate verification -- the question
+    is whether the connection gets through, not whether the server is who it
+    claims -- and routed with an ip rule rather than a domain one. Telegram is
+    the case that makes this necessary rather than tidy: MTProto dials data
+    centres by address, so the thing most worth finding is precisely the thing
+    a domain rule cannot carry. Private and loopback addresses are never
+    candidates.
+  * A third of each run's budget is held back for names that have never been
+    seen, and the record is probed oldest-first. Without that the record would
+    starve the run the moment it reached the budget -- forty known destinations
+    filling every pass forever while the task kept reporting success, which is
+    the quiet way for this feature to stop working.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 00:40:00 +0300
+
 shunt (2.15.0) stable; urgency=medium
 
   * The gateway now finds blocked destinations by measuring instead of waiting
