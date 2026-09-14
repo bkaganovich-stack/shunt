@@ -1,3 +1,31 @@
+shunt (2.19.0) stable; urgency=medium
+
+  * The session key is no longer a published constant when its file is missing.
+    SECRET fell back to the literal "shunt-default-secret", and nothing failed
+    in that case: the gateway came up, the interface worked, and every session
+    token on it could be forged by anyone who had read the source. The only
+    symptom was that there was no symptom. Missing now means generate: a fresh
+    32-byte key, written 0600, and kept in memory if it cannot be persisted --
+    sessions then end at the next restart, which is an inconvenience where a
+    shared constant is a way in. A key file others can read is repaired rather
+    than reported, since the only reader of such a report would be whoever
+    could already read the key.
+  * Passwords are salted and slow: PBKDF2-SHA256, 200 000 rounds, per-password
+    salt. Plain unsalted SHA-256 is neither, and this password is the only
+    thing between a stranger on the LAN and the household's routing. The old
+    format is still accepted, because every settings.json in existence holds
+    one and refusing it would lock a household out of its own gateway to make a
+    point; logging in with one upgrades it in place, at the only moment the
+    plaintext exists.
+  * Changing the password now ends every other session. The signing key is the
+    secret mixed with the stored hash, so a token minted against the old
+    password stops verifying the moment the new one is saved -- which is the
+    entire reason somebody changes a password in a hurry. The person who typed
+    it keeps their own session: locking the administrator out alongside the
+    intruder would teach them not to do this.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 12:10:00 +0300
+
 shunt (2.18.0) stable; urgency=medium
 
   * The interface stops telling the household about September. Eight

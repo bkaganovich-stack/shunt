@@ -2,7 +2,7 @@
 """Shunt — web management interface."""
 
 import asyncio, base64, fcntl, hashlib, hmac, io, ipaddress, json, os, pty
-import re, shutil, signal, socket, struct, subprocess, tarfile, termios, time
+import re, secrets, shutil, signal, socket, struct, subprocess, tarfile, termios, time
 import urllib.parse, urllib.request
 import uuid as _uuid_mod
 from datetime import datetime, timezone
@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.18.0"
+VERSION = "2.19.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -205,14 +205,112 @@ def save_settings(s: dict) -> None:
     CFG_DIR.mkdir(parents=True, exist_ok=True)
     SETTINGS.write_text(json.dumps(s, indent=2))
 
-SECRET = (BASE / ".secret").read_text().strip() if (BASE / ".secret").exists() \
-         else "shunt-default-secret"
+def load_secret(path: Path = None) -> str:
+    """
+    The key every session cookie is signed with.
+
+    It used to fall back to the literal "shunt-default-secret" when the file was
+    missing. Nothing failed in that case -- the gateway came up, the interface
+    worked, and every token on it could be forged by anyone who had read the
+    source. A silent downgrade to a published key is the worst shape a security
+    default can take, because the only symptom is that there is no symptom.
+
+    Missing now means generate, not substitute. If the new key cannot be
+    persisted it is kept in memory: sessions then end at the next restart, which
+    is an inconvenience, where a shared constant is a way in.
+    """
+    path = path or (BASE / ".secret")
+    try:
+        val = path.read_text().strip()
+        if val:
+            # A key others can read is not a key. Repaired rather than reported,
+            # because the only person who would see a report is the attacker.
+            try:
+                if path.stat().st_mode & 0o077:
+                    path.chmod(0o600)
+            except OSError:
+                pass
+            return val
+    except OSError:
+        pass
+    val = secrets.token_hex(32)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(val + "\n")
+        path.chmod(0o600)
+    except OSError:
+        pass          # in memory only; safe, just not durable
+    return val
+
+
+SECRET = load_secret()
+
+
+# ── Passwords ──────────────────────────────────────────────────────────────────
+PBKDF2_ROUNDS = 200_000
+
+
+def hash_password(pw: str, salt: bytes = None) -> str:
+    """Salted and slow. Plain SHA-256 is neither, and a gateway's password is
+    the only thing between a stranger on the LAN and its routing."""
+    salt = salt or secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, PBKDF2_ROUNDS)
+    return "pbkdf2$%d$%s$%s" % (PBKDF2_ROUNDS, salt.hex(), dk.hex())
+
+
+def verify_password(pw: str, stored: str) -> bool:
+    """
+    True if this password matches what is stored, in either format.
+
+    The old format is still accepted because every settings.json in existence
+    holds one, and refusing it would lock the household out of its own gateway
+    to make a point. Logging in with one upgrades it in place.
+    """
+    stored = (stored or "").strip()
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, rounds, salt_hex, want = stored.split("$", 3)
+            dk = hashlib.pbkdf2_hmac("sha256", pw.encode(),
+                                     bytes.fromhex(salt_hex), int(rounds))
+            return hmac.compare_digest(dk.hex(), want)
+        except (ValueError, TypeError):
+            return False
+    return hmac.compare_digest(hashlib.sha256(pw.encode()).hexdigest(), stored)
+
+
+def is_legacy_hash(stored: str) -> bool:
+    return not (stored or "").strip().startswith("pbkdf2$")
+
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
+# The signing key is the secret mixed with the stored password hash, so changing
+# the password ends every session that exists -- including the one an intruder
+# is holding, which is the entire reason somebody changes a password in a hurry.
+# Cached against settings.json's mtime: this runs on every request, and reading
+# and parsing the file each time would put the whole interface behind a disk.
+_sign_key: tuple = (None, None)
+
+
+def signing_key() -> bytes:
+    global _sign_key
+    try:
+        stamp = SETTINGS.stat().st_mtime_ns
+    except OSError:
+        stamp = 0
+    if _sign_key[0] != stamp:
+        try:
+            pwh = json.loads(SETTINGS.read_text())["auth"]["password_hash"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pwh = ""
+        _sign_key = (stamp, hmac.new(SECRET.encode(), str(pwh).encode(),
+                                     hashlib.sha256).digest())
+    return _sign_key[1]
+
+
 def make_token(user: str) -> str:
     exp = int(time.time()) + 86400
     payload = f"{user}:{exp}"
-    sig = hmac.new(SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(signing_key(), payload.encode(), hashlib.sha256).hexdigest()
     return base64.urlsafe_b64encode(f"{payload}:{sig}".encode()).decode()
 
 def verify_token(tok: str) -> Optional[str]:
@@ -221,7 +319,8 @@ def verify_token(tok: str) -> Optional[str]:
         user, exp, sig = decoded.rsplit(":", 2)
         if int(exp) < int(time.time()):
             return None
-        expected = hmac.new(SECRET.encode(), f"{user}:{exp}".encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(signing_key(), f"{user}:{exp}".encode(),
+                            hashlib.sha256).hexdigest()
         return user if hmac.compare_digest(sig, expected) else None
     except Exception:
         return None
@@ -2263,12 +2362,19 @@ async def login(req: LoginReq, resp: Response, request: Request):
     s = load_settings()
     src_ip = request.client.host if request.client else "unknown"
     if (req.username != s["auth"]["username"] or
-            hashlib.sha256(req.password.encode()).hexdigest() != s["auth"]["password_hash"]):
+            not verify_password(req.password, s["auth"]["password_hash"])):
         _login_fail_count[src_ip] = _login_fail_count.get(src_ip, 0) + 1
         if _login_fail_count[src_ip] >= 5:
             fire_alert("login_failed", f"5+ failed logins from {src_ip}")
         raise HTTPException(401, "Invalid credentials")
     _login_fail_count[src_ip] = 0
+    # A correct password is the only moment the plaintext exists, so it is the
+    # only moment an old hash can be replaced with a salted one. Saved before
+    # the token is minted: the signing key depends on the stored hash, and a
+    # token issued against the old one would be dead on arrival.
+    if is_legacy_hash(s["auth"]["password_hash"]):
+        s["auth"]["password_hash"] = hash_password(req.password)
+        save_settings(s)
     tok = make_token(req.username)
     resp.set_cookie("token", tok, max_age=86400, httponly=True, samesite="lax")
     return {"ok": True, "token": tok}
@@ -3783,12 +3889,18 @@ async def get_wan_status(u: str = Depends(auth_dep)):
 
 # ── Password / Factory Reset ───────────────────────────────────────────────────
 @app.post("/api/change-password")
-async def change_pw(req: PwReq, u: str = Depends(auth_dep)):
+async def change_pw(req: PwReq, resp: Response, u: str = Depends(auth_dep)):
     s = load_settings()
-    if hashlib.sha256(req.current.encode()).hexdigest() != s["auth"]["password_hash"]:
+    if not verify_password(req.current, s["auth"]["password_hash"]):
         raise HTTPException(403, "Wrong current password")
-    s["auth"]["password_hash"] = hashlib.sha256(req.new_pw.encode()).hexdigest()
-    save_settings(s); return {"ok": True}
+    s["auth"]["password_hash"] = hash_password(req.new_pw)
+    save_settings(s)
+    # Changing the password ends every session, which is the point of changing
+    # it in a hurry. The person who just typed it keeps theirs: locking out the
+    # administrator along with the intruder would teach them not to do this.
+    tok = make_token(u)
+    resp.set_cookie("token", tok, max_age=86400, httponly=True, samesite="lax")
+    return {"ok": True, "token": tok, "sessions_ended": True}
 
 @app.post("/api/factory-reset")
 async def factory_reset(u: str = Depends(auth_dep)):
