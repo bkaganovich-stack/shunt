@@ -664,6 +664,16 @@ def ingest_access_log(log_path: Path, retention_days: int = 30) -> int:
     if saved_offset >= current_size:
         return 0
 
+    # The names the resolver saw, for the addresses the log recorded. Loaded
+    # once per run rather than per line: this reads a file on tmpfs that the
+    # DoH proxy rewrites every thirty seconds, and a miss simply leaves the
+    # address in place. See dnsnames.py for why the log has no names of its own.
+    try:
+        import dnsnames as _dn
+        names = _dn.NameMap.load()
+    except Exception:
+        _dn, names = None, None
+
     count = 0
     with open(str(log_path), "rb") as f:
         f.seek(saved_offset)
@@ -684,6 +694,8 @@ def ingest_access_log(log_path: Path, retention_days: int = 30) -> int:
         hour = ts_str.replace("/", "-").replace("/", "-")[:13]
         # dst: strip IPv6 brackets
         dst = dst.strip("[]")
+        if names is not None:
+            dst = _dn.name_for(dst, names)
         # limit dst length
         dst = dst[:100]
         key = (hour, src_ip, dst, outb, proto)

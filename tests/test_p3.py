@@ -340,6 +340,42 @@ class TestAnalyticsIngestion:
         count = _ft.ingest_access_log(log, retention_days=30)
         assert count == 3
 
+    def test_addresses_are_given_their_names(self, tmp_path, monkeypatch):
+        # The whole point of dnsnames.py: xray logs 157.240.205.174 because the
+        # sniffed name is used for routing and discarded, so the counting is
+        # done against a map the resolver filled in.
+        import dnsnames as dn
+        m = dn.NameMap()
+        m.record("instagram.com", ["157.240.205.174"])
+        dump = tmp_path / "names.json"
+        m.dump(dump)
+        monkeypatch.setattr(dn, "DUMP", dump)
+
+        # Today's date, not a fixed one: ingest purges anything older than the
+        # retention window straight after inserting it, so a June timestamp
+        # would be counted and then deleted -- which is exactly why the test
+        # above, which only checks the count, never noticed.
+        now = time.strftime("%Y/%m/%d %H:%M:%S", time.gmtime())
+        log = tmp_path / "named.log"
+        log.write_text(
+            now + ".000 192.168.1.5:1 accepted tcp:157.240.205.174:443 [tproxy-in -> proxy]\n")
+        assert _ft.ingest_access_log(log, retention_days=30) == 1
+        hosts = _db.top_hosts(hours=24 * 365, limit=50)
+        assert "instagram.com" in hosts
+        assert "157.240.205.174" not in hosts
+
+    def test_an_address_the_resolver_never_saw_stays_an_address(self, tmp_path, monkeypatch):
+        import dnsnames as dn
+        dump = tmp_path / "empty.json"
+        dn.NameMap().dump(dump)
+        monkeypatch.setattr(dn, "DUMP", dump)
+        now = time.strftime("%Y/%m/%d %H:%M:%S", time.gmtime())
+        log = tmp_path / "unnamed.log"
+        log.write_text(
+            now + ".000 192.168.1.5:1 accepted tcp:203.0.113.77:443 [tproxy-in -> direct]\n")
+        assert _ft.ingest_access_log(log, retention_days=30) == 1
+        assert "203.0.113.77" in _db.top_hosts(hours=24 * 365, limit=50)
+
     def test_ingest_incremental(self, tmp_path):
         log = tmp_path / "access2.log"
         log.write_text(

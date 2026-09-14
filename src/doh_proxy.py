@@ -2,7 +2,19 @@
 # Local DoH proxy. UDP DNS -> RFC8484 POST to Cloudflare DoH over the VPN tunnel
 # (the VPN server blocks plain :53; :443 works). Hardened for burst load:
 # large recv buffer, keep-alive connection pool, retries with failover.
-import socket, socketserver, ssl, http.client, sys, threading, queue
+import socket, socketserver, ssl, http.client, sys, threading, queue, time
+
+# Recording names is strictly a side job. Every path through it swallows its own
+# errors and none of them can stop an answer being returned: a resolver that
+# fails on this gateway means no tunnel, because the tunnel needs a name of its
+# own to come up. If the import fails the proxy simply resolves without
+# remembering anything.
+try:
+    sys.path.insert(0, "/opt/shunt/web")
+    import dnsnames as _dn
+    NAMES = _dn.NameMap()
+except Exception:
+    _dn = None; NAMES = None
 UP  = [("1.1.1.1", "/dns-query"), ("1.0.0.1", "/dns-query")]
 CTX = ssl.create_default_context()
 LISTEN = [("127.0.0.1", 53), ("127.0.0.1", 5053)]
@@ -41,8 +53,26 @@ def doh(raw):
 class H(socketserver.BaseRequestHandler):
     def handle(self):
         raw, sock = self.request[0], self.request[1]
-        try: sock.sendto(doh(raw), self.client_address)
-        except Exception as e: sys.stderr.write("err %s\n" % e)
+        try:
+            answer = doh(raw)
+            sock.sendto(answer, self.client_address)
+        except Exception as e:
+            sys.stderr.write("err %s\n" % e); return
+        # After the answer is on the wire, never before it.
+        if NAMES is not None:
+            try:
+                name, ips = _dn.parse_answer(answer)
+                if name and ips: NAMES.record(name, ips)
+            except Exception: pass
+
+
+def _dumper(every=30):
+    """Write the map out on a timer -- not per query, which is the point."""
+    while True:
+        time.sleep(every)
+        try:
+            NAMES.prune(); NAMES.dump()
+        except Exception: pass
 
 class Srv(socketserver.ThreadingUDPServer):
     allow_reuse_address = True; daemon_threads = True
@@ -53,6 +83,8 @@ class Srv(socketserver.ThreadingUDPServer):
 def serve(host, port): Srv((host, port), H).serve_forever()
 
 if __name__ == "__main__":
+    if NAMES is not None:
+        threading.Thread(target=_dumper, daemon=True).start()
     for host, port in LISTEN[1:]:
         threading.Thread(target=serve, args=(host, port), daemon=True).start()
     serve(*LISTEN[0])

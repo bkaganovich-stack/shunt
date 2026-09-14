@@ -1,3 +1,40 @@
+shunt (2.17.0) stable; urgency=medium
+
+  * The traffic log gets its names back. access.log records addresses because
+    the sniffer discards the name after routing, and 2.16.0 established that no
+    xray setting changes that. So the names are taken from the place they
+    already pass through: every client on this network resolves via dnsmasq and
+    doh_proxy.py, and the answer carries both the name asked for and the
+    addresses it maps to. The proxy records them into a bounded map and writes
+    it to /run every thirty seconds; the analytics ingester reads that and
+    counts instagram.com where it used to count 157.240.205.174.
+  * Keyed on the question, not on each record's owner. After a CNAME chain the
+    A record belongs to the last alias -- instagram.com ends at something like
+    z-p42-instagram.c10r.facebook.com -- and the household asked for the first
+    one. Recording the alias would describe the packet accurately and be
+    useless on a page a person reads.
+  * Entries expire after an hour and the newest answer wins, because a CDN
+    address is handed to a different site within the hour and a page that
+    confidently says "instagram" about an address now serving something else is
+    worse than one that says the address.
+  * Nothing about this can fail a lookup. Recording happens after the answer is
+    on the wire, every path swallows its own errors, the map is never written
+    per query, and the dicts are snapshotted before rebuilding -- a resolver
+    that raises on this gateway means no tunnel, because the tunnel needs a
+    name of its own to come up. If the import fails the proxy simply resolves
+    without remembering anything.
+  * The block probe benefits without changing: its candidates come from the
+    same table, so it will start probing domains rather than the addresses that
+    made its first run report 38 of 40 destinations as down.
+  * Two defects found by the tests rather than in production. The dump path was
+    a default argument, captured when the function was defined, so the module
+    could never be pointed anywhere else -- by a test or by an operator. And
+    ingest purges rows older than the retention window immediately after
+    inserting them, so the existing ingestion test, which only checked a count,
+    had been passing on rows that were deleted before anything could read them.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 09:20:00 +0300
+
 shunt (2.16.1) stable; urgency=medium
 
   * 2.16.0's attempt to get domain names into access.log is reverted, because
