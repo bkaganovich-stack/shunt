@@ -1,3 +1,15 @@
+shunt (2.20.1) stable; urgency=medium
+
+  * Keep dialog label spacing off switch tracks: a six-pixel margin shortened
+    the track and left the knob hanging outside it. Restore centered dialogs
+    and show keyboard focus on the visible switch track.
+  * Place active egress and egress settings beside each other at widths of
+    1100px and above, with balanced field widths. Retain stacked mobile cards.
+  * Remove hidden hints from layout and keep mobile hint bubbles within the
+    viewport so they cannot create horizontal scrolling.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 19:18:50 +0300
+
 shunt (2.20.0) stable; urgency=medium
 
   * Organize the interface into six sections with grouped tabs, preserving
