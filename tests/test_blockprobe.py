@@ -224,3 +224,81 @@ class TestTrafficThatHasNoName:
             sp.run = orig
         assert seen["https://149.154.167.51/"] is True
         assert seen["https://example.com/"] is False
+
+
+class TestTheBudgetIsSpentOnWhatCanChange:
+    """
+    The live gateway had the feature quietly stop working while reporting
+    success. Its record had grown to 79 entries, 77 of them bare addresses and
+    43 of those permanently `down`, and the next run would have spent 39 of its
+    40 probes re-confirming them and looked at exactly one new name.
+
+    Three things caused that and all three are asserted here: the candidate
+    list ranked by volume alone, so addresses crowded out names; the record was
+    re-probed oldest-first, so an entry that could teach nothing cost the same
+    as one that could; and the pool the candidates came from was cut at 500
+    rows, which is itself a ranking and threw the names away first.
+    """
+
+    def test_names_come_before_addresses(self):
+        got = bp.candidates(["1.1.1.1", "2.2.2.2", "example.com"], [], limit=2)
+        assert got == ["example.com", "1.1.1.1"]
+
+    def test_addresses_still_get_the_leftover_budget(self):
+        # Telegram dials data centres by address; dropping them outright would
+        # give back the hole that cost the household Telegram in 2.12.0.
+        got = bp.candidates(["1.1.1.1", "example.com"], [], limit=5)
+        assert got == ["example.com", "1.1.1.1"]
+
+    def test_volume_still_orders_within_a_kind(self):
+        got = bp.candidates(["b.com", "a.com"], [], limit=2)
+        assert got == ["b.com", "a.com"]
+
+    def test_a_routed_entry_is_always_re_probed_first(self):
+        # The only way a domain stops being routed is by being asked again.
+        known = [{"domain": "old.com", "last_checked": 1, "routed": False},
+                 {"domain": "routed.com", "last_checked": 9, "routed": True}]
+        assert bp.probe_set([], known, limit=1) == ["routed.com"]
+
+    def test_a_name_outranks_an_address(self):
+        known = [{"domain": "9.9.9.9", "last_checked": 1},
+                 {"domain": "late.com", "last_checked": 9}]
+        assert bp.probe_set([], known, limit=1) == ["late.com"]
+
+    def test_three_down_runs_park_an_entry(self):
+        rec = []
+        for _ in range(bp.DOWN_PARK):
+            rec = bp.merge(rec, {"gone.com": (bp.DOWN, obs(bp.FAILED),
+                                              obs(bp.FAILED))})
+        assert rec[0]["down_streak"] == bp.DOWN_PARK
+        assert bp.recheck_rank(rec[0]) == 3
+
+    def test_a_parked_entry_still_runs_when_nothing_else_wants_the_budget(self):
+        # Parked, not deleted: it keeps its history, and a quiet run picks it up.
+        rec = []
+        for _ in range(bp.DOWN_PARK):
+            rec = bp.merge(rec, {"gone.com": (bp.DOWN, obs(bp.FAILED),
+                                              obs(bp.FAILED))})
+        assert bp.probe_set([], rec, limit=40) == ["gone.com"]
+
+    def test_an_answer_of_any_kind_unparks_it(self):
+        rec = []
+        for _ in range(bp.DOWN_PARK):
+            rec = bp.merge(rec, {"gone.com": (bp.DOWN, obs(bp.FAILED),
+                                              obs(bp.FAILED))})
+        rec = bp.merge(rec, {"gone.com": (bp.OPEN, obs(bp.OK, 200), obs(bp.OK))})
+        assert rec[0]["down_streak"] == 0 and bp.recheck_rank(rec[0]) == 1
+
+    def test_a_record_of_dead_addresses_no_longer_starves_the_run(self):
+        # The live shape, in miniature: a record full of parked addresses and a
+        # log full of names. Before the fix this run was all addresses.
+        rec = []
+        for _ in range(bp.DOWN_PARK):
+            rec = bp.merge(rec, {"%d.0.0.1" % i: (bp.DOWN, obs(bp.FAILED),
+                                                  obs(bp.FAILED))
+                                 for i in range(1, 30)})
+        log = ["%d.1.1.1" % i for i in range(1, 60)] + \
+              ["name%d.com" % i for i in range(10)]
+        got = bp.probe_set(log, rec, limit=10)
+        assert [h for h in got if not bp.is_address(h)] == \
+               ["name%d.com" % i for i in range(10)]

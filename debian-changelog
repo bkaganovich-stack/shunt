@@ -1,3 +1,18 @@
+shunt (2.21.0) stable; urgency=medium
+
+  * Spend the block probe's budget on what asking again can change: re-probe
+    routed entries first, then names, then addresses, and hold back entries
+    that have answered on neither path three runs running. On this gateway the
+    next run would have spent 39 of 40 probes on dead addresses and looked at
+    one new name; it now looks at fifteen.
+  * Rank new candidates by kind before volume, so bare addresses no longer
+    crowd names out of the run. Addresses are still probed with the leftover
+    budget, which is what carries Telegram.
+  * Widen the candidate pool from 500 rows to 2000: at 500 the cut was itself a
+    ranking, and it discarded names first.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 21:47:09 +0300
+
 shunt (2.20.2) stable; urgency=medium
 
   * Unify action buttons across pages and dialogs: 14px type, 40px height,

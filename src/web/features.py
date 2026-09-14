@@ -429,7 +429,12 @@ def _task_block_probe() -> tuple[str, str]:
 
     known = settings.get("discovered", [])
     before = set(_bp.routed_domains(known))
-    hosts = _db.top_hosts(hours=int(cfg.get("window_hours", 168)), limit=500)
+    # A pool, not a shortlist: `blockprobe.candidates` ranks it further and takes
+    # forty. 470 of the 500 busiest destinations on this gateway are bare
+    # addresses, so a cut at 500 left only thirty names to choose from -- enough
+    # today, and one bad week of address traffic away from leaving none.
+    hosts = _db.top_hosts(hours=int(cfg.get("window_hours", 168)),
+                          limit=int(cfg.get("pool", 2000)))
 
     record, counts = _bp.run_once(
         hosts, known,

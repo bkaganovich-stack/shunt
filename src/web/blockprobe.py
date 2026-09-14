@@ -48,6 +48,14 @@ BLOCKED, OPEN, DOWN, EXIT_TROUBLE = "blocked", "open", "down", "exit_trouble"
 # the verdict treats them alike.
 REFUSAL_CODES = (403, 451)
 
+# After this many consecutive `down` runs an entry stops competing for the
+# budget. Measured on the live gateway: the record had grown to 79 entries, 77
+# of them bare addresses and 43 of those permanently `down`, and the next run
+# would have spent 39 of its 40 probes re-confirming them. `down` is the one
+# verdict that teaches nothing -- neither path answered -- so an entry that has
+# said it three times running is the cheapest thing to stop asking.
+DOWN_PARK = 3
+
 
 def classify(direct: dict, tunnel: dict) -> str:
     """The verdict for one domain, from the two observations."""
@@ -128,19 +136,20 @@ def candidates(hosts: list[str], known: list[dict], limit: int = 40,
     """
     Which hosts are worth two probes this run.
 
-    Ordered by how much the household actually used them, because a list that
-    starts with the domain somebody opened once last week spends the run on
-    nothing. Russian names are skipped: they are decided by geoip:ru long before
-    any of this, and probing them would only find that a Russian service refuses
-    a foreign exit -- which is true, expected, and not a block.
+    Names first, then addresses, each ordered by how much the household actually
+    used them -- a list that starts with the domain somebody opened once last
+    week spends the run on nothing. Russian names are skipped: they are decided
+    by geoip:ru long before any of this, and probing them would only find that a
+    Russian service refuses a foreign exit -- true, expected, and not a block.
     """
     seen = {d.get("domain") for d in known}
-    out: list[str] = []
+    names: list[str] = []
+    addrs: list[str] = []
     if limit <= 0:
-        return out          # the record already fills the budget
+        return []           # the record already fills the budget
     for h in hosts:
         h = (h or "").strip().lower().rstrip(".")
-        if not h or h in out or "." not in h:
+        if not h or "." not in h:
             continue
         if is_address(h):
             try:
@@ -155,10 +164,22 @@ def candidates(hosts: list[str], known: list[dict], limit: int = 40,
             continue
         if h in seen:
             continue                      # already has a verdict; re-checked below
-        out.append(h)
-        if len(out) >= limit:
-            break
-    return out
+        if is_address(h):
+            if h in addrs: continue
+            addrs.append(h)
+        else:
+            if h in names: continue
+            names.append(h)
+        if len(names) >= limit:
+            break                         # names alone fill it; addresses lose
+    # Names first, addresses with whatever is left. Both are worth probing --
+    # Telegram dials data centres by address and no domain rule can carry that
+    # -- but the household's log is overwhelmingly addresses (470 of the 500
+    # busiest destinations here), and ranked by volume alone they crowd out
+    # every name. An address also answers the question badly: port 443 on a
+    # bare address usually refuses because no site lives there, which is not a
+    # block and cannot be told apart from one.
+    return (names + addrs)[:limit]
 
 
 def merge(known: list[dict], results: dict, min_streak: int = 2,
@@ -194,12 +215,41 @@ def merge(known: list[dict], results: dict, min_streak: int = 2,
         elif verdict == OPEN:
             row["streak"] = 0
             row["routed"] = False
+        row["down_streak"] = (int(row.get("down_streak", 0)) + 1
+                              if verdict == DOWN else 0)
         # DOWN and EXIT_TROUBLE say nothing about blocking, so they change
         # neither the streak nor the routing -- only the timestamp, so that the
         # page can show the domain was looked at and what was seen.
         by_domain[domain] = row
 
     return sorted(by_domain.values(), key=lambda r: r["domain"])
+
+
+def recheck_rank(row: dict) -> int:
+    """
+    How much this entry deserves one of this run's probes.
+
+    A record that is only ever re-probed oldest-first is fair and useless: every
+    entry costs the same whether or not asking it again can change anything.
+    These four bands say what can change.
+
+      0  routed -- the one band that MUST be asked. A domain routed because it
+         was blocked in June can only stop being routed by being asked again.
+      1  a name that is not routed. The lists lag on names; this is the band the
+         feature exists for.
+      2  an address that is not routed. Worth keeping -- Telegram dials data
+         centres by address -- but it answers the question poorly and must not
+         crowd out names.
+      3  parked: `down` on DOWN_PARK runs in a row. Neither path answered three
+         times running, so a fourth ask is the least informative probe available.
+         Kept in the record with its history, and picked up again only when the
+         budget is not wanted by anything above it.
+    """
+    if row.get("routed"):
+        return 0
+    if int(row.get("down_streak", 0)) >= DOWN_PARK:
+        return 3
+    return 1 if not is_address(row.get("domain", "")) else 2
 
 
 def probe_set(hosts: list[str], known: list[dict], limit: int = 40) -> list[str]:
@@ -218,18 +268,24 @@ def probe_set(hosts: list[str], known: list[dict], limit: int = 40) -> list[str]
     # ever be looked at, which is the quiet way for this feature to stop working
     # while still reporting success.
     reserve = max(1, limit // 3)
-    # Oldest first, so a long record is covered over several runs rather than
-    # the same head of it every time.
-    ordered = [d["domain"] for d in
-               sorted((d for d in known if d.get("enabled", True)),
-                      key=lambda d: d.get("last_checked", 0))]
-    on_record = ordered[:max(0, limit - reserve)]
+    # By what asking again can change, and within a band oldest first, so a long
+    # record is covered over several runs rather than the same head every time.
+    ranked = sorted((d for d in known if d.get("enabled", True)),
+                    key=lambda d: (recheck_rank(d), d.get("last_checked", 0)))
+    # Parked entries are held out of the claim on the budget entirely rather
+    # than merely sorted last. A record that is nothing BUT parked entries --
+    # which is what a gateway fed bare addresses for a week ends up with -- puts
+    # them at the top of its own ordering and starves the run exactly as before.
+    active = [d["domain"] for d in ranked if recheck_rank(d) < 3]
+    parked = [d["domain"] for d in ranked if recheck_rank(d) == 3]
+    on_record = active[:max(0, limit - reserve)]
     fresh = candidates(hosts, known, limit=limit - len(on_record))
     # If there were fewer new names than the reserve held back, the rest of the
-    # budget goes back to the record rather than going unused.
+    # budget goes back to the record rather than going unused -- and this is the
+    # one path by which a parked entry is asked again.
     spare = limit - len(on_record) - len(fresh)
     if spare > 0:
-        on_record += ordered[len(on_record):len(on_record) + spare]
+        on_record += (active[len(on_record):] + parked)[:spare]
     return on_record + fresh
 
 
