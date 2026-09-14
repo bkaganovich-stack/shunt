@@ -1,3 +1,23 @@
+shunt (2.20.0) stable; urgency=medium
+
+  * Organize the interface into six sections with grouped tabs, preserving
+    existing forms, API handlers and direct links. Add browser history and
+    mobile navigation, using the existing dark and light product palettes.
+  * Show connection shares as a responsive SVG diagram backed by analytics.
+    Report unavailable statistics, blocked and other routes explicitly; show
+    the active egress and actual WAN/file metadata without sample values.
+  * Consolidate manual rules into a searchable table. Keep unsaved rules
+    across navigation and preserve the selected profile during status polling.
+    Stop polling and delayed stream reconnects after logout.
+  * Ship plain HTML, CSS and JavaScript with local vendor assets. No frontend
+    build, package manager, CDN or new runtime dependency is required.
+  * Ignore source subdirectories when packaging helper scripts so test-created
+    __pycache__ directories cannot abort a subsequent package build.
+  * Extend English localization and add UI model/static resource checks plus
+    a local-only browser fixture for reproducible interface qualification.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 16:19:12 +0300
+
 shunt (2.19.0) stable; urgency=medium
 
   * The session key is no longer a published constant when its file is missing.

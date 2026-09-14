@@ -68,7 +68,7 @@ python3 3.10 or newer. Both are on the
 
 ```
 shasum -a 256 -c SHA256SUMS
-sudo apt install ./shunt_2.1.0_all.deb ./shunt-xray_*.deb
+sudo apt install ./shunt_2.20.0_all.deb ./shunt-xray_*.deb
 ```
 
 `apt` resolves the rest from the distribution archive. `sing-box` is not in the
@@ -155,7 +155,7 @@ from [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russi
 ./packaging/build.sh          # build the packages; needs only dpkg-dev
 ./packaging/mkiso.sh --help   # build an installer image; needs only xorriso
 ./packaging/shunt-clone.sh --help  # copy one gateway's settings onto another
-python3 -m pytest tests/ -q   # 150 tests, redirected to a temp directory
+python3 -m pytest tests/ -q   # backend and static resource checks
 ```
 
 Formerly `xray-gateway`, renamed at 2.0.0 because that name promoted one

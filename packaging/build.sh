@@ -33,7 +33,11 @@ chmod 755 "$P/opt/shunt/web/main.py"
 cp -r "$ROOT"/src/web/static/.                 "$P/opt/shunt/web/static/"
 # These carry a shebang and are meant to be runnable, so they get exec bits.
 install -m 755 "$ROOT"/src/doh_proxy.py "$ROOT"/src/doh_proxy_ns.py "$P/opt/shunt/"
-for f in "$ROOT"/src/scripts/*; do install -m 755 "$f" "$P/opt/shunt/scripts/"; done
+for f in "$ROOT"/src/scripts/*; do
+    # Test runs may leave __pycache__; only source files belong in this step.
+    [ -f "$f" ] || continue
+    install -m 755 "$f" "$P/opt/shunt/scripts/"
+done
 # The FPTN egress script drops privileges and edits a network namespace; it is
 # root-only on the live system and stays that way in the package.
 chmod 750 "$P/opt/shunt/scripts/fptn-egress.sh"
