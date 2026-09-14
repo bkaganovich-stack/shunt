@@ -205,6 +205,28 @@ class NameMap:
         return m
 
 
+def should_record(listen: list) -> bool:
+    """
+    Whether the resolver with these listen addresses should record names.
+
+    `fptn-egress.sh` GENERATES the namespace variant of doh_proxy.py by
+    rewriting its LISTEN line and nothing else, so every change to that file is
+    inherited by a second resolver serving the tunnel's own namespace. That one
+    must not record: it never sees a household query, its map is therefore
+    always empty, and both processes share a filesystem -- so its empty map
+    overwrote the real one every thirty seconds. Which it did, for the first
+    hour this existed, and the symptom was a file that kept resetting to `{}`
+    while every part of the code tested correct in isolation.
+
+    The test is the listen address rather than a filename, because the filename
+    is the one thing the generator does not change.
+    """
+    try:
+        return any(str(h) in ("127.0.0.1", "::1", "localhost") for h, _ in listen)
+    except (TypeError, ValueError):
+        return False
+
+
 def name_for(ip: str, cached: NameMap | None = None,
              now: float | None = None) -> str:
     """Convenience for callers holding one map: the name, or the address."""

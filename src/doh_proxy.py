@@ -9,15 +9,22 @@ import socket, socketserver, ssl, http.client, sys, threading, queue, time
 # fails on this gateway means no tunnel, because the tunnel needs a name of its
 # own to come up. If the import fails the proxy simply resolves without
 # remembering anything.
-try:
-    sys.path.insert(0, "/opt/shunt/web")
-    import dnsnames as _dn
-    NAMES = _dn.NameMap()
-except Exception:
-    _dn = None; NAMES = None
 UP  = [("1.1.1.1", "/dns-query"), ("1.0.0.1", "/dns-query")]
 CTX = ssl.create_default_context()
 LISTEN = [("127.0.0.1", 53), ("127.0.0.1", 5053)]
+
+# fptn-egress.sh GENERATES the namespace variant of this file by rewriting the
+# LISTEN line above and nothing else, so everything below is inherited by a
+# second resolver serving the tunnel's own namespace. It must not record names:
+# it never sees a household query, and since both share a filesystem its empty
+# map overwrote the real one every thirty seconds. should_record() decides from
+# the listen address, which is the one thing the generator does change.
+try:
+    sys.path.insert(0, "/opt/shunt/web")
+    import dnsnames as _dn
+    NAMES = _dn.NameMap() if _dn.should_record(LISTEN) else None
+except Exception:
+    _dn = None; NAMES = None
 _pools = {h: queue.Queue(maxsize=64) for h, _ in UP}
 
 def _get_conn(host):

@@ -443,9 +443,14 @@ an address directly never asks the resolver anything, so Telegram's data centres
 and anything else speaking its own protocol stay addresses in the log — which is
 correct, and is what the block probe's address handling in 2.15.1 is for.
 
-**Not done here:** `doh_proxy_ns.py`, the resolver inside the FPTN namespace.
-Household clients do not resolve through it, so it has no names worth
-recording.
+**Not done here, and it bit immediately:** `doh_proxy_ns.py`, the resolver
+inside the FPTN namespace, is not a file anyone edits — `fptn-egress.sh`
+generates it from `doh_proxy.py` by rewriting the LISTEN line and nothing else.
+So it inherited the recording, saw no household queries, and its permanently
+empty map overwrote the real one every thirty seconds. Fixed in 2.17.1 by
+deciding from the listen address rather than the filename. The lesson is
+general: a file that is generated from another file inherits every change made
+to the original, including the ones that assume there is only one of it.
 
 ## Earlier items, unchanged
 

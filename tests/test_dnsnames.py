@@ -211,3 +211,29 @@ class TestThePathIsNotFrozen:
         assert m.dump() is True
         assert target.exists()
         assert dn.NameMap.load(now=0).lookup("1.2.3.4", now=0) == "example.com"
+
+
+class TestOnlyOneResolverRecords:
+    """
+    fptn-egress.sh generates the namespace resolver by rewriting doh_proxy.py's
+    LISTEN line and nothing else, so everything else is inherited. Both share a
+    filesystem, and the namespace one never sees a household query -- so its
+    empty map overwrote the real one every thirty seconds. The symptom was a
+    file resetting to {} while every piece of code tested correct in isolation.
+    """
+
+    def test_the_loopback_resolver_records(self):
+        assert dn.should_record([("127.0.0.1", 53), ("127.0.0.1", 5053)]) is True
+
+    def test_the_namespace_resolver_does_not(self):
+        # This is the generated one: 192.168.244.1 is the veth inside the FPTN
+        # namespace, and the line is the only thing the generator rewrites.
+        assert dn.should_record([("192.168.244.1", 53)]) is False
+
+    def test_ipv6_loopback_counts(self):
+        assert dn.should_record([("::1", 53)]) is True
+
+    def test_rubbish_does_not_record(self):
+        # Wrong is better than double-writing the map.
+        for bad in (None, [], "127.0.0.1", [("127.0.0.1",)], [42]):
+            assert dn.should_record(bad) is False

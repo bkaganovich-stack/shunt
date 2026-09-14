@@ -1,3 +1,24 @@
+shunt (2.17.1) stable; urgency=medium
+
+  * The name map kept resetting to {} minutes after 2.17.0 went on, and the
+    cause is worth writing down: fptn-egress.sh GENERATES the namespace
+    resolver by rewriting doh_proxy.py's LISTEN line and nothing else. So the
+    recording added in 2.17.0 was inherited by a second resolver, one that
+    serves only the tunnel's own namespace and therefore never sees a household
+    query. Both share a filesystem. Its permanently empty map overwrote the
+    real one every thirty seconds.
+  * Every piece tested correct in isolation, which is what made it take a
+    while: the parser parsed a live answer, record recorded, prune kept, dump
+    wrote, and a copy of the whole proxy on a spare port filled its map
+    immediately. Only the pair was wrong. A sentinel written into the file and
+    replaced by {} within one dump interval is what finally named the second
+    writer.
+  * Recording is now decided by should_record(), which looks at the listen
+    address -- the one line the generator rewrites -- rather than at a
+    filename, which is the one thing it does not.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 09:45:00 +0300
+
 shunt (2.17.0) stable; urgency=medium
 
   * The traffic log gets its names back. access.log records addresses because
