@@ -661,8 +661,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
             начинайте с перезапуска.
           </div>
           <div class="btn-row">
-            <button class="btn btn-primary" onclick="restartServices()">↻ Перезапустить службы</button>
-            <button class="btn btn-danger btn-sm" onclick="rebootGateway()">⏻ Перезагрузить шлюз</button>
+            <button class="btn btn-primary" onclick="restartServices()">Перезапустить службы</button>
+            <button class="btn btn-danger btn-sm" onclick="rebootGateway()">Перезагрузить шлюз</button>
             <span id="sysact-result" class="text-muted" style="font-size:12px"></span>
           </div>
         </div>
@@ -705,7 +705,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
             </select>
           </div>
           <div class="btn-row" style="margin-top:2px">
-            <button class="btn btn-secondary btn-sm" onclick="measurePings()">📡 Замерить пинги</button>
+            <button class="btn btn-secondary btn-sm" onclick="measurePings()">Замерить пинги</button>
             <span id="egress-ping-status" class="text-muted" style="font-size:12px"></span>
           </div>
           <div id="egress-pings" style="display:none;max-height:260px;overflow-y:auto;border:1px solid rgba(128,128,128,.25);border-radius:8px;padding:6px;margin-bottom:10px"></div>
@@ -716,7 +716,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <div class="text-muted" style="font-size:12px">Вход в аккаунт AdGuard — на шлюзе: <span class="monospace">adguardvpn-cli login</span></div>
         </div>
         <div class="btn-row" style="margin-top:6px">
-          <button class="btn btn-primary" onclick="saveEgress()">✓ Применить выход</button>
+          <button class="btn btn-primary" onclick="saveEgress()">Применить выход</button>
           <span id="egress-result" class="text-muted" style="font-size:13px"></span>
         </div>
       </div>
@@ -761,7 +761,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <div class="text-muted" style="font-size:13px;padding:8px 0">Загрузка…</div>
         </div>
         <div class="mt-4">
-          <button class="btn btn-secondary btn-sm" onclick="loadVpnServers()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadVpnServers()">Обновить</button>
         </div>
       </div>
 
@@ -773,9 +773,9 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="field"><label>Имя (опционально)</label>
           <input id="vpn-add-name" type="text" placeholder="Мой сервер"></div>
         <div class="btn-row">
-          <button class="btn btn-primary" onclick="addVpnServer()">➕ Добавить</button>
-          <button class="btn btn-secondary" onclick="pasteVpnKey()">📋 Из буфера</button>
-          <label class="btn btn-secondary" for="vpn-key-file">📁 Файл</label>
+          <button class="btn btn-primary" onclick="addVpnServer()">Добавить</button>
+          <button class="btn btn-secondary" onclick="pasteVpnKey()">Из буфера</button>
+          <label class="btn btn-secondary" for="vpn-key-file">Файл</label>
           <input type="file" id="vpn-key-file" accept=".json,.txt,.conf" onchange="loadVpnKeyFile(this)">
         </div>
         <div id="vpn-add-result" class="mt-4" style="display:none"></div>
@@ -841,7 +841,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           </label>
         </div>
         <div class="mt-4">
-          <button class="btn btn-primary" onclick="applyProfile()">✓ Применить профиль</button>
+          <button class="btn btn-primary" onclick="applyProfile()">Применить профиль</button>
           <span id="profile-result" class="text-muted" style="margin-left:12px;font-size:13px"></span>
         </div>
       </div>
@@ -881,7 +881,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <input id="ib-ip" type="text" placeholder="адрес устройства">
           <input id="ib-dport" type="text" placeholder="порт устройства" style="max-width:140px">
           <input id="ib-name" type="text" placeholder="название" style="max-width:160px">
-          <button class="btn btn-secondary btn-sm" onclick="addInbound()">+ Открыть</button>
+          <button class="btn btn-secondary btn-sm" onclick="addInbound()">Открыть</button>
         </div>
         <div id="inbound-result" class="mt-4"></div>
       </div>
@@ -972,7 +972,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         </div>
         <div class="mt-4">
           <button class="btn btn-primary" id="geo-btn" onclick="updateGeo()">
-            🔄 Обновить сейчас</button>
+            Обновить сейчас</button>
           <div id="geo-result" class="mt-4" style="display:none"></div>
         </div>
       </div>
@@ -985,19 +985,19 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
 
       <div class="tab-bar">
         <button class="tab active" id="tab-syslog" onclick="switchLogTab('syslog')">
-          📋 Системный журнал</button>
+          Системный журнал</button>
         <button class="tab" id="tab-connections" onclick="switchLogTab('connections')">
-          🌐 Соединения</button>
+          Соединения</button>
       </div>
 
       <!-- System log tab -->
       <div id="logtab-syslog" class="card">
         <div class="btn-row" style="margin-bottom:12px">
-          <button class="btn btn-secondary btn-sm" onclick="loadLogs()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadLogs()">Обновить</button>
           <button class="btn btn-secondary btn-sm" id="stream-btn" onclick="toggleStream()">
-            ▶ Live</button>
-          <button class="btn btn-secondary btn-sm" onclick="copyLogs()">📋 Копировать</button>
-          <button class="btn btn-secondary btn-sm" onclick="clearLogs()">✕ Очистить</button>
+            Live</button>
+          <button class="btn btn-secondary btn-sm" onclick="copyLogs()">Копировать</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearLogs()">Очистить</button>
         </div>
         <div id="log-box"></div>
       </div>
@@ -1005,10 +1005,10 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <!-- Connections tab -->
       <div id="logtab-connections" class="card" style="display:none">
         <div class="btn-row" style="margin-bottom:10px">
-          <button class="btn btn-secondary btn-sm" onclick="loadConnections()">🔄 Обновить</button>
-          <button class="btn btn-secondary btn-sm" id="conn-stream-btn" onclick="toggleConnStream()">▶ Live</button>
-          <button class="btn btn-secondary btn-sm" onclick="clearConns()">✕ Очистить</button>
-          <button class="btn btn-secondary btn-sm" onclick="exportConnCSV()">↓ CSV</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadConnections()">Обновить</button>
+          <button class="btn btn-secondary btn-sm" id="conn-stream-btn" onclick="toggleConnStream()">Live</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearConns()">Очистить</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportConnCSV()">CSV</button>
           <span id="conn-count" class="text-muted" style="font-size:12px;margin-left:6px"></span>
         </div>
         <!-- Search & filters -->
@@ -1265,8 +1265,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Резервная копия</div>
         <div class="btn-row">
-          <button class="btn btn-secondary" onclick="exportSettings()">💾 Экспортировать в файл</button>
-          <label class="btn btn-secondary" for="import-file">📂 Импортировать из файла</label>
+          <button class="btn btn-secondary" onclick="exportSettings()">Экспортировать в файл</button>
+          <label class="btn btn-secondary" for="import-file">Импортировать из файла</label>
           <input type="file" id="import-file" accept=".tar.gz,.tgz" onchange="importSettings(this)">
         </div>
       </div>
@@ -1281,7 +1281,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="btn-row" style="margin-top:12px">
           <button class="btn btn-primary" id="topo-apply-btn" onclick="applyTopology()" disabled>
             Переключить топологию</button>
-          <button class="btn btn-secondary btn-sm" onclick="loadTopology()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadTopology()">Обновить</button>
         </div>
       </div>
 
@@ -1300,7 +1300,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="btn-row" style="margin-top:12px">
           <button class="btn btn-primary" id="netif-apply-btn" onclick="applyIfaceSwitch()" disabled>
             Переключить интерфейс</button>
-          <button class="btn btn-secondary btn-sm" onclick="loadNetIfaces()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadNetIfaces()">Обновить</button>
         </div>
       </div>
 
@@ -1309,7 +1309,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <p class="text-muted" style="font-size:12px;margin-bottom:12px">
           Автоматически создаются перед каждым изменением. Последние 10. При ошибке старта xray — откат выполняется автоматически.</p>
         <div class="btn-row">
-          <button class="btn btn-secondary btn-sm" onclick="loadSnapshots()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadSnapshots()">Обновить</button>
         </div>
         <div id="snap-list" class="snap-list">
           <div class="text-muted" style="font-size:13px;padding:8px 0">Загрузка…</div>
@@ -1334,7 +1334,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <p class="text-muted" style="font-size:13px;margin-bottom:14px">
           Удаляет VPN ключ и сбрасывает все настройки. Пароль сбрасывается на <code>admin</code>.</p>
         <button class="btn btn-danger" onclick="factoryReset()">
-          ⚠️ Сбросить настройки</button>
+          Сбросить настройки</button>
       </div>
 
       <div class="card">
@@ -1374,7 +1374,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="rule-add-row">
           <input id="rule-direct-input" type="text" placeholder="domain:example.ru или 1.2.3.0/24"
                  onkeydown="if(event.key==='Enter')addRule('direct')">
-          <button class="btn btn-secondary btn-sm" onclick="addRule('direct')">+ Добавить</button>
+          <button class="btn btn-secondary btn-sm" onclick="addRule('direct')">Добавить</button>
         </div>
         <div id="rule-direct-err" style="color:var(--red);font-size:12px;margin-top:6px"></div>
       </div>
@@ -1387,13 +1387,13 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="rule-add-row">
           <input id="rule-vpn-input" type="text" placeholder="domain:site.com или 5.6.7.8"
                  onkeydown="if(event.key==='Enter')addRule('vpn')">
-          <button class="btn btn-secondary btn-sm" onclick="addRule('vpn')">+ Добавить</button>
+          <button class="btn btn-secondary btn-sm" onclick="addRule('vpn')">Добавить</button>
         </div>
         <div id="rule-vpn-err" style="color:var(--red);font-size:12px;margin-top:6px"></div>
       </div>
 
       <div class="btn-row">
-        <button class="btn btn-primary" onclick="saveRules()">✓ Сохранить правила</button>
+        <button class="btn btn-primary" onclick="saveRules()">Сохранить правила</button>
         <span id="rules-result" class="text-muted" style="font-size:13px"></span>
       </div>
 
@@ -1421,7 +1421,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
 
       <div class="card">
         <div class="btn-row" style="margin-bottom:12px">
-          <button class="btn btn-secondary btn-sm" onclick="loadDevices()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadDevices()">Обновить</button>
           <span style="font-size:12px;color:var(--muted);margin-left:8px">
             Текущий профиль: <span id="dev-global-profile" class="text-green">—</span>
           </span>
@@ -1471,7 +1471,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div id="dns-resolvers"><span class="text-muted">загрузка…</span></div>
         <div id="dns-lease-offer" class="mt-4" style="display:none"></div>
         <div class="btn-row mt-4">
-          <button class="btn btn-secondary btn-sm" onclick="loadDnsProbe()">🔄 Опросить заново</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadDnsProbe()">Опросить заново</button>
         </div>
       </div>
 
@@ -1495,7 +1495,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="rule-add-row">
           <input id="dns-upstream-input" type="text" placeholder="8.8.8.8 или 192.168.50.1"
                  onkeydown="if(event.key==='Enter')addDnsUpstream('main')">
-          <button class="btn btn-secondary btn-sm" onclick="addDnsUpstream('main')">+ Добавить</button>
+          <button class="btn btn-secondary btn-sm" onclick="addDnsUpstream('main')">Добавить</button>
         </div>
       </div>
 
@@ -1507,7 +1507,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="rule-add-row">
           <input id="dns-ru-input" type="text" placeholder="192.168.50.1"
                  onkeydown="if(event.key==='Enter')addDnsUpstream('ru')">
-          <button class="btn btn-secondary btn-sm" onclick="addDnsUpstream('ru')">+ Добавить</button>
+          <button class="btn btn-secondary btn-sm" onclick="addDnsUpstream('ru')">Добавить</button>
         </div>
       </div>
 
@@ -1522,7 +1522,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="rule-add-row" style="margin-top:10px">
           <input id="dns-local-host" type="text" placeholder="mydevice.local" style="flex:1">
           <input id="dns-local-ip"   type="text" placeholder="192.168.50.5"   style="flex:1">
-          <button class="btn btn-secondary btn-sm" onclick="addDnsLocal()">+ Добавить</button>
+          <button class="btn btn-secondary btn-sm" onclick="addDnsLocal()">Добавить</button>
         </div>
       </div>
 
@@ -1536,7 +1536,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       </div>
 
       <div class="btn-row">
-        <button class="btn btn-primary" onclick="saveDns()">✓ Применить настройки DNS</button>
+        <button class="btn btn-primary" onclick="saveDns()">Применить настройки DNS</button>
         <span id="dns-result" class="text-muted" style="font-size:13px"></span>
       </div>
     </div>
@@ -1547,8 +1547,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <p class="page-desc">Объединяйте устройства в группы для применения общей политики маршрутизации</p>
       <div class="card">
         <div class="btn-row" style="margin-bottom:12px">
-          <button class="btn btn-primary btn-sm" onclick="showCreateGroup()">+ Создать группу</button>
-          <button class="btn btn-secondary btn-sm" onclick="loadGroups()">🔄 Обновить</button>
+          <button class="btn btn-primary btn-sm" onclick="showCreateGroup()">Создать группу</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadGroups()">Обновить</button>
         </div>
         <div id="groups-list"><div class="text-muted" style="font-size:13px">Загрузка…</div></div>
       </div>
@@ -1569,7 +1569,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           </select></div>
         <input type="hidden" id="grp-edit-id">
         <div class="btn-row">
-          <button class="btn btn-primary" onclick="saveGroup()">✓ Сохранить</button>
+          <button class="btn btn-primary" onclick="saveGroup()">Сохранить</button>
           <button class="btn btn-secondary" onclick="cancelGroupEdit()">Отмена</button>
           <span id="grp-result" class="text-muted" style="font-size:13px"></span>
         </div>
@@ -1582,8 +1582,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <p class="page-desc">Автоматически импортируйте списки доменов/IP из внешних источников</p>
       <div class="card">
         <div class="btn-row" style="margin-bottom:12px">
-          <button class="btn btn-secondary btn-sm" onclick="loadSubscriptions()">🔄 Обновить</button>
-          <button class="btn btn-primary btn-sm" onclick="toggleSubAddForm()">+ Добавить</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadSubscriptions()">Обновить</button>
+          <button class="btn btn-primary btn-sm" onclick="toggleSubAddForm()">Добавить</button>
         </div>
         <div id="sub-add-form" style="display:none;margin-bottom:16px;padding:14px;background:var(--bg3);border-radius:8px">
           <div class="field" style="margin-bottom:10px"><label>Название</label>
@@ -1651,7 +1651,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <textarea id="adblock-allow" rows="3" placeholder="trusted.example.com"></textarea>
       </div>
       <div class="btn-row">
-        <button class="btn btn-primary" onclick="saveAdblock()">✓ Применить</button>
+        <button class="btn btn-primary" onclick="saveAdblock()">Применить</button>
         <span id="adblock-result" class="text-muted" style="font-size:13px"></span>
       </div>
     </div>
@@ -1687,7 +1687,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         </div>
       </div>
       <div class="btn-row">
-        <button class="btn btn-primary" onclick="saveProxy()">✓ Применить</button>
+        <button class="btn btn-primary" onclick="saveProxy()">Применить</button>
         <span id="proxy-result" class="text-muted" style="font-size:13px"></span>
         <span class="text-muted" style="font-size:12px">Применение перезапустит туннель (~10 сек без сети)</span>
       </div>
@@ -1706,7 +1706,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <button class="btn btn-secondary btn-sm" onclick="loadAnalytics(24)">24 ч</button>
           <button class="btn btn-secondary btn-sm" onclick="loadAnalytics(48)">48 ч</button>
           <button class="btn btn-secondary btn-sm" onclick="loadAnalytics(168)">7 дней</button>
-          <button class="btn btn-secondary btn-sm" onclick="exportAnalytics()">↓ CSV</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportAnalytics()">CSV</button>
         </div>
         <div id="analytics-summary" class="status-grid" style="margin-bottom:16px"></div>
         <div class="card-title">VPN vs Direct по часам</div>
@@ -1730,8 +1730,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <p class="page-desc">Автоматическое обслуживание: гео-базы, бэкапы, подписки, health checks</p>
       <div class="card">
         <div class="btn-row">
-          <button class="btn btn-secondary btn-sm" onclick="loadScheduler()">🔄 Обновить</button>
-          <button class="btn btn-primary btn-sm" onclick="showCreateTask()">+ Задача</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadScheduler()">Обновить</button>
+          <button class="btn btn-primary btn-sm" onclick="showCreateTask()">Задача</button>
         </div>
         <div id="scheduler-list"><div class="text-muted" style="font-size:13px">Загрузка…</div></div>
       </div>
@@ -1769,7 +1769,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <p class="page-desc">Проверка и установка обновлений компонентов шлюза</p>
       <div class="card">
         <div class="btn-row" style="margin-bottom:12px">
-          <button class="btn btn-primary" id="check-updates-btn" onclick="checkUpdates()">🔍 Проверить обновления</button>
+          <button class="btn btn-primary" id="check-updates-btn" onclick="checkUpdates()">Проверить обновления</button>
         </div>
         <label class="auto-update">
           <input type="checkbox" id="auto-update-cb" onchange="setAutoUpdate(this.checked)">
@@ -1816,8 +1816,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <div class="alert-events-grid" id="alerts-events-grid"></div>
         </div>
         <div class="btn-row" style="margin-top:14px">
-          <button class="btn btn-primary" onclick="saveAlerts()">✓ Сохранить</button>
-          <button class="btn btn-secondary" onclick="testAlert()">📤 Тест</button>
+          <button class="btn btn-primary" onclick="saveAlerts()">Сохранить</button>
+          <button class="btn btn-secondary" onclick="testAlert()">Тест</button>
           <span id="alerts-result" class="text-muted" style="font-size:13px"></span>
         </div>
       </div>
@@ -1825,7 +1825,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Журнал событий</div>
         <div class="btn-row" style="margin-bottom:10px">
-          <button class="btn btn-secondary btn-sm" onclick="loadAlertLog()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadAlertLog()">Обновить</button>
         </div>
         <div id="alert-log-list">
           <div class="text-muted" style="font-size:13px">Нет событий</div>
@@ -1838,9 +1838,9 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <h2>Терминал</h2>
       <p class="page-desc">Bash-сессия на шлюзе в реальном времени</p>
       <div class="terminal-toolbar">
-        <button class="btn btn-secondary btn-sm" onclick="termConnect()" id="term-conn-btn">▶ Подключить</button>
-        <button class="btn btn-secondary btn-sm" onclick="termDisconnect()" id="term-disc-btn" style="display:none">⏹ Отключить</button>
-        <button class="btn btn-secondary btn-sm" onclick="termClear()">🗑 Очистить</button>
+        <button class="btn btn-secondary btn-sm" onclick="termConnect()" id="term-conn-btn">Подключить</button>
+        <button class="btn btn-secondary btn-sm" onclick="termDisconnect()" id="term-disc-btn" style="display:none">Отключить</button>
+        <button class="btn btn-secondary btn-sm" onclick="termClear()">Очистить</button>
         <span id="term-status" class="text-muted" style="font-size:12px;margin-left:4px"></span>
       </div>
       <div id="terminal-container"></div>
@@ -2420,7 +2420,7 @@ async function loadGeoInfo() {
 }
 async function updateGeo() {
   const btn = document.getElementById('geo-btn');
-  btn.disabled = true; btn.textContent = '⏳ Обновление…';
+  btn.disabled = true; btn.textContent = 'Обновление…';
   const box = document.getElementById('geo-result');
   box.style.display = 'block';
   box.innerHTML = '<span class="text-muted">Загрузка geoip.dat и geosite.dat…</span>';
@@ -2433,7 +2433,7 @@ async function updateGeo() {
     box.innerHTML = `<span class="text-red">✕ ${r?.error || 'Ошибка'}</span>`;
     toast('Ошибка обновления', false);
   }
-  btn.disabled = false; btn.textContent = '🔄 Обновить сейчас';
+  btn.disabled = false; btn.textContent = 'Обновить сейчас';
 }
 
 // ─── Log tabs ─────────────────────────────────────────────────────────────────
@@ -2480,9 +2480,9 @@ function toggleStream() {
   const btn = document.getElementById('stream-btn');
   if (streaming) {
     if (logStreamES) { logStreamES.close(); logStreamES = null; }
-    streaming = false; btn.textContent = '▶ Live';
+    streaming = false; btn.textContent = 'Live';
   } else {
-    streaming = true; btn.textContent = '⏸ Стоп';
+    streaming = true; btn.textContent = 'Стоп';
     logStreamES = new EventSource('/api/logs/stream');
     const box = document.getElementById('log-box');
     logStreamES.onmessage = e => {
@@ -2494,7 +2494,7 @@ function toggleStream() {
       if (box.children.length > 1000) box.removeChild(box.firstChild);
       box.scrollTop = box.scrollHeight;
     };
-    logStreamES.onerror = () => { streaming = false; btn.textContent = '▶ Live'; };
+    logStreamES.onerror = () => { streaming = false; btn.textContent = 'Live'; };
   }
 }
 
@@ -2524,10 +2524,10 @@ function toggleConnStream() {
   if (connStreaming) {
     if (connStreamES) { connStreamES.close(); connStreamES = null; }
     connStreaming = false;
-    if (btn) btn.textContent = '▶ Live';
+    if (btn) btn.textContent = 'Live';
   } else {
     connStreaming = true;
-    if (btn) btn.textContent = '⏸ Стоп';
+    if (btn) btn.textContent = 'Стоп';
     connStreamES = new EventSource('/api/connections/stream');
     connStreamES.onmessage = e => {
       const c = JSON.parse(e.data);
@@ -2535,7 +2535,7 @@ function toggleConnStream() {
     };
     connStreamES.onerror = () => {
       connStreaming = false;
-      if (btn) btn.textContent = '▶ Live';
+      if (btn) btn.textContent = 'Live';
     };
   }
 }
@@ -3444,7 +3444,7 @@ async function loadSnapshots() {
         <div class="snap-id">${escHtml(s.id)}</div>
       </div>
       ${s.has_vpn ? '<span class="snap-vpn">VPN</span>' : ''}
-      <button class="btn btn-secondary btn-sm" onclick="restoreSnapshot('${s.id}')">↩ Откатить</button>
+      <button class="btn btn-secondary btn-sm" onclick="restoreSnapshot('${s.id}')">Откатить</button>
     </div>`;
   }).join('');
 }
@@ -3523,7 +3523,7 @@ function renderConns() {
       <td class="col-proto">${c.proto}</td>
       <td class="col-route"><span class="${cls}">${lbl}</span></td>
       <td><button title="Объяснить маршрут" onclick='openExplain(${connJson})'
-          style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;padding:2px 4px">🔍</button></td>
+          class="ui-icon-action" aria-label="Объяснить маршрут"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button></td>
     </tr>`;
   }).join('');
 }
@@ -3614,10 +3614,10 @@ async function loadVpnServers() {
       <div class="vpn-server-meta">${escHtml(s.protocol)} · ${escHtml(s.server)}:${s.port}
         · приоритет: ${s.priority} · ping: ${lat} · проверен: ${checked}</div>
       <div class="vpn-actions">
-        ${!s.is_active ? `<button class="btn btn-primary btn-sm" onclick="activateVpn('${s.id}')">▶ Активировать</button>` : ''}
-        <button class="btn btn-secondary btn-sm" onclick="checkVpn('${s.id}', this)">📡 Проверить</button>
-        <button class="btn btn-secondary btn-sm" onclick="toggleVpn('${s.id}', ${!s.enabled})">${s.enabled ? '⏸ Выключить' : '▶ Включить'}</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteVpn('${s.id}')">✕ Удалить</button>
+        ${!s.is_active ? `<button class="btn btn-primary btn-sm" onclick="activateVpn('${s.id}')">Активировать</button>` : ''}
+        <button class="btn btn-secondary btn-sm" onclick="checkVpn('${s.id}', this)">Проверить</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleVpn('${s.id}', ${!s.enabled})">${s.enabled ? 'Выключить' : 'Включить'}</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteVpn('${s.id}')">Удалить</button>
       </div>
     </div>`;
   }).join('');
@@ -3650,7 +3650,7 @@ async function activateVpn(id) {
 async function checkVpn(id, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   const r = await apiJ('POST', `/api/vpn-servers/${id}/check`);
-  if (btn) { btn.disabled = false; btn.textContent = '📡 Проверить'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Проверить'; }
   if (r?.ok) {
     const msg = r.reachable ? `✓ Доступен, ${r.latency_ms} ms` : '✕ Недоступен';
     toast(msg, r.reachable); loadVpnServers();
@@ -3803,7 +3803,7 @@ async function loadDevices() {
       <td class="dev-mac">${escHtml(d.mac||'—')}</td>
       <td><span class="badge ${stateClass}" style="font-size:11px">${escHtml(d.state)}</span></td>
       <td>${policyDropdown}</td>
-      <td><button class="btn btn-danger" style="padding:3px 7px;font-size:11px"
+      <td><button class="btn btn-danger" aria-label="Удалить устройство"
           onclick="deleteDevice('${escHtml(d.key)}')">✕</button></td>
     </tr>`;
   }).join('');
@@ -4175,8 +4175,8 @@ async function loadGroups() {
       </div>
       ${g.description ? `<div class="vpn-server-meta">${escHtml(g.description)}</div>` : ''}
       <div class="vpn-actions">
-        <button class="btn btn-secondary btn-sm" onclick="editGroup('${g.id}','${escHtml(g.name)}','${escHtml(g.description||'')}','${g.routing_policy}')">✏️ Изменить</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteGroup('${g.id}')">✕ Удалить</button>
+        <button class="btn btn-secondary btn-sm" onclick="editGroup('${g.id}','${escHtml(g.name)}','${escHtml(g.description||'')}','${g.routing_policy}')">Изменить</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteGroup('${g.id}')">Удалить</button>
       </div>
     </div>`;
   }).join('');
@@ -4264,8 +4264,8 @@ async function loadSubscriptions() {
       <div class="vpn-server-meta">${escHtml(s.url.slice(0,60))}… · ${s.rule_count} правил · обновлено: ${upd}</div>
       ${errHtml}
       <div class="vpn-actions">
-        <button class="btn btn-primary btn-sm" onclick="refreshSub('${s.id}', this)">↻ Обновить</button>
-        <button class="btn btn-secondary btn-sm" onclick="toggleSub('${s.id}', ${!s.enabled})">${s.enabled ? '⏸ Выкл' : '▶ Вкл'}</button>
+        <button class="btn btn-primary btn-sm" onclick="refreshSub('${s.id}', this)">Обновить</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleSub('${s.id}', ${!s.enabled})">${s.enabled ? 'Выкл' : 'Вкл'}</button>
         <button class="btn btn-danger btn-sm" onclick="deleteSub('${s.id}')">✕</button>
       </div>
     </div>`;
@@ -4286,7 +4286,7 @@ async function addSubscription() {
 async function refreshSub(id, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   const r = await apiJ('POST', `/api/subscriptions/${id}/update`);
-  if (btn) { btn.disabled = false; btn.textContent = '↻ Обновить'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Обновить'; }
   if (r?.ok) {
     toast(`Загружено ${r.rule_count} правил${r.parse_errors?.length ? `, ${r.parse_errors.length} ошибок` : ''}`);
     loadSubscriptions();
@@ -4596,8 +4596,8 @@ async function loadScheduler() {
         ${t.last_result ? ` · <span class="${resCls}">${escHtml(t.last_result)}</span>` : ''}
         ${t.last_error ? ` <span class="text-red" style="font-size:11px">${escHtml(t.last_error.slice(0,60))}</span>` : ''}</div>
       <div class="vpn-actions">
-        <button class="btn btn-primary btn-sm" onclick="runTaskNow('${t.id}', this)">▶ Запустить</button>
-        <button class="btn btn-secondary btn-sm" onclick="toggleTask('${t.id}', ${!t.enabled})">${t.enabled ? '⏸ Выкл' : '▶ Вкл'}</button>
+        <button class="btn btn-primary btn-sm" onclick="runTaskNow('${t.id}', this)">Запустить</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleTask('${t.id}', ${!t.enabled})">${t.enabled ? 'Выкл' : 'Вкл'}</button>
         <button class="btn btn-danger btn-sm" onclick="deleteTask('${t.id}')">✕</button>
       </div>
     </div>`;
@@ -4624,7 +4624,7 @@ async function createTask() {
 async function runTaskNow(id, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   const r = await apiJ('POST', `/api/scheduler/${id}/run`);
-  if (btn) { btn.disabled = false; btn.textContent = '▶ Запустить'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Запустить'; }
   if (r) {
     toast(`${r.result}: ${r.detail || '—'}`, r.result === 'ok'); loadScheduler();
   }
@@ -4647,10 +4647,10 @@ async function deleteTask(id) {
 async function checkUpdates() {
   const btn = document.getElementById('check-updates-btn');
   const el  = document.getElementById('updates-content');
-  btn.disabled = true; btn.textContent = '⏳ Проверка…';
+  btn.disabled = true; btn.textContent = 'Проверка…';
   el.innerHTML = '<div class="text-muted">Запрашиваем GitHub releases API…</div>';
   const r = await apiJ('GET', '/api/updates/check');
-  btn.disabled = false; btn.textContent = '🔍 Проверить обновления';
+  btn.disabled = false; btn.textContent = 'Проверить обновления';
   if (!r) return;
   renderUpdatesContent(r);
 }
@@ -4678,7 +4678,7 @@ function renderUpdatesContent(r) {
         ? `<span class="badge badge-green">✓ Актуально</span>`
         : `<span class="badge badge-gray">? Не проверено</span>`;
     const updateBtn = avail && title === 'xray-core'
-      ? `<button class="btn btn-primary btn-sm" onclick="doUpdateXray('${escHtml(info.latest||'')}')">⬆ Обновить до v${escHtml(info.latest||'')}</button>`
+      ? `<button class="btn btn-primary btn-sm" onclick="doUpdateXray('${escHtml(info.latest||'')}')">Обновить до v${escHtml(info.latest||'')}</button>`
       : '';
     // The gateway is not updated from here: apt would replace the process
     // serving this page. Show the commands rather than a badge with no exit.
@@ -4690,7 +4690,7 @@ function renderUpdatesContent(r) {
         ? `cd /tmp\ncurl -sSLO ${base}/shunt_${v}_all.deb\ncurl -sSL ${base}/SHA256SUMS | grep 'shunt_${v}_all.deb$' | sha256sum -c -\nsudo apt install ./shunt_${v}_all.deb`
         : `sudo apt install ./shunt_${v}_all.deb`;
       howTo = `<div class="update-howto">
-        <button class="btn btn-primary btn-sm" id="update-gw-btn" onclick="doUpdateGateway('${escHtml(v)}')">⬆ Обновить до v${escHtml(v)}</button>
+        <button class="btn btn-primary btn-sm" id="update-gw-btn" onclick="doUpdateGateway('${escHtml(v)}')">Обновить до v${escHtml(v)}</button>
         ${info.release_url ? `<a class="update-howto-link" href="${escHtml(info.release_url)}" target="_blank" rel="noopener noreferrer">Что изменилось</a>` : ''}
         <div class="update-howto-why">Установка заменит программу, которая отдаёт эту страницу: интерфейс на минуту пропадёт и вернётся сам. Ход установки виден ниже.</div>
         <div id="gw-update-status" class="update-progress" style="display:none"></div>
@@ -4728,10 +4728,10 @@ async function setAutoUpdate(on) {
 async function doUpdateGateway(v) {
   if (!confirm(t(`Обновить Shunt до v${v}?\n\nИнтерфейс перезапустится и на минуту станет недоступен. Если после установки он или маршрутизация не поднимутся, автоматически вернётся текущая версия.`))) return;
   const btn = document.getElementById('update-gw-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Устанавливается…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Устанавливается…'; }
   const r = await apiJ('POST', '/api/updates/gateway');
   if (!r?.ok) {
-    if (btn) { btn.disabled = false; btn.textContent = `⬆ Обновить до v${v}`; }
+    if (btn) { btn.disabled = false; btn.textContent = `Обновить до v${v}`; }
     toast(r?.error || 'Не удалось запустить обновление', false);
     return;
   }
@@ -4981,7 +4981,7 @@ function termInit() {
   });
   termResizeObserver.observe(container);
 
-  term.writeln('\x1b[2;37mТерминал готов. Нажмите \x1b[0m\x1b[1;32m▶ Подключить\x1b[0m\x1b[2;37m для запуска сессии.\x1b[0m');
+  term.writeln('\x1b[2;37mТерминал готов. Нажмите \x1b[0m\x1b[1;32mПодключить\x1b[0m\x1b[2;37m для запуска сессии.\x1b[0m');
 }
 
 function termSendResize() {

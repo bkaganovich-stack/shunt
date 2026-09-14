@@ -1,3 +1,12 @@
+shunt (2.20.2) stable; urgency=medium
+
+  * Unify action buttons across pages and dialogs: 14px type, 40px height,
+    consistent weight and spacing in both themes and mobile layouts.
+  * Remove decorative emoji from action labels and update English translations.
+    Use a vector route inspection icon with an accessible label.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 20:14:31 +0300
+
 shunt (2.20.1) stable; urgency=medium
 
   * Keep dialog label spacing off switch tracks: a six-pixel margin shortened

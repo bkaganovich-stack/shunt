@@ -868,7 +868,45 @@
     "Основная навигация": "Main navigation",
     "Мобильная навигация": "Mobile navigation",
     "Провайдер": "ISP",
-    "Таблица ручных правил": "Manual rules table"
+    "Таблица ручных правил": "Manual rules table",
+    "Перезапустить службы": "Restart services",
+    "Очистить": "Clear",
+    "Устанавливается…": "Installing…",
+    "Системный журнал": "System journal",
+    "Применить настройки DNS": "Apply DNS settings",
+    "Обновление…": "Updating…",
+    "Применить выход": "Apply egress",
+    "Обновить": "Refresh",
+    "Подключить": "Connect",
+    "Стоп": "Stop",
+    "Отключить": "Disconnect",
+    "Сбросить настройки": "Reset settings",
+    "Запустить": "Start",
+    "Проверить обновления": "Check for updates",
+    "Замерить пинги": "Measure pings",
+    "Из буфера": "From the clipboard",
+    "Перезагрузить шлюз": "Reboot gateway",
+    "Изменить": "Edit",
+    "Копировать": "Copy",
+    "Применить": "Apply",
+    "Проверка…": "Checking…",
+    "Задача": "Task",
+    "Обновить сейчас": "Refresh now",
+    "Соединения": "Connections",
+    "Экспортировать в файл": "Export to a file",
+    "Создать группу": "Create group",
+    "Откатить": "Roll back",
+    "Тест": "Test",
+    "Открыть": "Open",
+    "Сохранить правила": "Save rules",
+    "Файл": "File",
+    "Импортировать из файла": "Import from a file",
+    "Удалить устройство": "Delete device",
+    "Активировать": "Activate",
+    "Вкл": "Enable",
+    "Выкл": "Disable",
+    "Включить": "Enable",
+    "Выключить": "Disable"
   },
   "patterns": [
     [
@@ -1087,6 +1125,10 @@
     [
       "^Всего: (.+)\\. Напрямую: (.+)\\. Туннель: (.+)\\. Заблокировано: (.+)\\.$",
       "Total: $1. Direct: $2. Tunnel: $3. Blocked: $4."
+    ],
+    [
+      "^Обновить до v(.+)$",
+      "Update to v$1"
     ]
   ]
 }

@@ -61,3 +61,15 @@
 .hint::after{display:none}
 .hint:hover::after,.hint:focus::after{display:block}
 @media(max-width:700px){.hint::after{position:fixed;left:16px;right:16px;bottom:84px;width:auto;max-width:none;transform:none}}
+/* Action buttons share one type scale and geometry, including legacy btn-sm. */
+:root{--action-height:40px;--action-font-size:14px;--action-font-weight:500;--action-padding:16px}
+.btn,.page .btn,.ui-dialog .btn,#app-screen button.primary,#ui-rule-rows button{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  box-sizing:border-box;height:var(--action-height);min-height:var(--action-height);
+  padding:0 var(--action-padding);border-width:1px;border-style:solid;
+  font-family:inherit;font-size:var(--action-font-size);font-weight:var(--action-font-weight);
+  line-height:20px;letter-spacing:normal;border-radius:var(--radius);white-space:nowrap;
+}
+.btn-primary{border-color:transparent}
+.ui-icon-action{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;border:0;background:none;color:var(--muted)}
+.ui-icon-action .icon{width:18px;height:18px}
