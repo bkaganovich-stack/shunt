@@ -501,6 +501,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
 .auto-update-title{display:block;font-size:13px;font-weight:600;color:var(--text)}
 .auto-update-why{display:block;font-size:12px;color:var(--muted);line-height:1.5;margin-top:4px}
 </style>
+<link rel="stylesheet" href="/static/ui.css">
 </head>
 <body>
 <script>
@@ -529,7 +530,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
 </div>
 
 <!-- ─── APP ───────────────────────────────────────────────────────────────── -->
-<div id="app-screen" style="display:none">
+<div id="app-screen" class="shell" style="display:none">
   <!-- Mobile top bar -->
   <div class="mobile-header">
     <button class="hamburger" onclick="toggleNav()" aria-label="Меню">☰</button>
@@ -1929,16 +1930,15 @@ function toast(msg, ok = true) {
 
 // ─── Auth ──────────────────────────────────────────────────────────────────
 function showLogin() {
+  stopUpdates();
   document.getElementById('app-screen').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
 }
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'grid';
+  window.shuntUI?.start();
   startUpdates();
-  // восстановить страницу из #hash после перезагрузки
-  const page = (location.hash || '').replace(/^#/, '');
-  if (page && page !== 'dashboard') showPage(page);
 }
 
 async function doLogin() {
@@ -1980,7 +1980,7 @@ function toggleTheme() {
   applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
 }
 
-function showPage(name, linkEl) {
+function legacyShowPage(name, linkEl) {
   if (!document.getElementById('page-' + name)) return;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
@@ -1992,8 +1992,10 @@ function showPage(name, linkEl) {
 
   if (name === 'logs') { loadLogs(); if (currentLogTab === 'connections') loadConnections(); }
   if (name === 'geo') loadGeoInfo();
+  if (name === 'servers') loadVpnServers();
+  if (name === 'discovered') loadDiscovered();
   if (name === 'settings') { loadAbout(); loadSnapshots(); loadTopology(); loadNetIfaces(); }
-  if (name === 'rules') loadRules();
+  if (name === 'rules' && !window.shuntUI?.rulesDirty) loadRules();
   if (name === 'devices') loadDevices();
   if (name === 'vpn') { loadVpnServers(); loadFptn(); }
   if (name === 'dns') { loadDnsSettings(); loadDnsStatus(); }
@@ -2034,8 +2036,10 @@ const STATE_HTML = {
 async function refreshStatus() {
   const lbl0 = document.getElementById('theme-label');
   if (lbl0) lbl0.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? 'Тёмная тема' : 'Светлая тема';
-  const d = await apiJ('GET', '/api/status');
-  if (!d) return;
+  let d;
+  try { d = await apiJ('GET', '/api/status'); } catch (e) { window.shuntUI?.offline(); return; }
+  if (!d || !d.state) { window.shuntUI?.offline(); return; }
+  window.shuntUI?.status(d);
   renderFallbackState(d);
   let stateHtml = STATE_HTML[d.state] || d.state;
   if (d.egress && d.egress.kind === 'adguard')
@@ -2058,8 +2062,7 @@ async function refreshStatus() {
       if (el) el.style.display = show ? '' : 'none';
     });
   }
-  currentProfile = d.profile;
-  updateProfileUI(d.profile);
+  if (!window.shuntUI?.profileDirty) updateProfileUI(d.profile);
   const tog = document.getElementById('aaplimg-toggle');
   if (tog) tog.checked = d.force_aaplimg_vpn !== false;
   const rt = document.getElementById('realtime-toggle');
@@ -2087,6 +2090,7 @@ async function refreshStatus() {
 }
 
 function startUpdates() {
+  clearInterval(window._statusInterval);
   refreshStatus();
   loadAbout();
   window._statusInterval = setInterval(refreshStatus, 5000);
@@ -2116,6 +2120,10 @@ async function refreshAboutGeoDate() {
   if (el) el.textContent = s.geo_updated || 'Никогда';
 }
 function stopUpdates() {
+  clearTimeout(window._speedRetry);
+  stopPathPolling();
+  if (chartTimer) { clearInterval(chartTimer); chartTimer = null; }
+  window.shuntUI?.stop();
   clearInterval(window._statusInterval);
   if (speedES) { speedES.close(); speedES = null; }
   if (logStreamES) { logStreamES.close(); logStreamES = null; }
@@ -2126,6 +2134,8 @@ function stopUpdates() {
 
 // ─── Speed stream (dashboard) ────────────────────────────────────────────────
 function startSpeedStream() {
+  if (window.shuntUI && !window.shuntUI.authenticated) return;
+  clearTimeout(window._speedRetry);
   if (speedES) speedES.close();
   speedES = new EventSource('/api/speed-stream');
   speedES.onmessage = e => {
@@ -2138,7 +2148,7 @@ function startSpeedStream() {
     document.getElementById('rx-bar').style.width = (rx / speedMax.rx * 100) + '%';
     document.getElementById('tx-bar').style.width = (tx / speedMax.tx * 100) + '%';
   };
-  speedES.onerror = () => setTimeout(startSpeedStream, 3000);
+  speedES.onerror = () => { if (window.shuntUI?.authenticated) window._speedRetry = setTimeout(startSpeedStream, 3000); };
 }
 
 function fmtSpeed(bps) {
@@ -2258,6 +2268,8 @@ function fmtBytes(b) {
 
 // ─── System monitor ──────────────────────────────────────────────────────────
 function startSysinfoStream() {
+  if (window.shuntUI && (!window.shuntUI.authenticated || window.shuntUI.page !== 'system')) return;
+  clearTimeout(window._sysinfoRetry);
   if (sysinfoES) sysinfoES.close();
   sysinfoES = new EventSource('/api/sysinfo-stream');
   sysinfoES.onmessage = e => {
@@ -2268,10 +2280,11 @@ function startSysinfoStream() {
     if (d.net) updateSysNetUI(d.net);
   };
   sysinfoES.onerror = () => {
-    if (sysinfoES) setTimeout(startSysinfoStream, 3000);
+    if (sysinfoES) window._sysinfoRetry = setTimeout(startSysinfoStream, 3000);
   };
 }
 function stopSysinfoStream() {
+  clearTimeout(window._sysinfoRetry);
   if (sysinfoES) { sysinfoES.close(); sysinfoES = null; }
 }
 
@@ -2381,12 +2394,13 @@ function updateProfileUI(profile) {
   if (el) el.classList.add('selected');
   currentProfile = profile;
 }
-function selectProfile(p) { updateProfileUI(p); }
+function selectProfile(p) { updateProfileUI(p); window.shuntUI?.profileSelected(p); }
 async function applyProfile() {
   const r = await apiJ('POST', '/api/profile', { profile: currentProfile });
   const s = document.getElementById('profile-result');
   if (r?.ok) {
     s.textContent = '✓ Применено'; s.className = 'text-green';
+    window.shuntUI?.profileApplied();
     toast('Профиль применён'); refreshStatus();
   } else {
     s.textContent = '✕ Ошибка'; s.className = 'text-red';
@@ -2399,6 +2413,7 @@ async function applyProfile() {
 async function loadGeoInfo() {
   const r = await apiJ('GET', '/api/geo-info');
   if (!r) return;
+  window.shuntUI?.geo(r);
   document.getElementById('geo-date').textContent = r.geo_updated || 'Никогда';
   document.getElementById('geo-ip-size').textContent = r.geoip_size || '—';
   document.getElementById('geo-site-size').textContent = r.geosite_size || '—';
@@ -3263,7 +3278,8 @@ let _rulesData = { always_direct: [], always_vpn: [] };
 async function loadRules() {
   const r = await apiJ('GET', '/api/custom-rules');
   if (!r) return;
-  _rulesData = r;
+  _rulesData = {always_direct:r.always_direct || [],always_vpn:r.always_vpn || []};
+  window.shuntUI?.rulesLoaded();
   renderRulesList('direct', r.always_direct || []);
   renderRulesList('vpn',    r.always_vpn    || []);
   loadDiscovered();
@@ -3277,6 +3293,7 @@ function ruleOf(r) {
 }
 
 function renderRulesList(type, rules) {
+  window.shuntUI?.renderRules();
   const el = document.getElementById(`rules-${type}-list`);
   if (!el) return;
   if (!rules.length) {
@@ -3296,6 +3313,7 @@ function renderRulesList(type, rules) {
 }
 
 function toggleRule(type, idx) {
+  window.shuntUI?.markRulesDirty();
   const list = type === 'direct' ? _rulesData.always_direct : _rulesData.always_vpn;
   const r = ruleOf(list[idx]);
   list[idx] = { rule: r.rule, enabled: !r.enabled };
@@ -3319,12 +3337,14 @@ function addRule(type) {
   if (!ok) {
     document.getElementById(errId).textContent = 'Неверный формат'; return;
   }
+  window.shuntUI?.markRulesDirty();
   list.push({ rule: val, enabled: true });
   renderRulesList(type, list);
   document.getElementById(inputId).value = '';
 }
 
 function removeRule(type, idx) {
+  window.shuntUI?.markRulesDirty();
   const list = type === 'direct' ? _rulesData.always_direct : _rulesData.always_vpn;
   list.splice(idx, 1);
   renderRulesList(type, list);
@@ -3333,6 +3353,7 @@ function removeRule(type, idx) {
 async function loadDiscovered() {
   const r = await apiJ('GET', '/api/discovered');
   if (!r) return;
+  window.shuntUI?.discovered(r);
   const meta = document.getElementById('discovered-meta');
   const when = r.last_run ? new Date(r.last_run * 1000).toLocaleString('ru-RU') : 'ещё не запускалась';
   const every = { '@hourly':'раз в час', '@daily':'раз в сутки',
@@ -3387,6 +3408,7 @@ async function saveRules() {
   const r = await apiJ('PUT', '/api/custom-rules', _rulesData);
   if (r?.ok) {
     res.textContent = '✓ Сохранено'; res.className = 'text-green';
+    window.shuntUI?.rulesSaved();
     toast('Правила применены');
   } else {
     res.textContent = '✕ ' + (r?.error || 'Ошибка'); res.className = 'text-red';
@@ -5025,12 +5047,7 @@ function termSetStatus(msg, color) {
   if (el) { el.textContent = msg; el.style.color = color || ''; }
 }
 
-// ─── Init ──────────────────────────────────────────────────────────────────────
-(async () => {
-  let r = null;
-  try { r = await apiJ('GET', '/api/auth-check'); } catch (e) { /* network down */ }
-  if (r?.ok) showApp(); else showLogin();
-})();
+
 </script>
 <script>
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -5232,6 +5249,16 @@ function toggleLang() { setLang(I18N.lang === 'ru' ? 'en' : 'ru'); }
   try { saved = localStorage.getItem('ui-lang') || 'ru'; } catch (e) {}
   if (saved !== 'ru') await setLang(saved); else i18nApply();
   i18nObserveOn();
+})();
+</script>
+<script src="/static/ui-model.js"></script>
+<script src="/static/ui.js"></script>
+<script>
+// ─── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  let r = null;
+  try { r = await apiJ('GET', '/api/auth-check'); } catch (e) { /* network down */ }
+  if (r?.ok) showApp(); else showLogin();
 })();
 </script>
 </body>
