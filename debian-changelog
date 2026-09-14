@@ -1,3 +1,23 @@
+shunt (2.18.0) stable; urgency=medium
+
+  * The interface stops telling the household about September. Eight
+    explanatory paragraphs had a working sentence with a war story welded to
+    it -- "everything below the break is a consequence, not evidence: in
+    September every layer blamed the one beneath it", "one missing line here
+    cost a day", "the first question you ask when you wonder whether the box is
+    safe on a public address; it used to take ss -tulnp over SSH". None of that
+    helps somebody looking at their own gateway, and a page that argues with an
+    absent opponent -- "not 'the service is running', but bytes per second" --
+    reads as defensive rather than precise.
+  * What each paragraph actually says is kept and the rest is gone: checks run
+    in order and stop at the first failure, a missing rule is shown as missing,
+    each resolver is asked a real query with a random name. Both languages
+    updated together, since the English file is keyed by the Russian source.
+  * Nothing in the backend needed it -- the diagnostics and remedies read as
+    instructions already. The memoir lived only in the markup.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 14 Sep 2026 10:30:00 +0300
+
 shunt (2.17.1) stable; urgency=medium
 
   * The name map kept resetting to {} minutes after 2.17.0 went on, and the

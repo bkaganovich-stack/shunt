@@ -888,8 +888,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Кто слушает на шлюзе</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Первый вопрос, который возникает, когда думаешь, безопасна ли коробка
-          на публичном адресе. Раньше на него отвечал только <code>ss -tulnp</code> по SSH.</p>
+          Службы, принимающие соединения на шлюзе, и кто может до них дотянуться.</p>
         <div id="inbound-listeners"><span class="text-muted">загрузка…</span></div>
       </div>
     </div>
@@ -902,8 +901,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Куда пойдёт пакет</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Имя или адрес. Ответ — из трёх слоёв: перехват, выбор ядра, решение xray.
-          Читать один слой из трёх и есть способ ошибиться уверенно.</p>
+          Имя или адрес. Ответ учитывает все три слоя: перехват, выбор ядра,
+          решение xray.</p>
         <div style="display:flex;gap:8px">
           <input id="path-target" type="text" placeholder="zoom.us или 8.8.8.8"
                  style="flex:1" onkeydown="if(event.key==='Enter')pathTo()">
@@ -915,18 +914,16 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Что сейчас не так</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Условия проверяются по порядку и останавливаются на первом невыполненном.
-          Всё, что ниже обрыва, — следствие, а не улика: в сентябре каждый слой
-          обвинял тот, что под ним.</p>
+          Проверки идут по порядку и останавливаются на первой неуспешной.
+          Всё, что ниже неё, — следствие.</p>
         <div id="path-ladder"><span class="text-muted">загрузка…</span></div>
       </div>
 
       <div class="card">
         <div class="card-title">Допущения о провайдере</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Настройки опираются на то, как ведёт себя провайдер. В сентябре три
-          таких допущения перестали выполняться разом, и ни одно не было записано.
-          Здесь они записаны и проверяются.</p>
+          Настройки опираются на то, как ведёт себя провайдер. Эти допущения
+          перечислены здесь и проверяются.</p>
         <div id="provider-audit"><span class="text-muted">загрузка…</span></div>
       </div>
 
@@ -941,7 +938,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Выход наружу</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Не «служба запущена», а сколько байт прошло за секунду измерения.</p>
+          Сколько байт прошло за секунду измерения.</p>
         <div id="path-egress"><span class="text-muted">загрузка…</span></div>
       </div>
 
@@ -949,8 +946,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="card-title">Правила перехвата</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
           Счётчики правил, которые решают, кого забирать в туннель.
-          Отсутствующее правило показывается как отсутствующее — именно одна
-          пропавшая строка здесь стоила суток.</p>
+          Отсутствующее правило показано как отсутствующее.</p>
         <div id="path-counters"><span class="text-muted">загрузка…</span></div>
       </div>
     </div>
@@ -1403,10 +1399,10 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <h3>🔎 Найдено проверкой</h3>
         <p class="text-muted" style="font-size:13px;margin:4px 0 10px">
-          Списки блокировок всегда отстают. Шлюз сам проверяет домены, которыми
-          вы пользуетесь, двумя путями — напрямую и через туннель — и отправляет
-          в туннель то, что работает только через него. Домен уезжает в туннель
-          не раньше, чем покажет себя заблокированным дважды подряд.
+          Шлюз проверяет домены, которыми вы пользуетесь, двумя путями —
+          напрямую и через туннель — и отправляет в туннель то, что работает
+          только через него. Домен уезжает в туннель не раньше, чем покажет
+          себя заблокированным дважды подряд.
         </p>
         <div id="discovered-meta" class="text-muted" style="font-size:12px;margin-bottom:8px"></div>
         <div id="discovered-list" class="rules-list"></div>
@@ -1469,8 +1465,8 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Резолверы</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Каждому задан настоящий вопрос со случайным именем — чтобы измерять путь,
-          а не кэш. «Отвечает» значит ответил, а не «порт открыт».</p>
+          Каждому задан реальный запрос со случайным именем — измеряется путь,
+          а не кэш.</p>
         <div id="dns-resolvers"><span class="text-muted">загрузка…</span></div>
         <div id="dns-lease-offer" class="mt-4" style="display:none"></div>
         <div class="btn-row mt-4">
