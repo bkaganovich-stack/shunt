@@ -1,3 +1,17 @@
+shunt (2.21.1) stable; urgency=medium
+
+  * Stop a shared front end being routed by the luck of the DNS round robin.
+    geoip:ru-blocked-community lists two whole /24s of Google's edge, which
+    serve clients6.google.com -- the RPC hosts behind Drive, Tasks, Keep and
+    Gemini, none of them blocked. Blocked-list entries inside Google's front-end
+    space that are coarser than /28 are now handed back to the domain rules;
+    the /31 and /32 entries there are deliberate and still honoured.
+  * Make the route tester follow the datapath's rule order. It asked about
+    addresses before names, so gemini.google.com came back as decided by
+    geoip:ru-blocked when xray had decided it by name.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Wed, 16 Sep 2026 08:58:30 +0300
+
 shunt (2.21.0) stable; urgency=medium
 
   * Spend the block probe's budget on what asking again can change: re-probe

@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.21.0"
+VERSION = "2.21.1"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -776,12 +776,106 @@ BLOCKED_LISTS = ["geosite:ru-blocked", "geosite:antifilter-download-community"]
 # right. This is not a quiet return to tunnelling everything.
 BLOCKED_IP_LISTS = ["geoip:ru-blocked", "geoip:ru-blocked-community"]
 
+# Google's shared front-end space. These ranges have carried every Google
+# service for over a decade -- Search, Gmail, Drive, the clients6 RPC family and
+# YouTube alike -- and Google moves services between the addresses inside them
+# freely. So an address here says which company answers, never which service.
+#
+# This matters because `geoip:ru-blocked-community` lists 64.233.161.0/24 and
+# 64.233.162.0/24 whole. Those two /24s serve `clients6.google.com`, the RPC
+# host family behind Drive, Tasks, Keep and Gemini, none of which is blocked.
+# The result was a service routed by the luck of the DNS round robin: the same
+# name went through the tunnel or straight out depending on which of its dozen
+# addresses came back. Nothing failed outright, which is what made it hard to
+# see -- but a session that authenticates from one exit and calls its backend
+# from another is exactly the condition that cost this household Gemini and the
+# television's home screen.
+GOOGLE_FRONTEND = (
+    "64.233.160.0/19",  "66.102.0.0/20",   "66.249.64.0/19",  "72.14.192.0/18",
+    "74.125.0.0/16",    "108.177.0.0/17",  "142.250.0.0/15",  "172.217.0.0/16",
+    "172.253.0.0/16",   "173.194.0.0/16",  "209.85.128.0/17", "216.58.192.0/19",
+    "216.239.32.0/19",
+)
+
+# Where a blocked-list entry inside that space stops being a target and starts
+# being collateral. A /32 there is somebody naming one YouTube front end on
+# purpose and is honoured; a /24 is 256 shared addresses swept up wholesale.
+SHARED_EDGE_PREFIX = 28
+
+
 # The mirror image: Russian services that refuse FOREIGN addresses -- ozon.ru,
 # rzd.ru, pochta.ru and 164 more. Sending these through a US exit breaks them,
 # which is what a hand-written force_ozon_direct setting used to paper over for
 # exactly one of them. The list covers the class and is updated weekly with
 # everything else.
 RU_ONLY_LISTS = ["geosite:category-ru", "geosite:ru-available-only-inside"]
+
+def shared_edge_collateral(blocked_nets, frontend=GOOGLE_FRONTEND,
+                           coarser_than: int = SHARED_EDGE_PREFIX) -> list[str]:
+    """
+    Blocked-list entries that are too coarse to mean what they say.
+
+    Returns the networks inside `frontend` that are coarser than
+    `coarser_than`, so the profile can hand them back to the domain rules
+    rather than tunnelling a whole shared edge on the strength of one entry.
+    Computed from the list rather than hardcoded: the lists are refreshed
+    weekly, and a fix that names today's two /24s would go stale by Thursday.
+    """
+    try:
+        fe = [ipaddress.ip_network(n) for n in frontend]
+    except ValueError:
+        return []
+    out: list[str] = []
+    for raw in blocked_nets:
+        try:
+            net = raw if isinstance(raw, ipaddress._BaseNetwork) \
+                else ipaddress.ip_network(raw)
+        except (ValueError, TypeError):
+            continue
+        if net.prefixlen >= coarser_than:
+            continue                       # surgical enough to be deliberate
+        if any(net.subnet_of(f) for f in fe if f.version == net.version):
+            out.append(str(net))
+    return sorted(set(out))
+
+
+_shared_edge_cache: tuple = (None, [])
+
+
+def shared_edge_nets() -> list:
+    """
+    The collateral above, as networks, recomputed only when the lists change.
+
+    Scanning ninety thousand entries against thirteen ranges is cheap once a
+    week and far too expensive on every route test, which is a page the
+    household refreshes by hand.
+    """
+    global _shared_edge_cache
+    try:
+        mtime = (CFG_DIR / "geoip.dat").stat().st_mtime
+    except Exception:
+        return []
+    if _shared_edge_cache[0] == mtime:
+        return _shared_edge_cache[1]
+    nets: list = []
+    for cat in ("RU-BLOCKED", "RU-BLOCKED-COMMUNITY"):
+        try:
+            nets += _load_geoip(cat)
+        except Exception:
+            pass
+    found = [ipaddress.ip_network(n) for n in shared_edge_collateral(nets)]
+    _shared_edge_cache = (mtime, found)
+    return found
+
+
+def _shared_edge_rules() -> list[dict]:
+    """The collateral as one direct rule, or nothing when there is none."""
+    found = shared_edge_nets()
+    if not found:
+        return []
+    return [{"type": "field", "ip": [str(n) for n in found],
+             "outboundTag": "direct"}]
+
 
 def _realtime_rules(enabled: bool) -> list[dict]:
     """Send conferencing media straight out, ahead of the profile's catch-all."""
@@ -862,6 +956,10 @@ def build_xray_config(settings: dict) -> dict:
             {"type": "field", "ip":     ["geoip:ru"],      "outboundTag": "direct"},
             {"type": "field", "domain": RU_ONLY_LISTS,     "outboundTag": "direct"},
             {"type": "field", "domain": BLOCKED_LISTS,     "outboundTag": final},
+            # Ahead of the address lists and behind the domain lists on purpose:
+            # a name that IS on a blocklist has already been decided above, so
+            # this only reaches Google traffic no list claims.
+            *_shared_edge_rules(),
             {"type": "field", "ip":     BLOCKED_IP_LISTS,  "outboundTag": final},
             # What measurement found that no list carries. Placed last of the
             # tunnel rules, so a name the lists already decide is decided by
@@ -1812,6 +1910,31 @@ def route_test(target: str, settings: dict) -> dict:
             return result_with_note("direct", hit, f"{domain} есть в {hit}", "geosite_database")
 
     if profile == "blocked_only":
+        # This block follows the datapath's rule order exactly: names first,
+        # then addresses, then what the probe found. It used to ask about
+        # addresses first, which reached the same outbound by a different route
+        # and so reported the wrong reason -- gemini.google.com came back as
+        # "geoip:ru-blocked" when xray had in fact decided it by name. A tester
+        # that agrees on the answer and lies about the reason is worse than one
+        # that disagrees, because nothing ever catches it.
+        if domain:
+            hit = _domain_in_any_geosite(domain, BLOCKED_LISTS)
+            if hit:
+                return result_with_note(final, hit,
+                              f"{domain} есть в {hit} — заблокирован, идёт через туннель",
+                              "geosite_database")
+        # Google's shared front end, swept up whole by a list entry. See
+        # GOOGLE_FRONTEND.
+        for ip in ips:
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if any(addr in n for n in shared_edge_nets()
+                   if addr.version == n.version):
+                return result_with_note("direct", "shared-edge",
+                              f"{ip} — общий фронтенд Google, решается по имени",
+                              "geoip_database")
         # An address the household dialled directly, with no name for the
         # sniffer to read. This is the Telegram case, and leaving it out of the
         # tester would hide exactly the failure that put it here.
@@ -1833,17 +1956,6 @@ def route_test(target: str, settings: dict) -> dict:
                     "проверка: напрямую %s, через туннель %s"
                     % (row.get("direct"), row.get("tunnel")), "block_probe")
 
-        # The half this page used to leave out. It checked the two "keep it in
-        # Russia" lists and then answered "direct" for everything else --
-        # including every domain the profile actually sends through the tunnel,
-        # which is the entire point of the profile. A route tester that
-        # contradicts the routing is worse than none.
-        if domain:
-            hit = _domain_in_any_geosite(domain, BLOCKED_LISTS)
-            if hit:
-                return result_with_note(final, hit,
-                              f"{domain} есть в {hit} — заблокирован, идёт через туннель",
-                              "geosite_database")
         return result_with_note("direct", "catch-all",
                       "Профиль «только заблокированное»: остальное идёт напрямую",
                       "global_profile")
