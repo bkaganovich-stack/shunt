@@ -19,4 +19,4 @@ Description: Transparent split-routing gateway for a home network
  .
  This package carries the application, its helper scripts and systemd units.
  The xray-core binary lives in shunt-xray; the geoip/geosite rule sets are
- downloaded after installation and refreshed by a weekly timer.
+ downloaded after installation and refreshed by a daily timer.

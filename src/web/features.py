@@ -72,13 +72,13 @@ GROUP_POLICIES = ("inherit", "always_direct", "always_vpn",
                   "all_except_ru", "blocked_only")
 
 
-def validate_group(g: dict) -> list[str]:
+def validate_group(g: dict, settings=None) -> list[str]:
     errors = []
     if not g.get("name", "").strip():
         errors.append("name is required")
     if len(g.get("name", "")) > 64:
         errors.append("name too long")
-    if g.get("routing_policy", "inherit") not in GROUP_POLICIES:
+    if g.get("routing_policy", "inherit") not in (*GROUP_POLICIES, *__import__("profiles").ids(settings or {})):
         errors.append(f"routing_policy must be one of {GROUP_POLICIES}")
     return errors
 
@@ -119,7 +119,7 @@ def build_group_policy_rules(settings: dict, final: str) -> list[dict]:
             ips = arp_by_key.get(dev_key, dev.get("ips", []))
             if not ips:
                 continue
-            rules.extend(_device_policy_rules(ips, policy, final))
+            rules.extend(_device_policy_rules(ips, policy, final, settings))
     return rules
 
 
@@ -396,11 +396,16 @@ def _probe_paths(settings: dict) -> tuple[str, str]:
                 wan = line.split("=", 1)[1].strip()
     except OSError:
         pass
-    if settings.get("egress_active") == "fptn":
-        eg = settings.get("fptn", {})
-    else:
-        eg = settings.get("adguard", {})
-    socks = "%s:%s" % (eg.get("socks_host", "127.0.0.1"), eg.get("socks_port", 1081))
+    import main as _main
+    outbounds, _, _ = _main._get_active_vpn_outbound(settings)
+    proxy = next((ob for ob in outbounds if ob.get("tag") == "proxy"), {})
+    socks = ""
+    if proxy.get("protocol") == "socks":
+        servers = proxy.get("settings", {}).get("servers", [])
+        if servers:
+            server = servers[0]
+            host = server["address"]
+            socks = "%s:%s" % ("[" + host + "]" if ":" in host else host, server["port"])
     return wan, socks
 
 
@@ -427,8 +432,11 @@ def _task_block_probe() -> tuple[str, str]:
     if not wan:
         return "error", "не определён WAN-порт: некуда направить прямую пробу"
 
+    if not socks:
+        return "error", "выбранный выход не предоставляет SOCKS-путь для проверки"
+
     known = settings.get("discovered", [])
-    before = set(_bp.routed_domains(known))
+    before = set(_bp.routed_domains(known) + _bp.routed_addresses(known))
     # A pool, not a shortlist: `blockprobe.candidates` ranks it further and takes
     # forty. 470 of the 500 busiest destinations on this gateway are bare
     # addresses, so a cut at 500 left only thirty names to choose from -- enough
@@ -448,8 +456,8 @@ def _task_block_probe() -> tuple[str, str]:
     fresh["discovered"] = record
     _main.save_settings(fresh)
 
-    after = set(_bp.routed_domains(record))
-    detail = ("проверено %d: заблокировано %d, доступно %d, лежит %d"
+    after = set(_bp.routed_domains(record) + _bp.routed_addresses(record))
+    detail = ("проверено %d: заблокировано %d, доступно %d, нет ответа на обоих путях %d"
               % (sum(counts.values()), counts.get("blocked", 0),
                  counts.get("open", 0), counts.get("down", 0)))
     if after != before:
@@ -466,10 +474,11 @@ def _task_block_probe() -> tuple[str, str]:
 
 def _task_geo_update() -> tuple[str, str]:
     script = BASE / "scripts" / "update-geo.sh"
-    r = subprocess.run([str(script)], capture_output=True, text=True, timeout=120)
+    r = subprocess.run([str(script)], capture_output=True, text=True, timeout=1800)
     if r.returncode == 0:
-        subprocess.run(["systemctl", "restart", "shunt"], capture_output=True)
-        return "ok", "geo databases updated"
+        if "UNCHANGED:" not in r.stdout:
+            subprocess.run(["systemctl", "restart", "shunt"], capture_output=True)
+        return "ok", "geo databases unchanged" if "UNCHANGED:" in r.stdout else "geo databases updated"
     return "error", r.stderr[:200]
 
 

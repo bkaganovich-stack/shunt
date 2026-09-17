@@ -25,6 +25,7 @@ jobs:
           node --test tests/ui-model.test.cjs
           node --check src/web/static/ui.js
           node --check src/web/static/ui-model.js
+          node --check src/web/static/profiles.js
       - name: Build Debian package
         run: ./packaging/build.sh
       - name: Verify package contents

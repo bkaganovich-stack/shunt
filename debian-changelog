@@ -1,3 +1,15 @@
+shunt (2.22.0) stable; urgency=medium
+
+  * Use a shared routing profile compiler for network, device and group rules.
+    Place confirmed domains and service packs before broad Russian IP rules.
+  * Add profile inspection, editing, exact host exceptions, reset, one-step undo
+    and named copies without changing global manual rules or network settings.
+  * Add bounded direct/tunnel HTTPS diagnostics with explicit application of
+    evidence-backed recommendations and stale-egress protection.
+  * Refresh geo assets daily with staged validation and skip unchanged reloads.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Thu, 17 Sep 2026 12:00:00 +0300
+
 shunt (2.21.1) stable; urgency=medium
 
   * Stop a shared front end being routed by the luck of the DNS round robin.

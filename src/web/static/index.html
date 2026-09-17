@@ -502,6 +502,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
 .auto-update-why{display:block;font-size:12px;color:var(--muted);line-height:1.5;margin-top:4px}
 </style>
 <link rel="stylesheet" href="/static/ui.css">
+<link rel="stylesheet" href="/static/profiles.css">
 </head>
 <body>
 <script>
@@ -2016,7 +2017,7 @@ function legacyShowPage(name, linkEl) {
 }
 
 // ─── Status updates ─────────────────────────────────────────────────────────
-const PROFILE_LABELS = {
+window.PROFILE_LABELS = {
   blocked_only: 'Только заблокированное',
   all_except_ru: 'Всё кроме России',
   all: 'Весь трафик',
@@ -3710,7 +3711,7 @@ async function deleteKey() {
 
 // ─── Device Policies ─────────────────────────────────────────────────────────
 // Full human-readable labels for each policy value
-const POLICY_FULL_LABELS = {
+window.POLICY_FULL_LABELS = {
   inherit:       'Как глобальный',
   always_direct: 'Напрямую',
   always_vpn:    'Через VPN',
@@ -3781,7 +3782,7 @@ async function loadDevices() {
     // Dropdown: "inherit" = follow global (auto-tracks global changes)
     // "all" (Весь VPN) removed — identical to always_vpn for per-device use
     const policyDropdown = `
-      <select class="dev-policy-select" data-key="${escHtml(d.key)}"
+      <select class="dev-policy-select" data-key="${escHtml(d.key)}" data-current-policy="${escHtml(d.policy)}"
           onchange="saveDevicePolicy(this)"
           style="background:var(--bg);border:1px solid var(--border);
           color:var(--text);border-radius:5px;padding:3px 6px;font-size:12px;cursor:pointer">
@@ -4188,6 +4189,7 @@ function showCreateGroup() {
   document.getElementById('grp-name').value = '';
   document.getElementById('grp-desc').value = '';
   document.getElementById('grp-policy').value = 'inherit';
+  delete document.getElementById('grp-policy').dataset.currentPolicy;
   document.getElementById('grp-edit-id').value = '';
   document.getElementById('group-edit-card').style.display = 'block';
 }
@@ -4198,6 +4200,8 @@ function editGroup(id, name, desc, policy) {
   document.getElementById('grp-name').value = name;
   document.getElementById('grp-desc').value = desc;
   document.getElementById('grp-policy').value = policy;
+  delete document.getElementById('grp-policy').dataset.currentPolicy;
+  if (!document.getElementById('grp-policy').value) document.getElementById('grp-policy').dataset.currentPolicy = policy;
   document.getElementById('grp-edit-id').value = id;
   document.getElementById('group-edit-card').style.display = 'block';
 }
@@ -5253,6 +5257,7 @@ function toggleLang() { setLang(I18N.lang === 'ru' ? 'en' : 'ru'); }
 </script>
 <script src="/static/ui-model.js"></script>
 <script src="/static/ui.js"></script>
+<script src="/static/profiles.js"></script>
 <script>
 // ─── Init ──────────────────────────────────────────────────────────────────────
 (async () => {

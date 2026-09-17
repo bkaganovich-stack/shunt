@@ -1,9 +1,11 @@
 """Local-only UI qualification harness. Never imports or runs gateway services."""
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-import json,time,urllib.parse,mimetypes,threading
+import json,time,urllib.parse,mimetypes,threading,sys,hashlib,copy
 ROOT=Path(__file__).resolve().parents[1]/'src/web/static'
-state={'profile':'blocked_only','fail_status':False,'summary':{'total':178057,'direct':124945,'vpn':53112,'blocked':0},'rules':{'always_direct':[],'always_vpn':[{'rule':'domain:anthropic.com','enabled':True}]}}
+sys.path.insert(0,str(ROOT.parents[1]/'web'))
+import profiles as profile_model
+state={'profile':'blocked_only','profile_overrides':{},'profile_history':{},'custom_profiles':{},'force_aaplimg_vpn':True,'realtime_direct':True,'fail_status':False,'summary':{'total':178057,'direct':124945,'vpn':53112,'blocked':0},'rules':{'always_direct':[],'always_vpn':[{'rule':'domain:anthropic.com','enabled':True}]}}
 # Explicit fixture domain, not a claim that these are the user's private rules.
 state['rules']['always_direct']=[{'rule':'domain:fixture-%02d.example'%i,'enabled':True} for i in range(24)]
 requests=[]
@@ -11,10 +13,37 @@ class Handler(BaseHTTPRequestHandler):
  def log_message(self,*a): pass
  def respond(self,data,status=200):
   b=json.dumps(data).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
+ def body(self):
+  n=int(self.headers.get('Content-Length',0));return json.loads(self.rfile.read(n) or '{}')
+ def catalog(self):
+  data=profile_model.catalog(state)
+  for row in data['profiles']:
+   row['revision']=hashlib.sha256(json.dumps(row['config'],sort_keys=True).encode()).hexdigest()[:20]
+  return data
+ def profile_mutation(self,path,body):
+  parts=path.split('/');ident=urllib.parse.unquote(parts[3]);action=parts[4] if len(parts)>4 else 'save'
+  try:
+   current=self.catalog();row=next(x for x in current['profiles'] if x['id']==ident)
+   if action in ('save','reset','undo') and body.get('revision')!=row['revision']:return self.respond({'detail':'Профиль изменился. Обновите данные и повторите действие'},409)
+   before=copy.deepcopy(state)
+   if action=='save':new=profile_model.update(state,ident,body.get('config'))
+   elif action=='reset':new=profile_model.reset(state,ident)
+   elif action=='undo':new=profile_model.undo(state,ident)
+   elif action=='copy':
+    new=profile_model.clone(state,ident,body.get('name',''));created_id=next(iter(set(new.get('custom_profiles',{}))-set(state.get('custom_profiles',{}))))
+   else:return self.respond({'detail':'Unknown fixture action'},404)
+   state.clear();state.update(new)
+   result={'ok':True,**self.catalog()}
+   if action=='copy':result['created_id']=created_id
+   return self.respond(result)
+  except (ValueError,KeyError,StopIteration) as e:
+   if 'before' in locals():state.clear();state.update(before)
+   return self.respond({'detail':str(e)},400)
  def do_GET(self):
   path=urllib.parse.urlsplit(self.path).path;requests.append(('GET',path))
   if path=='/__fixture/requests':return self.respond(requests[-200:])
   if path=='/__fixture/state':return self.respond(state)
+  if path=='/api/profiles':return self.respond(self.catalog())
   if not path.startswith('/api/'):
    name='index.html' if path=='/' else path.removeprefix('/static/');p=(ROOT/name).resolve()
    if ROOT not in p.parents or not p.is_file():return self.respond({'error':'not found'},404)
@@ -45,15 +74,36 @@ class Handler(BaseHTTPRequestHandler):
   }
   return self.respond(data.get(path,{}))
  def do_POST(self):
-  path=urllib.parse.urlsplit(self.path).path;n=int(self.headers.get('Content-Length',0));body=json.loads(self.rfile.read(n) or '{}');requests.append((self.command,path,body))
+  path=urllib.parse.urlsplit(self.path).path;body=self.body();requests.append((self.command,path,body))
   if path=='/__fixture/state':state.update(body);return self.respond({'ok':True})
   if path=='/api/login' or path=='/api/logout':
    self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Set-Cookie','fixture='+('loggedout' if path.endswith('logout') else 'loggedin'));self.end_headers();self.wfile.write(b'{"ok":true}');return
-  if path=='/api/profile':state['profile']=body['profile']
+  if path=='/api/profile':
+   if body.get('profile') not in profile_model.ids(state):return self.respond({'detail':'Unknown profile'},400)
+   state['profile']=body['profile']
+  if path.startswith('/api/profiles/'):
+   parts=path.split('/');ident=urllib.parse.unquote(parts[3]);action=parts[4] if len(parts)>4 else 'save'
+   if action in ('reset','undo','copy'):return self.profile_mutation(path,body)
+   if action=='preview':
+    target=body.get('target','').split('://')[-1].split('/')[0].lower();out='proxy' if target.endswith(('openai.com','blocked.example')) else 'direct'
+    return self.respond({'profile_id':ident,'preview':{'outbound':out,'matched_rule':'fixture:'+target,'note':'Fixture prediction; no packet was sent','resolved_ips':['203.0.113.10'],'error':None},'applied':False})
+   if action=='diagnose':
+    target=body.get('target','').split('://')[-1].split('/')[0].lower();report_id='fixture-report-'+ident
+    state.setdefault('_fixture_reports',{})[report_id]={'profile':ident,'host':target}
+    path_result={'state':'ok','http_code':200,'curl_code':0,'seconds':{'connect':0.04,'tls':0.08,'first_byte':0.12,'total':0.14},'detail':'Explicit fixture data; no network request was made'}
+    return self.respond({'report_id':report_id,'host':target,'profile_id':ident,'addresses':['203.0.113.10'],'tested_address':'203.0.113.10','direct':{**path_result,'state':'timeout','http_code':None,'curl_code':28},'tunnel':path_result,'verdict':'tunnel_works','recommendation':'tunnel','scope':'fixture','limitations':'Local fixture response; not a real connectivity measurement'})
+   if action=='apply-diagnosis':
+    rep=state.get('_fixture_reports',{}).pop(body.get('report_id',''),None)
+    if not rep or rep['profile']!=ident:return self.respond({'detail':'Отчёт истёк. Повторите диагностику'},409)
+    row=next(x for x in self.catalog()['profiles'] if x['id']==ident);cfg=copy.deepcopy(row['config']);cfg['extra_tunnel_domains']=sorted(set(cfg['extra_tunnel_domains']+[rep['host']]))
+    new=profile_model.update(state,ident,cfg);state.clear();state.update(new);return self.respond({'ok':True,**self.catalog()})
   if path=='/api/custom-rules':state['rules']=body
   if path=='/api/route-test':return self.respond({'outbound':'proxy','matched_rule':'domain:anthropic.com','note':'Local fixture','resolved_ips':[]})
   return self.respond({'ok':True})
- do_PUT=do_POST
+ def do_PUT(self):
+  path=urllib.parse.urlsplit(self.path).path;body=self.body();requests.append((self.command,path,body))
+  if path.startswith('/api/profiles/'):return self.profile_mutation(path,body)
+  return self.respond({'ok':True})
  do_DELETE=do_POST
 if __name__ == '__main__':
  import argparse

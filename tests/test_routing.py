@@ -203,11 +203,11 @@ class TestTrafficThatCarriesNoName:
         assert r["outbound"] == "proxy"
         assert "заблокированных адресов" in r["note"]
 
-    def test_a_profile_that_tunnels_everything_needs_no_such_rule(self):
+    def test_all_except_ru_includes_selected_blocked_ip_sources(self):
         with self._with_tunnel():
             cfg = m.build_xray_config(self._s(profile="all_except_ru"))
-        assert not [r for r in cfg["routing"]["rules"]
-                    if "geoip:ru-blocked" in r.get("ip", [])]
+        assert [r for r in cfg["routing"]["rules"]
+                if "geoip:ru-blocked" in r.get("ip", [])]
 
 
 class TestRulesThatCanBeSwitchedOff:
@@ -473,7 +473,7 @@ class TestRouteTester:
         with patch("socket.getaddrinfo", side_effect=socket.gaierror("no DNS")), \
              patch.object(m, "_ip_in_geoip_ru", return_value=False), \
              patch.object(m, "_domain_in_any_geosite",
-                          side_effect=lambda d, refs: refs[0]):
+                          side_effect=lambda d, refs: "geosite:category-ru" if "geosite:category-ru" in refs else None):
             result = m.route_test("vk.com", self._settings())
         assert result["outbound"] == "direct"
         assert "geosite:category-ru" in result["matched_rule"]
