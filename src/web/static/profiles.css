@@ -66,3 +66,30 @@
 
 @media(max-width:700px){.pe-tabs{gap:12px;justify-content:space-between}.pe-tab{font-size:12px}}
 @media(max-width:360px){.pe-tabs{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.pe-tab{text-align:left}}
+
+/* Keep the editor footer on one typographic baseline: state labels stay quiet,
+   while the action group carries the visual weight. */
+.pe-actions{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 26px}
+.pe-action-meta{display:flex;align-items:center;gap:12px;min-width:0;flex:1}
+.pe-state{display:inline-flex;align-items:center;min-height:20px;font-size:12px;line-height:20px;font-weight:500;white-space:nowrap}
+.pe-state:empty{display:none}
+.pe-state + .pe-state:not(:empty){padding-left:12px;border-left:1px solid var(--border)}
+.pe-state-dirty{color:var(--muted)}
+.pe-state-active{color:var(--green)}
+.pe-action-buttons{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.pe-action-buttons .btn{height:40px;min-height:40px;padding:0 14px;font-size:13px;line-height:20px;font-weight:600}
+.pe-action-buttons #pe-undo{min-width:198px}
+.pe-action-buttons #pe-reset{min-width:224px}
+.pe-action-buttons #pe-save{min-width:112px}
+.pe-status{min-height:0;padding:0 26px;font-size:12px;line-height:20px}
+.pe-status:empty{display:none}
+.pe-status:not(:empty){padding-top:10px;min-height:30px}
+
+@media(max-width:700px){
+ .pe-actions{display:block;padding:10px 16px}
+ .pe-action-meta{display:none}
+ .pe-action-buttons{display:grid;grid-template-columns:1fr;gap:7px;width:100%}
+ .pe-action-buttons .btn{width:100%;min-width:0}
+ .pe-status{padding:0 16px}
+ .pe-status:not(:empty){padding-top:8px;min-height:28px}
+}
