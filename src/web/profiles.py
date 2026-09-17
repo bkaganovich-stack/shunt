@@ -24,7 +24,7 @@ BUILTINS = {
     "all": ("Всё через туннель", "Туннель по умолчанию", "tunnel"),
     "direct": ("Всё напрямую", "Аварийный профиль: весь трафик напрямую", "direct"),
 }
-FIELDS = {"name", "default_route", "tunnel_lists", "services", "use_discovered", "apple_vpn", "realtime_direct", "extra_tunnel_domains", "custom_rules"}
+FIELDS = {"name", "default_route", "tunnel_lists", "disabled_tunnel_lists", "services", "use_discovered", "apple_vpn", "realtime_direct", "extra_tunnel_domains", "custom_rules"}
 
 def ids(settings):
     return tuple(BUILTINS) + tuple(settings.get("custom_profiles", {}))
@@ -32,7 +32,7 @@ def ids(settings):
 def _base(settings, ident):
     name, _, default = BUILTINS[ident]
     selective = ident in ("blocked_only", "all_except_ru")
-    return {"name": name, "default_route": default, "tunnel_lists": [v["id"] for v in TUNNEL_LISTS] if selective else [], "services": [v["id"] for v in SERVICES] if ident == "blocked_only" else [], "use_discovered": selective, "apple_vpn": selective, "realtime_direct": True, "extra_tunnel_domains": [], "custom_rules": []}
+    return {"name": name, "default_route": default, "tunnel_lists": [v["id"] for v in TUNNEL_LISTS] if selective else [], "disabled_tunnel_lists": [], "services": [v["id"] for v in SERVICES] if ident == "blocked_only" else [], "use_discovered": selective, "apple_vpn": selective, "realtime_direct": True, "extra_tunnel_domains": [], "custom_rules": []}
 
 def validate_hostname(value):
     if not isinstance(value, str):
@@ -63,6 +63,10 @@ def _validate(config, ident):
     if not isinstance(values, list) or len(values) > 100 or any(not isinstance(v, str) or not re.fullmatch(r"(?:geosite|geoip):[a-z0-9][a-z0-9_.-]{0,127}", v) for v in values):
         raise ValueError("Укажите до 100 списков в формате geosite:имя или geoip:имя")
     c["tunnel_lists"] = list(dict.fromkeys(values))
+    disabled = c.get("disabled_tunnel_lists", [])
+    if not isinstance(disabled, list) or any(not isinstance(v, str) or v not in c["tunnel_lists"] for v in disabled):
+        raise ValueError("Отключенные списки должны входить в список профиля")
+    c["disabled_tunnel_lists"] = list(dict.fromkeys(disabled))
     custom = c.get("custom_rules", [])
     if not isinstance(custom, list) or len(custom) > 100:
         raise ValueError("Допускается не более 100 своих правил")

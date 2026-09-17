@@ -18,6 +18,21 @@ def test_replace_and_extend_lists_without_changing_defaults():
     assert p.effective(p.undo(edited, 'blocked_only'), 'blocked_only') == p.effective(original, 'blocked_only')
 
 
+def test_disabled_list_stays_in_profile_but_is_not_compiled():
+    original = base()
+    edited = p.update(original, 'blocked_only', {'disabled_tunnel_lists': ['geosite:ru-blocked']})
+    assert p.effective(edited, 'blocked_only')['tunnel_lists'] == ['geosite:ru-blocked', 'geoip:ru-blocked', 'geoip:ru-blocked-community']
+    assert p.effective(edited, 'blocked_only')['disabled_tunnel_lists'] == ['geosite:ru-blocked']
+    rules = m._profile_rules(edited, 'blocked_only', 'proxy')
+    assert not any('geosite:ru-blocked' in (r.get('domain') or []) for r in rules)
+    assert any('geoip:ru-blocked' in (r.get('ip') or []) for r in rules)
+
+
+def test_disabled_list_must_be_selected():
+    with pytest.raises(ValueError):
+        p.update(base(), 'blocked_only', {'disabled_tunnel_lists': ['geosite:github']})
+
+
 @pytest.mark.parametrize('value', ['https://example.com/list', 'geosite:../../file', 'geosite:foo@bar', 'geoip:', 'ext:a.dat:b'])
 def test_invalid_list_reference(value):
     with pytest.raises(ValueError):

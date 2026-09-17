@@ -911,7 +911,9 @@ def _profile_rules(settings, ident, final):
             add("domain", service["domains"], final, "service:" + service["id"])
     if config["use_discovered"]:
         add("domain", ["domain:" + d for d in _discovered_domains(settings)], final, "probe:discovered")
-    add("domain", [v for v in config["tunnel_lists"] if v.startswith("geosite:")], final, "geosite_database")
+    disabled_lists = set(config.get("disabled_tunnel_lists", []))
+    enabled_lists = [v for v in config["tunnel_lists"] if v not in disabled_lists]
+    add("domain", [v for v in enabled_lists if v.startswith("geosite:")], final, "geosite_database")
     if config["realtime_direct"]:
         rules.extend(dict(r, _reason="realtime") for r in _realtime_rules(True))
     if config["use_discovered"]:
@@ -920,7 +922,7 @@ def _profile_rules(settings, ident, final):
     if family in ("blocked_only", "all_except_ru"):
         add("domain", ["geosite:category-ru"], "direct", "geosite:category-ru")
         add("ip", ["geoip:ru"], "direct", "geoip:ru")
-    ip_lists = [v for v in config["tunnel_lists"] if v.startswith("geoip:")]
+    ip_lists = [v for v in enabled_lists if v.startswith("geoip:")]
     if ip_lists:
         rules.extend(dict(r, _reason="shared-edge") for r in _shared_edge_rules())
         add("ip", ip_lists, final, "geoip_database")
