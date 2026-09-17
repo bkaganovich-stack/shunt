@@ -24,7 +24,7 @@ BUILTINS = {
     "all": ("Всё через туннель", "Туннель по умолчанию", "tunnel"),
     "direct": ("Всё напрямую", "Аварийный профиль: весь трафик напрямую", "direct"),
 }
-FIELDS = {"name", "default_route", "tunnel_lists", "services", "use_discovered", "apple_vpn", "realtime_direct", "extra_tunnel_domains"}
+FIELDS = {"name", "default_route", "tunnel_lists", "services", "use_discovered", "apple_vpn", "realtime_direct", "extra_tunnel_domains", "custom_rules"}
 
 def ids(settings):
     return tuple(BUILTINS) + tuple(settings.get("custom_profiles", {}))
@@ -32,7 +32,7 @@ def ids(settings):
 def _base(settings, ident):
     name, _, default = BUILTINS[ident]
     selective = ident in ("blocked_only", "all_except_ru")
-    return {"name": name, "default_route": default, "tunnel_lists": [v["id"] for v in TUNNEL_LISTS] if selective else [], "services": [v["id"] for v in SERVICES] if ident == "blocked_only" else [], "use_discovered": selective, "apple_vpn": selective, "realtime_direct": True, "extra_tunnel_domains": []}
+    return {"name": name, "default_route": default, "tunnel_lists": [v["id"] for v in TUNNEL_LISTS] if selective else [], "services": [v["id"] for v in SERVICES] if ident == "blocked_only" else [], "use_discovered": selective, "apple_vpn": selective, "realtime_direct": True, "extra_tunnel_domains": [], "custom_rules": []}
 
 def validate_hostname(value):
     if not isinstance(value, str):
@@ -59,7 +59,28 @@ def _validate(config, ident):
         raise ValueError("default_route must be direct or tunnel")
     if ident == "direct" and c["default_route"] != "direct":
         raise ValueError("Аварийный профиль должен направлять трафик напрямую")
-    for field, allowed in (("tunnel_lists", {x["id"] for x in TUNNEL_LISTS}), ("services", {x["id"] for x in SERVICES})):
+    values = c.get("tunnel_lists")
+    if not isinstance(values, list) or len(values) > 100 or any(not isinstance(v, str) or not re.fullmatch(r"(?:geosite|geoip):[a-z0-9][a-z0-9_.-]{0,127}", v) for v in values):
+        raise ValueError("Укажите до 100 списков в формате geosite:имя или geoip:имя")
+    c["tunnel_lists"] = list(dict.fromkeys(values))
+    custom = c.get("custom_rules", [])
+    if not isinstance(custom, list) or len(custom) > 100:
+        raise ValueError("Допускается не более 100 своих правил")
+    normalized = []
+    for rule in custom:
+        if not isinstance(rule, dict) or set(rule) != {"kind", "value", "route"} or rule["kind"] not in ("full", "domain", "ip") or rule["route"] not in ("direct", "tunnel") or not isinstance(rule["value"], str):
+            raise ValueError("Для правила укажите тип, назначение и маршрут")
+        value = rule["value"].strip()
+        if rule["kind"] == "ip":
+            try:
+                value = str(ipaddress.ip_network(value, strict=False))
+            except ValueError:
+                raise ValueError("Укажите IP-адрес или подсеть CIDR") from None
+        else:
+            value = validate_hostname(value)
+        normalized.append(dict(rule, value=value))
+    c["custom_rules"] = normalized
+    for field, allowed in (("services", {x["id"] for x in SERVICES}),):
         if not isinstance(c.get(field), list) or any(not isinstance(x, str) or x not in allowed for x in c[field]):
             raise ValueError("Invalid " + field)
         c[field] = list(dict.fromkeys(c[field]))
@@ -111,7 +132,7 @@ def update(settings, ident, config):
 def reset(settings, ident):
     current = effective(settings, ident)
     out = deepcopy(settings)
-    target = _base(settings, ident) if ident in BUILTINS else settings["custom_profiles"][ident]["original"]
+    target = _base(settings, ident) if ident in BUILTINS else _validate(settings["custom_profiles"][ident]["original"], ident)
     if current == target:
         return out
     out.setdefault("profile_history", {})[ident] = _raw(settings, ident)
@@ -147,5 +168,5 @@ def catalog(settings):
     rows = []
     for ident in ids(settings):
         c = effective(settings, ident)
-        rows.append({"id": ident, "name": c["name"], "description": BUILTINS[ident][1] if ident in BUILTINS else "Пользовательский профиль", "builtin": ident in BUILTINS, "modified": c != (_base(settings, ident) if ident in BUILTINS else settings["custom_profiles"][ident]["original"]), "can_undo": ident in settings.get("profile_history", {}), "config": c})
+        rows.append({"id": ident, "name": c["name"], "description": BUILTINS[ident][1] if ident in BUILTINS else "Пользовательский профиль", "builtin": ident in BUILTINS, "modified": c != (_base(settings, ident) if ident in BUILTINS else _validate(settings["custom_profiles"][ident]["original"], ident)), "can_undo": ident in settings.get("profile_history", {}), "config": c})
     return {"active_profile": settings.get("profile", "all_except_ru"), "profiles": rows, "tunnel_lists": deepcopy(TUNNEL_LISTS), "services": deepcopy(SERVICES)}

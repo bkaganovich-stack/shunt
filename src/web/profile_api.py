@@ -11,6 +11,7 @@ from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 import profiles as p
 import diagnostics as diag
+import geosite
 
 
 class Edit(BaseModel):
@@ -38,6 +39,19 @@ class ApplyDiagnosis(BaseModel):
 def revision(settings, ident):
     value = p.effective(settings, ident)
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()[:20]
+
+
+def available_lists(m):
+    return sorted(kind + ":" + name.lower()
+                  for kind, path in (("geosite", m.GEOSITE_DAT), ("geoip", m.GEOIP_DAT))
+                  for name in geosite.categories(path))
+
+
+def validate_added_lists(m, old, new, ident):
+    added = set(p.effective(new, ident)["tunnel_lists"]) - set(p.effective(old, ident)["tunnel_lists"])
+    missing = sorted(added - set(available_lists(m))) if added else []
+    if missing:
+        raise HTTPException(400, "В установленных базах нет списков: " + ", ".join(missing) + ". Обновите геобазы или выберите другой список.")
 
 
 def catalog(settings):
@@ -69,6 +83,7 @@ def path_revision(m, settings):
 def persist(m, old, new, ident, reason):
     # Synchronous transaction: no await between read, compilation and persistence.
     # The compiler/apply path validates required lists before writing xray.json.
+    validate_added_lists(m, old, new, ident)
     if new == old:
         return {"ok": True, **catalog(new)}
     if used(old, ident) or used(new, ident):
@@ -106,7 +121,7 @@ def register(app, m):
 
     @app.get('/api/profiles')
     async def get_profiles(u: str = Depends(m.auth_dep)):
-        return catalog(m.load_settings())
+        return {**catalog(m.load_settings()), "available_lists": available_lists(m)}
 
     @app.put('/api/profiles/{ident}')
     async def edit(ident: str, body: Edit, req: Request, u: str = Depends(m.auth_dep)):
@@ -162,6 +177,7 @@ def register(app, m):
                 ipaddress.ip_address(body.source_ip)
             if body.config is not None:
                 settings = p.update(settings, ident, body.config)
+            validate_added_lists(m, get(ident), settings, ident)
             # Hostnames only in this entry point. URL paths are not routing keys.
             host = diag.hostname(body.target)
             result = m.route_test(host, settings, profile_id=ident, source_ip=body.source_ip)

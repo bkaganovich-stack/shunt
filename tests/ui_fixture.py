@@ -17,6 +17,7 @@ class Handler(BaseHTTPRequestHandler):
   n=int(self.headers.get('Content-Length',0));return json.loads(self.rfile.read(n) or '{}')
  def catalog(self):
   data=profile_model.catalog(state)
+  data['available_lists']=['geosite:ru-blocked','geosite:ru-blocked-all','geosite:github','geoip:ru-blocked','geoip:ru-blocked-community','geoip:telegram']
   for row in data['profiles']:
    row['revision']=hashlib.sha256(json.dumps(row['config'],sort_keys=True).encode()).hexdigest()[:20]
   return data

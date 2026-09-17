@@ -899,6 +899,10 @@ def _profile_rules(settings, ident, final):
     # Exact availability constraint takes priority over any automatic tunnel rule.
     if ident in ("blocked_only", "all_except_ru") or settings.get("custom_profiles", {}).get(ident, {}).get("copied_from") in ("blocked_only", "all_except_ru"):
         add("domain", ["geosite:ru-available-only-inside"], "direct", "geosite:ru-available-only-inside")
+    for index, rule in enumerate(config["custom_rules"]):
+        field = "ip" if rule["kind"] == "ip" else "domain"
+        value = rule["value"] if field == "ip" else rule["kind"] + ":" + rule["value"]
+        add(field, [value], final if rule["route"] == "tunnel" else "direct", "profile:custom:" + str(index + 1))
     if config["apple_vpn"]:
         add("domain", ["domain:cdn-apple.com", "domain:itunes.apple.com", "domain:aaplimg.com"], final, "apple-cdn-override")
     add("domain", ["full:" + d for d in config["extra_tunnel_domains"]], final, "profile:extra_tunnel_domains")
@@ -919,7 +923,7 @@ def _profile_rules(settings, ident, final):
     ip_lists = [v for v in config["tunnel_lists"] if v.startswith("geoip:")]
     if ip_lists:
         rules.extend(dict(r, _reason="shared-edge") for r in _shared_edge_rules())
-        add("ip", ip_lists, final, "geoip:ru-blocked")
+        add("ip", ip_lists, final, "geoip_database")
     rules.append({"type": "field", "network": "tcp", "port": "5228", "outboundTag": "direct", "_reason": "push-notifications"})
     add("network", "tcp,udp", final if config["default_route"] == "tunnel" else "direct", "catch-all")
     return rules
@@ -1533,9 +1537,9 @@ def _load_geoip(cat: str = "RU") -> list:
     try:   mtime = geoip_path.stat().st_mtime
     except Exception: return []
     cat = cat.upper()
-    if _geoip_ru_nets is not None and mtime == _geoip_ru_mtime:
+    if _geoip_ru_nets is not None and mtime == _geoip_ru_mtime and cat in _geoip_ru_nets:
         return _geoip_ru_nets.get(cat, [])
-    buckets: dict = {c: [] for c in _GEOIP_WANTED}
+    buckets: dict = {c: [] for c in (*_GEOIP_WANTED, cat)}
     try:
         data = geoip_path.read_bytes(); pos = 0; n = len(data)
         while pos < n:
@@ -1621,10 +1625,10 @@ def _load_geosite(cat: str) -> dict:
     cat = cat.upper()
     try:   mtime = GEOSITE_DAT.stat().st_mtime
     except Exception: return _empty_geosite()
-    if _geosite_sets and mtime == _geosite_ru_mtime:
+    if _geosite_sets and mtime == _geosite_ru_mtime and cat in _geosite_sets:
         return _geosite_sets.get(cat, _empty_geosite())
 
-    result: dict = {c: _empty_geosite() for c in _GEOSITE_WANTED}
+    result: dict = {c: _empty_geosite() for c in (*_GEOSITE_WANTED, cat)}
     try:
         data = GEOSITE_DAT.read_bytes(); pos = 0; n = len(data)
         while pos < n:
@@ -1883,9 +1887,9 @@ def route_test(target: str, settings: dict, profile_id: Optional[str] = None, so
         if not hit and ("domain" in rule or "ip" in rule):
             continue
         reason = rule.get("_reason", "subscription")
-        if reason == "geosite_database":
+        if reason in ("geosite_database", "geoip_database"):
             reason = hit
-        source = "custom_rule" if reason.startswith("custom:") else "block_probe" if reason == "probe:discovered" else "geosite_database" if reason.startswith("geosite:") else "geoip_database" if reason.startswith("geoip:") or reason == "shared-edge" else "global_profile_fallback"
+        source = "custom_rule" if reason.startswith(("custom:", "profile:custom:")) else "block_probe" if reason == "probe:discovered" else "geosite_database" if reason.startswith("geosite:") else "geoip_database" if reason.startswith("geoip:") or reason == "shared-edge" else "global_profile_fallback"
         r = result(rule["outboundTag"], reason, "В списке заблокированных адресов" if reason == "geoip:ru-blocked" else "", rule_source=source)
         if disabled_hit:
             r["note"] += " — " + disabled_hit

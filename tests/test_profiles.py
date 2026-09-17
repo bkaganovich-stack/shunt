@@ -42,7 +42,7 @@ def test_clone_identity_reset_and_copy_of_copy_keep_family():
 
 
 @pytest.mark.parametrize('config', [
-    {'tunnel_lists': ['geosite:antifilter-download-community']}, {'services': ['unknown']},
+    {'tunnel_lists': ['geosite:']}, {'services': ['unknown']},
     {'use_discovered': 1}, {'default_route': 'proxy'}, {'name': 'a' * 81},
     {'extra_tunnel_domains': ['*.example.com']}, {'extra_tunnel_domains': ['127.0.0.1']},
     {'extra_tunnel_domains': ['private.local']}, {'extra_tunnel_domains': ['https://example.com']},
