@@ -2,7 +2,12 @@
 # Update geoip.dat and geosite.dat from runetfreedom/russia-v2ray-rules-dat
 set -euo pipefail
 
-GEO_DIR="/opt/shunt/config"
+GEO_DIR="${SHUNT_GEO_DIR:-/opt/shunt/config}"
+WEB_DIR="${SHUNT_WEB_DIR:-/opt/shunt/web}"
+XRAY_BIN="${SHUNT_XRAY_BIN:-/opt/shunt/bin/xray}"
+mkdir -p "$GEO_DIR"
+exec 9>"$GEO_DIR/.geo-update.lock"
+flock -n 9 || { echo "Geo update already running" >&2; exit 1; }
 TMP=$(mktemp -d)
 trap "rm -rf $TMP" EXIT
 
@@ -34,8 +39,40 @@ echo "Downloading geosite.dat…"
 [ -s "$TMP/geoip.dat" ]   || { echo "ERROR: geoip.dat is empty"; exit 1; }
 [ -s "$TMP/geosite.dat" ] || { echo "ERROR: geosite.dat is empty"; exit 1; }
 
-# Atomic replace
-cp "$TMP/geoip.dat"   "$GEO_DIR/geoip.dat"
-cp "$TMP/geosite.dat" "$GEO_DIR/geosite.dat"
+# Verify the configuration against the staged assets before touching live files.
+if [ -f "$GEO_DIR/xray.json" ]; then
+    PYTHONPATH="$WEB_DIR" python3 - "$GEO_DIR/xray.json" "$TMP" <<'PYCODE'
+import json, pathlib, sys
+import geosite
+cfg = json.loads(pathlib.Path(sys.argv[1]).read_text())
+tmp = pathlib.Path(sys.argv[2])
+missing = geosite.missing(cfg, tmp/'geosite.dat', tmp/'geoip.dat')
+if missing:
+    raise SystemExit('Missing routing lists: ' + ', '.join(missing))
+PYCODE
+    if [ -x "$XRAY_BIN" ]; then
+        XRAY_LOCATION_ASSET="$TMP" "$XRAY_BIN" run -test -config "$GEO_DIR/xray.json"
+    fi
+fi
+
+if cmp -s "$TMP/geoip.dat" "$GEO_DIR/geoip.dat" && cmp -s "$TMP/geosite.dat" "$GEO_DIR/geosite.dat"; then
+    echo "UNCHANGED: geo databases already current"
+    exit 0
+fi
+
+# Stage on the destination filesystem, then rename each complete file.
+# The running Xray retains its loaded tables until the caller reloads it.
+install -m 644 "$TMP/geoip.dat" "$GEO_DIR/geoip.dat.new"
+install -m 644 "$TMP/geosite.dat" "$GEO_DIR/geosite.dat.new"
+mv "$GEO_DIR/geoip.dat.new" "$GEO_DIR/geoip.dat"
+mv "$GEO_DIR/geosite.dat.new" "$GEO_DIR/geosite.dat"
+python3 - "$GEO_DIR/geo-version.json" "$TAG" <<'PYCODE'
+import datetime, json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+tmp = p.with_suffix('.new')
+tmp.write_text(json.dumps({'tag': sys.argv[2], 'updated': datetime.datetime.now(datetime.timezone.utc).isoformat()}))
+tmp.replace(p)
+PYCODE
+
 
 echo "Done: $(du -sh $GEO_DIR/geoip.dat $GEO_DIR/geosite.dat)"

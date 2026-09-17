@@ -227,16 +227,16 @@ class TestDevicePolicyRules:
         assert len(rules) == 1
         assert rules[0]["outboundTag"] == "proxy"
 
-    def test_all_except_ru_three_rules(self):
+    def test_all_except_ru_uses_shared_profile_rules(self):
         rules = m._device_policy_rules(["192.168.1.5"], "all_except_ru", "proxy")
-        assert len(rules) == 3
+        assert [{k:v for k,v in r.items() if k != "source"} for r in rules] == m._profile_rules({}, "all_except_ru", "proxy")
         outbounds = [r["outboundTag"] for r in rules]
         assert "direct" in outbounds
         assert "proxy"  in outbounds
 
-    def test_blocked_only_four_rules(self):
+    def test_blocked_only_uses_shared_profile_rules(self):
         rules = m._device_policy_rules(["192.168.1.5"], "blocked_only", "proxy")
-        assert len(rules) == 4
+        assert [{k:v for k,v in r.items() if k != "source"} for r in rules] == m._profile_rules({}, "blocked_only", "proxy")
         # Last rule is the per-device direct catch-all
         assert rules[-1]["outboundTag"] == "direct"
 

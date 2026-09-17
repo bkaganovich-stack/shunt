@@ -1,5 +1,58 @@
 {
   "strings": {
+    "Редактор профилей": "Profile editor",
+    "Настройте правила маршрутизации без изменения остальных параметров шлюза.": "Configure routing rules without changing other gateway settings.",
+    "Профиль для редактирования": "Profile to edit",
+    "+ Создать профиль": "+ Create profile",
+    "Поведение": "Behavior",
+    "Списки и сервисы": "Lists and services",
+    "Проверка": "Check",
+    "Название": "Name",
+    "Маршрут по умолчанию": "Default route",
+    "Напрямую": "Direct",
+    "Через туннель": "Through tunnel",
+    "Дополнительное поведение": "Additional behavior",
+    "Результаты автоматической проверки": "Automatic check results",
+    "Использовать подтверждённые обнаруженные назначения через туннель.": "Route confirmed discovered destinations through the tunnel.",
+    "Сервисы Apple через туннель": "Apple services through tunnel",
+    "Эффективное значение учитывает совместимость с прежней настройкой.": "The effective value reflects the legacy setting for compatibility.",
+    "Звонки и realtime напрямую": "Calls and real-time traffic direct",
+    "Сохраняет низкую задержку для известных realtime-направлений.": "Keeps latency low for known real-time destinations.",
+    "Точные доменные исключения": "Exact domain exceptions",
+    "Только публичные имена хостов, без масок, URL и IP-адресов.": "Public hostnames only, without wildcards, URLs, or IP addresses.",
+    "Порядок решений": "Decision order",
+    "Политика устройства или группы, когда указан исходный IP.": "Device or group policy when a source IP is provided.",
+    "Защищённые прямые назначения ru-available-only-inside.": "Protected direct ru-available-only-inside destinations.",
+    "Apple, точные исключения, выбранные сервисы, найденные домены и заблокированные домены.": "Apple, exact exceptions, selected services, discovered domains, and blocked domains.",
+    "Звонки и realtime напрямую, если включено.": "Calls and real-time traffic direct when enabled.",
+    "Найденные IP, затем ru/category-ru и российские сети напрямую.": "Discovered IPs, then ru/category-ru and Russian networks direct.",
+    "Защита общих CDN, заблокированные IP и маршрут по умолчанию.": "Shared-CDN protection, blocked IPs, and the default route.",
+    "Частные сети всегда идут напрямую. Глобальные ручные правила имеют фиксированный приоритет перед профилем и редактируются в разделе «Ручные правила».": "Private networks always go direct. Global manual rules have fixed priority over the profile and can be edited under Manual rules.",
+    "Списки для туннеля": "Tunnel lists",
+    "Подключаемые ссылки и их происхождение.": "Included references and their sources.",
+    "Источник ↗": "Source ↗",
+    "Сервисы": "Services",
+    "Домены можно раскрыть и проверить до сохранения.": "Domains can be inspected before saving.",
+    "Предварительное решение": "Routing preview",
+    "Прогноз конфигурации, а не трассировка реального пакета. Путь в вставленном URL игнорируется.": "A configuration prediction, not a real packet trace. Paths in pasted URLs are ignored.",
+    "Домен или URL": "Domain or URL",
+    "Исходный IP (необязательно)": "Source IP (optional)",
+    "Предпросмотр": "Preview",
+    "Проверка доступности": "Connectivity diagnosis",
+    "До 35 секунд. Проверяется HTTPS на корневом пути выбранного публичного IP: без редиректов, страницы, авторизации и JavaScript. Диагностика недоступна, пока черновик не сохранён или не отменён.": "Takes up to 35 seconds. Checks HTTPS at the root path of one selected public IP, without redirects, page content, authentication, or JavaScript. Diagnosis is unavailable until the draft is saved or discarded.",
+    "Запустить диагностику": "Run diagnosis",
+    "Отменить последнее изменение": "Undo last change",
+    "Сбросить к стандартным": "Reset to defaults",
+    "Сбросить копию": "Reset copy",
+    "Сохранить": "Save",
+    "Аварийный профиль всегда направляет трафик напрямую. Настройки туннеля для него недоступны; вы можете создать редактируемую копию.": "The emergency profile always routes traffic directly. Tunnel settings are unavailable; you can create an editable copy.",
+    "Активный профиль": "Active profile",
+    "Есть несохранённые изменения": "There are unsaved changes",
+    "Диагностика выполняется…": "Diagnosis is running…",
+    "Диагностика завершена": "Diagnosis complete",
+    "Применить к профилю": "Apply to profile",
+    "Состояние": "State",
+    "Ограничения": "Limitations",
     "Панель управления": "Dashboard",
     "Профиль маршрутов": "Routing profile",
     "Профиль": "Profile",
@@ -29,7 +82,6 @@
     "Показать все разделы": "Show all sections",
     "Светлая тема": "Light theme",
     "Меню": "Menu",
-    "Сохранить": "Save",
     "Создать": "Create",
     "Добавить": "Add",
     "Отмена": "Cancel",
@@ -38,10 +90,8 @@
     "Загрузка…": "Loading…",
     "Нет записей": "No entries",
     "Нет событий": "No events",
-    "Состояние": "State",
     "Статус": "Status",
     "Тип": "Type",
-    "Название": "Name",
     "Имя (опционально)": "Name (optional)",
     "Описание": "Description",
     "Источник": "Source",
@@ -407,7 +457,6 @@
     "Всё кроме РФ": "Everything but Russia",
     "Всё кроме России": "Everything but Russia",
     "Через VPN": "Through the VPN",
-    "Напрямую": "Direct",
     "Напрямую (без VPN)": "Direct (no VPN)",
     "Напрямую, без VPN": "Direct, no VPN",
     "Политика уст-ва": "Device policy",
@@ -460,6 +509,8 @@
     "Настройки уведомлений сохранены": "Notification settings saved",
     "Правила применены": "Rules applied",
     "Профиль применён": "Profile applied",
+    "— применён": "— applied",
+    "Применённый профиль": "Applied profile",
     "Выход обновлён": "Egress updated",
     "Интерфейс переключён": "Interface switched",
     "Топология переключена": "Topology switched",
@@ -796,7 +847,6 @@
     "Дом": "Home",
     "Решает, куда": "Chooses the path",
     "Через провайдера": "Via ISP",
-    "Через туннель": "Through tunnel",
     "Туннель": "Tunnel",
     "Толщина ветвей — доля соединений": "Branch width represents connection share",
     "Объём данных не измеряется этой схемой": "This chart does not show byte volume",
@@ -906,7 +956,78 @@
     "Вкл": "Enable",
     "Выкл": "Disable",
     "Включить": "Enable",
-    "Выключить": "Disable"
+    "Выключить": "Disable",
+    "Недоступные из России домены, включая дополнения сообществ": "Domains unavailable from Russia, including community contributions",
+    "Заблокированные IP-адреса и подсети": "Blocked destination networks",
+    "IP-список сообщества с защитой общих фронтендов": "Community destination networks; shared-edge protection applies",
+    "Основные домены ChatGPT, API и ресурсов; общие сторонние сервисы не включены": "Curated core domains for ChatGPT, API and static assets; shared third-party dependencies excluded",
+    "Основные домены Claude, ресурсов и API Anthropic": "Curated core domains for Claude and Anthropic API",
+    "Видео, изображения и сайт YouTube; остальные сервисы Google не включены": "Video, images and YouTube web; does not include all Google services",
+    "Домены Telegram; для клиентов, работающих по IP, включите IP-списки": "Telegram web domains; enable blocked IP lists for IP-based clients",
+    "Укажите публичное имя хоста": "Expected a public hostname",
+    "Укажите имя хоста вместо IP-адреса": "Expected a hostname, not an IP address",
+    "Нет изменения профиля для отмены": "No profile change to undo",
+    "Название должно содержать от 1 до 80 символов": "Name must contain 1–80 characters",
+    "Неизвестные поля настроек профиля": "Unknown profile configuration fields",
+    "Аварийный профиль должен направлять трафик напрямую": "Emergency direct profile cannot tunnel",
+    "Допускается не более 100 точных доменных исключений": "extra_tunnel_domains must contain at most 100 hostnames",
+    "Изменён": "Modified",
+    "Вернуть стандартные настройки": "Restore profile defaults",
+    "Новое точное доменное исключение": "New exact hostname exception",
+    "Доступен": "Available",
+    "Ошибка соединения": "Connection error",
+    "Отказ сервера": "Server refusal",
+    "Недостаточно данных": "Inconclusive",
+    "Путь не настроен": "Path not configured",
+    "Тайм-аут": "Timeout",
+    "Заблокировано": "Blocked",
+    " — копия": " — copy",
+    "Всё, кроме России": "Everything except Russia",
+    "Всё через туннель": "All through tunnel",
+    "Всё напрямую": "All direct",
+    "Пользовательский профиль": "Custom profile",
+    "Создать копию": "Create copy",
+    " — активен": " — active",
+    "Состав доменов и источники доступны до сохранения.": "Review the domain sets and their sources before saving.",
+    "Создать профиль": "Create profile",
+    "Название нового профиля": "New profile name",
+    "Введите название профиля": "Enter a profile name",
+    "Настроить": "Configure",
+    "Разделы редактора": "Editor sections",
+    "Точные исключения и заблокированные ресурсы через туннель, остальное напрямую": "Precise exceptions and blocked destinations through the tunnel; everything else direct",
+    "Редактируемый профиль": "Profile to edit",
+    "Свои правила": "Custom rules",
+    "Меняйте маршрут по умолчанию, подключайте списки и задавайте свои правила. Новый профиль создаётся как копия выбранного.": "Change the default route, connect lists, and define custom rules. A new profile starts as a copy of the selected one.",
+    "Apple CDN через туннель": "Apple CDN through tunnel",
+    "Включено — cdn-apple.com, itunes.apple.com и aaplimg.com вместе с поддоменами идут через туннель. Это CDN Apple, в том числе загрузки App Store и обновлений. Выключено — маршрут определяют остальные правила и профиль; прямое соединение не гарантируется.": "On: cdn-apple.com, itunes.apple.com, aaplimg.com and their subdomains use the tunnel. These Apple CDN domains include App Store downloads and updates. Off: other rules and the profile determine the route; a direct connection is not guaranteed.",
+    "Свои правила профиля сверху вниз: первое совпадение определяет маршрут.": "Custom profile rules from top to bottom: the first match determines the route.",
+    "Включённые списки направляют трафик через туннель. Список можно временно отключить или удалить из профиля; удалённый список можно добавить снова.": "Enabled lists route traffic through the tunnel. A list can be disabled temporarily or removed from the profile; a removed list can be added again.",
+    "Добавить список из геобазы": "Add a geodatabase list",
+    "Добавить список": "Add list",
+    "Выберите гео-список…": "Choose a geodatabase list…",
+    "Список из установленной геобазы": "List from an installed geodatabase",
+    "Выберите список из установленной geosite.dat или geoip.dat. Отключённый список сохраняется в профиле и не участвует в маршрутизации.": "Choose a list from the installed geosite.dat or geoip.dat. A disabled list remains in the profile and is excluded from routing.",
+    "Каталог геобаз недоступен. Обновите базы на шлюзе и откройте редактор снова.": "The geodatabase catalog is unavailable. Update the databases on the gateway and reopen the editor.",
+    "Выберите гео-список из списка": "Choose a geodatabase list from the menu",
+    "Этот список уже добавлен": "This list is already added",
+    "Список добавлен в черновик. Нажмите «Сохранить».": "List added to the draft. Click Save.",
+    "Свои правила профиля": "Custom profile rules",
+    "Укажите домен, домен с поддоменами или IP/подсеть и выберите маршрут. Правила проверяются сверху вниз до первого совпадения.": "Enter a domain, a domain with subdomains, or an IP/subnet and choose a route. Rules are checked from top to bottom until the first match.",
+    "+ Добавить правило": "+ Add rule",
+    "Например: example.com с поддоменами → через туннель, а api.example.com → напрямую. Поставьте точное исключение выше общего правила.": "For example: example.com with subdomains → tunnel, and api.example.com → direct. Place the exact exception above the broader rule.",
+    "Пока нет своих правил. Нажмите «Добавить правило», чтобы задать первое.": "No custom rules yet. Click Add rule to create the first one.",
+    "Эти правила действуют только в выбранном профиле, раньше сервисов и списков. Частные сети, общие ручные правила и защищённый список ru-available-only-inside имеют приоритет.": "These rules apply only to the selected profile, before services and lists. Private networks, global manual rules, and the protected ru-available-only-inside list take priority.",
+    "Точные исключения через туннель": "Exact tunnel exceptions",
+    "Здесь также появляются исключения из диагностики. Только указанный хост, без поддоменов. Для других условий используйте правила выше.": "Exceptions from diagnostics also appear here. Only the specified host, without subdomains. Use the rules above for other conditions.",
+    "Совпадение": "Match",
+    "Домен и поддомены": "Domain and subdomains",
+    "Точный домен": "Exact domain",
+    "IP / подсеть": "IP / subnet",
+    "Выше": "Move up",
+    "Ниже": "Move down",
+    "Удалить правило": "Delete rule",
+    "Сначала добавьте введённое значение кнопкой «Добавить» или очистите поле.": "Add the entered value using the Add button, or clear the field first.",
+    "С поддоменами": "With subdomains"
   },
   "patterns": [
     [
@@ -1129,6 +1250,65 @@
     [
       "^Обновить до v(.+)$",
       "Update to v$1"
+    ],
+    [
+      "^(.+) • изменён( — активен)?$",
+      "$1 • modified$2",
+      [
+        1,
+        2
+      ]
+    ],
+    [
+      "^(.+) — активен$",
+      "$1 — active",
+      [
+        1
+      ]
+    ],
+    [
+      "^Профиль: (.+)$",
+      "Profile: $1",
+      [
+        1
+      ]
+    ],
+    [
+      "^Совпавшее правило: (.+)$",
+      "Matched rule: $1"
+    ],
+    [
+      "^Адреса: (.+)$",
+      "Addresses: $1"
+    ],
+    [
+      "^Состояние: (.+)$",
+      "State: $1",
+      [
+        1
+      ]
+    ],
+    [
+      "^Ограничения: (.+)$",
+      "Limitations: $1",
+      [
+        1
+      ]
+    ],
+    [
+      "^Проверен (.+) \\((.+)\\)\\. Профиль: (.+)\\.$",
+      "Tested $1 ($2). Profile: $3.",
+      [
+        3
+      ]
+    ],
+    [
+      "^Соединение (.+) с · TLS (.+) с · первый байт (.+) с · всего (.+) с$",
+      "Connect $1 s · TLS $2 s · first byte $3 s · total $4 s"
+    ],
+    [
+      "^Удалить (.+)$",
+      "Remove $1"
     ]
   ]
 }

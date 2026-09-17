@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.21.1"
+VERSION = "2.22.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -21,6 +21,7 @@ import inbound as _in
 import dnspath as _dns
 import geosite as _geo
 import blockprobe as _bp
+import profiles as _profiles
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -619,28 +620,12 @@ def _rules_to_xray_entry(rules, outbound: str) -> list[dict]:
 # ── Device Policy → Xray Rules ─────────────────────────────────────────────────
 DEVICE_POLICIES = ("inherit", "blocked_only", "all_except_ru", "all", "always_direct", "always_vpn")
 
-def _device_policy_rules(ips: list[str], policy: str, final: str) -> list[dict]:
-    """Generate xray routing rules for a device with a given policy."""
-    if policy == "inherit" or not ips: return []
-    src = sorted(set(ips))
-    if policy == "always_direct":
-        return [{"type": "field", "source": src, "network": "tcp,udp", "outboundTag": "direct"}]
-    if policy in ("always_vpn", "all"):
-        return [{"type": "field", "source": src, "network": "tcp,udp", "outboundTag": final}]
-    if policy == "all_except_ru":
-        return [
-            {"type": "field", "source": src, "ip":     ["geoip:ru"],            "outboundTag": "direct"},
-            {"type": "field", "source": src, "domain": ["geosite:category-ru"], "outboundTag": "direct"},
-            {"type": "field", "source": src, "network": "tcp,udp",              "outboundTag": final},
-        ]
-    if policy == "blocked_only":
-        return [
-            {"type": "field", "source": src, "domain": ["geosite:category-ru-blocked"], "outboundTag": final},
-            {"type": "field", "source": src, "ip":     ["geoip:ru"],                    "outboundTag": "direct"},
-            {"type": "field", "source": src, "domain": ["geosite:category-ru"],         "outboundTag": "direct"},
-            {"type": "field", "source": src, "network": "tcp,udp",                      "outboundTag": "direct"},
-        ]
-    return []
+def _device_policy_rules(ips: list[str], policy: str, final: str, settings=None) -> list[dict]:
+    if policy == "inherit" or not ips:
+        return []
+    if policy in ("always_direct", "always_vpn"):
+        return [{"type": "field", "source": sorted(set(ips)), "network": "tcp,udp", "outboundTag": "direct" if policy == "always_direct" else final, "_reason": "device:" + policy}]
+    return [dict(r, source=sorted(set(ips))) for r in _profile_rules(settings or {}, policy, final)]
 
 def _build_device_rules(settings: dict, final: str) -> list[dict]:
     """Build all per-device xray routing rules from stored device policies."""
@@ -659,7 +644,7 @@ def _build_device_rules(settings: dict, final: str) -> list[dict]:
         # Prefer live ARP IPs; fall back to stored IPs
         ips = arp_by_key.get(key, d.get("ips", []))
         if not ips: continue
-        rules.extend(_device_policy_rules(ips, policy, final))
+        rules.extend(_device_policy_rules(ips, policy, final, settings))
     return rules
 
 def _build_subscription_rules(settings: dict, final: str) -> list[dict]:
@@ -761,7 +746,7 @@ REALTIME_IPS = [
 # owners do. That is the property that makes one list answer both halves of the
 # question, and it is why this profile does not need a second list of "foreign
 # companies that block us".
-BLOCKED_LISTS = ["geosite:ru-blocked", "geosite:antifilter-download-community"]
+BLOCKED_LISTS = ["geosite:ru-blocked"]
 
 # The same question asked of addresses, and the half that was missing. A
 # domain list only decides traffic that carries a name: xray sniffs SNI, and a
@@ -901,11 +886,72 @@ def _discovered_addresses(settings: dict) -> list[str]:
     return _bp.routed_addresses(settings.get("discovered", []))
 
 
+def _profile_rules(settings, ident, final):
+    """Single ordered policy compiler, consumed by datapath and route preview."""
+    config = _profiles.effective(settings, ident)
+    rules = []
+    def add(field, values, outbound, reason):
+        if values:
+            rules.append({"type": "field", field: values, "outboundTag": outbound, "_reason": reason})
+    if ident == "direct":
+        add("network", "tcp,udp", "direct", "catch-all")
+        return rules
+    # Exact availability constraint takes priority over any automatic tunnel rule.
+    if ident in ("blocked_only", "all_except_ru") or settings.get("custom_profiles", {}).get(ident, {}).get("copied_from") in ("blocked_only", "all_except_ru"):
+        add("domain", ["geosite:ru-available-only-inside"], "direct", "geosite:ru-available-only-inside")
+    for index, rule in enumerate(config["custom_rules"]):
+        field = "ip" if rule["kind"] == "ip" else "domain"
+        value = rule["value"] if field == "ip" else rule["kind"] + ":" + rule["value"]
+        add(field, [value], final if rule["route"] == "tunnel" else "direct", "profile:custom:" + str(index + 1))
+    if config["apple_vpn"]:
+        add("domain", ["domain:cdn-apple.com", "domain:itunes.apple.com", "domain:aaplimg.com"], final, "apple-cdn-override")
+    add("domain", ["full:" + d for d in config["extra_tunnel_domains"]], final, "profile:extra_tunnel_domains")
+    for service in _profiles.SERVICES:
+        if service["id"] in config["services"]:
+            add("domain", service["domains"], final, "service:" + service["id"])
+    if config["use_discovered"]:
+        add("domain", ["domain:" + d for d in _discovered_domains(settings)], final, "probe:discovered")
+    disabled_lists = set(config.get("disabled_tunnel_lists", []))
+    enabled_lists = [v for v in config["tunnel_lists"] if v not in disabled_lists]
+    add("domain", [v for v in enabled_lists if v.startswith("geosite:")], final, "geosite_database")
+    if config["realtime_direct"]:
+        rules.extend(dict(r, _reason="realtime") for r in _realtime_rules(True))
+    if config["use_discovered"]:
+        add("ip", _discovered_addresses(settings), final, "probe:discovered")
+    family = settings.get("custom_profiles", {}).get(ident, {}).get("copied_from", ident)
+    if family in ("blocked_only", "all_except_ru"):
+        add("domain", ["geosite:category-ru"], "direct", "geosite:category-ru")
+        add("ip", ["geoip:ru"], "direct", "geoip:ru")
+    ip_lists = [v for v in enabled_lists if v.startswith("geoip:")]
+    if ip_lists:
+        rules.extend(dict(r, _reason="shared-edge") for r in _shared_edge_rules())
+        add("ip", ip_lists, final, "geoip_database")
+    rules.append({"type": "field", "network": "tcp", "port": "5228", "outboundTag": "direct", "_reason": "push-notifications"})
+    add("network", "tcp,udp", final if config["default_route"] == "tunnel" else "direct", "catch-all")
+    return rules
+
+
+def _compiled_rules(settings, final, proxy_server_ip=None):
+    profile = settings.get("profile", "all_except_ru")
+    custom = settings.get("custom_rules", {})
+    if profile == "direct":
+        final = "direct"
+    rules = [*([{"type": "field", "ip": [proxy_server_ip], "outboundTag": "direct", "_reason": "vpn-server-ip"}] if proxy_server_ip else []),
+             {"type": "field", "ip": ["geoip:private"], "outboundTag": "direct", "_reason": "geoip:private"},
+             {"type": "field", "domain": ["geosite:private"], "outboundTag": "direct", "_reason": "geosite:private"}]
+    if profile == "direct":
+        return rules + _profile_rules(settings, profile, final)
+    for name, tag in (("always_direct", "direct"), ("always_vpn", final)):
+        rules.extend(dict(r, _reason="custom:" + name) for r in _rules_to_xray_entry(custom.get(name, []), tag))
+    rules.extend(_build_device_rules(settings, final))
+    rules.extend(_ft.build_group_policy_rules(settings, final))
+    rules.extend(_build_subscription_rules(settings, final))
+    rules.extend(_profile_rules(settings, profile, final))
+    return rules
+
+
 def build_xray_config(settings: dict) -> dict:
     profile        = settings.get("profile", "all_except_ru")
-    custom         = settings.get("custom_rules", {"always_direct": [], "always_vpn": []})
-    force_aaplimg  = settings.get("force_aaplimg_vpn", True)
-
     vpn_obs, has_proxy, proxy_server_ip = _get_active_vpn_outbound(settings)
     outbounds = vpn_obs + [
         {"protocol": "freedom", "tag": "direct",
@@ -919,76 +965,8 @@ def build_xray_config(settings: dict) -> dict:
         # pointed at the proxy resolve to direct as well.
         final = "direct"
 
-    rules: list[dict] = [
-        *([{"type": "field", "ip": [proxy_server_ip], "outboundTag": "direct"}]
-          if proxy_server_ip else []),
-        {"type": "field", "ip":     ["geoip:private"],   "outboundTag": "direct"},
-        {"type": "field", "domain": ["geosite:private"],  "outboundTag": "direct"},
-        *_rules_to_xray_entry(custom.get("always_direct", []), "direct"),
-        *_rules_to_xray_entry(custom.get("always_vpn", []),    final),
-        # Per-device policies (override global profile)
-        *_build_device_rules(settings, final),
-        # Per-group policies (devices with inherit policy that belong to a group)
-        *_ft.build_group_policy_rules(settings, final),
-        # Subscription rules (direct/vpn/block)
-        *_build_subscription_rules(settings, final),
-        # After the explicit lists, device and group policies and subscriptions,
-        # so anything the operator stated on purpose still wins -- this only
-        # overrides the profile's "everything else goes through the tunnel".
-        *_realtime_rules(settings.get("realtime_direct", True)),
-    ]
-
-    if profile == "blocked_only":
-        # Everything blocked in either direction goes through the tunnel and
-        # everything else goes straight out. The list this used to name --
-        # geosite:category-ru-blocked -- was renamed upstream to ru-blocked, and
-        # xray does not skip a rule it cannot resolve: it refuses the whole
-        # configuration with exit 23, so choosing this profile failed to start
-        # xray and rolled back, saying nothing about a list. apply_config now
-        # checks the names against the file before writing anything.
-        rules += [
-            *([{"type": "field",
-                "domain": ["domain:cdn-apple.com", "domain:itunes.apple.com", "domain:aaplimg.com"],
-                "outboundTag": final}] if force_aaplimg else []),
-            # geoip:ru stays ahead of the blocked lists on purpose: a Russian
-            # address that also appears on a blocklist is far more likely to be
-            # a service that refuses foreign addresses than one worth tunnelling.
-            {"type": "field", "ip":     ["geoip:ru"],      "outboundTag": "direct"},
-            {"type": "field", "domain": RU_ONLY_LISTS,     "outboundTag": "direct"},
-            {"type": "field", "domain": BLOCKED_LISTS,     "outboundTag": final},
-            # Ahead of the address lists and behind the domain lists on purpose:
-            # a name that IS on a blocklist has already been decided above, so
-            # this only reaches Google traffic no list claims.
-            *_shared_edge_rules(),
-            {"type": "field", "ip":     BLOCKED_IP_LISTS,  "outboundTag": final},
-            # What measurement found that no list carries. Placed last of the
-            # tunnel rules, so a name the lists already decide is decided by
-            # them and this only covers the gap.
-            *([{"type": "field",
-                "domain": ["domain:" + d for d in _discovered_domains(settings)],
-                "outboundTag": final}] if _discovered_domains(settings) else []),
-            *([{"type": "field", "ip": _discovered_addresses(settings),
-                "outboundTag": final}] if _discovered_addresses(settings) else []),
-        ]
-        default = "direct"
-    elif profile == "direct":
-        default = "direct"
-    elif profile == "all_except_ru":
-        rules += [
-            *([{"type": "field",
-                "domain": ["domain:cdn-apple.com", "domain:itunes.apple.com", "domain:aaplimg.com"],
-                "outboundTag": final}] if force_aaplimg else []),
-            {"type": "field", "ip":     ["geoip:ru"],  "outboundTag": "direct"},
-            {"type": "field", "domain": RU_ONLY_LISTS, "outboundTag": "direct"},
-        ]
-        default = final
-    else:
-        default = final
-
-    rules += [
-        {"type": "field", "network": "tcp",     "port": "5228", "outboundTag": "direct"},
-        {"type": "field", "network": "tcp,udp",                  "outboundTag": default},
-    ]
+    rules = [{k: v for k, v in r.items() if not k.startswith("_")}
+             for r in _compiled_rules(settings, final, proxy_server_ip)]
 
     return {
         "log": {"loglevel": "warning",
@@ -1561,9 +1539,9 @@ def _load_geoip(cat: str = "RU") -> list:
     try:   mtime = geoip_path.stat().st_mtime
     except Exception: return []
     cat = cat.upper()
-    if _geoip_ru_nets is not None and mtime == _geoip_ru_mtime:
+    if _geoip_ru_nets is not None and mtime == _geoip_ru_mtime and cat in _geoip_ru_nets:
         return _geoip_ru_nets.get(cat, [])
-    buckets: dict = {c: [] for c in _GEOIP_WANTED}
+    buckets: dict = {c: [] for c in (*_GEOIP_WANTED, cat)}
     try:
         data = geoip_path.read_bytes(); pos = 0; n = len(data)
         while pos < n:
@@ -1649,10 +1627,10 @@ def _load_geosite(cat: str) -> dict:
     cat = cat.upper()
     try:   mtime = GEOSITE_DAT.stat().st_mtime
     except Exception: return _empty_geosite()
-    if _geosite_sets and mtime == _geosite_ru_mtime:
+    if _geosite_sets and mtime == _geosite_ru_mtime and cat in _geosite_sets:
         return _geosite_sets.get(cat, _empty_geosite())
 
-    result: dict = {c: _empty_geosite() for c in _GEOSITE_WANTED}
+    result: dict = {c: _empty_geosite() for c in (*_GEOSITE_WANTED, cat)}
     try:
         data = GEOSITE_DAT.read_bytes(); pos = 0; n = len(data)
         while pos < n:
@@ -1815,7 +1793,10 @@ def _matches_realtime(domain: Optional[str], ips: list[str]) -> Optional[str]:
                 continue
     return None
 
-def route_test(target: str, settings: dict) -> dict:
+def route_test(target: str, settings: dict, profile_id: Optional[str] = None, source_ip: Optional[str] = None) -> dict:
+    if profile_id is not None:
+        settings = dict(settings, profile=profile_id)
+    _profiles.effective(settings)
     target = target.strip()
     profile       = settings.get("profile", "all_except_ru")
     custom        = settings.get("custom_rules", {"always_direct": [], "always_vpn": []})
@@ -1875,93 +1856,49 @@ def route_test(target: str, settings: dict) -> dict:
             if not _custom_matches(item["rule"], domain, ips[0] if ips else None):
                 continue
             if item["enabled"]:
-                return result(tag, f"custom:{lst} ({item['rule']})",
-                              rule_source="custom_rule")
+                continue
             disabled_hit = disabled_hit or ("подошло бы выключенное правило "
                                             f"{lst}: {item['rule']}")
 
-    # Check device policies for current source (route test is source-agnostic, skip)
-
-    if settings.get("realtime_direct", True):
-        hit = _matches_realtime(domain, ips)
-        if hit:
-            return result("direct", f"realtime:{hit}",
-                          "Видеозвонки идут мимо туннеля", "system_override")
-
-    if force_aaplimg and profile in ("blocked_only", "all_except_ru"):
-        if domain and _domain_matches_apple_cdn(domain):
-            return result(final, "apple-cdn-override", rule_source="system_override")
-
-    def result_with_note(outbound, rule, note="", src=""):
-        r = result(outbound, rule, note, src)
-        if disabled_hit:
-            r["note"] = (r["note"] + " — " if r["note"] else "") + disabled_hit
-        return r
-
-    if profile == "all":
-        return result_with_note(final, "catch-all", f"Profile: all traffic via {final}", "global_profile")
-
-    for ip in ips:
-        if _ip_in_geoip_ru(ip):
-            return result_with_note("direct", "geoip:ru", f"{ip} is in geoip:ru", "geoip_database")
-    if domain:
-        hit = _domain_in_any_geosite(domain, RU_ONLY_LISTS)
-        if hit:
-            return result_with_note("direct", hit, f"{domain} есть в {hit}", "geosite_database")
-
-    if profile == "blocked_only":
-        # This block follows the datapath's rule order exactly: names first,
-        # then addresses, then what the probe found. It used to ask about
-        # addresses first, which reached the same outbound by a different route
-        # and so reported the wrong reason -- gemini.google.com came back as
-        # "geoip:ru-blocked" when xray had in fact decided it by name. A tester
-        # that agrees on the answer and lies about the reason is worse than one
-        # that disagrees, because nothing ever catches it.
-        if domain:
-            hit = _domain_in_any_geosite(domain, BLOCKED_LISTS)
-            if hit:
-                return result_with_note(final, hit,
-                              f"{domain} есть в {hit} — заблокирован, идёт через туннель",
-                              "geosite_database")
-        # Google's shared front end, swept up whole by a list entry. See
-        # GOOGLE_FRONTEND.
-        for ip in ips:
-            try:
-                addr = ipaddress.ip_address(ip)
-            except ValueError:
+    for rule in _compiled_rules(settings, final, vpn_server):
+        if "source" in rule and (not source_ip or not any(_custom_matches(n, None, source_ip) for n in rule["source"])):
+            continue
+        if "port" in rule:
+            continue  # preview has no destination port
+        hit = None
+        for ref in rule.get("domain", []):
+            if not domain:
                 continue
-            if any(addr in n for n in shared_edge_nets()
-                   if addr.version == n.version):
-                return result_with_note("direct", "shared-edge",
-                              f"{ip} — общий фронтенд Google, решается по имени",
-                              "geoip_database")
-        # An address the household dialled directly, with no name for the
-        # sniffer to read. This is the Telegram case, and leaving it out of the
-        # tester would hide exactly the failure that put it here.
-        for ip in ips:
-            if _ip_in_geoip(ip, BLOCKED_IP_LISTS):
-                return result_with_note(final, "geoip:ru-blocked",
-                                        f"{ip} в списке заблокированных адресов",
-                                        "geoip_database")
-        # Matched against the name when there is one and the address when there
-        # is not -- the tester is asked about both, and the record holds both.
-        wanted = {domain} if domain else set(ips)
-        for row in settings.get("discovered", []):
-                if row.get("domain") not in wanted or not row.get("routed"):
-                    continue
-                if not row.get("enabled", True):
-                    continue
-                return result_with_note(
-                    final, "probe:discovered",
-                    "проверка: напрямую %s, через туннель %s"
-                    % (row.get("direct"), row.get("tunnel")), "block_probe")
-
-        return result_with_note("direct", "catch-all",
-                      "Профиль «только заблокированное»: остальное идёт напрямую",
-                      "global_profile")
-
-    return result_with_note(final, "catch-all",
-                  f"not matched by any rule → {final}", "global_profile_fallback")
+            if ref == "geosite:private":
+                match = _is_private_domain(domain)
+            elif ref.startswith("geosite:"):
+                match = _domain_in_any_geosite(domain, [ref])
+            else:
+                match = _custom_matches(ref, domain, None)
+            if match:
+                hit = ref
+                break
+        for ref in rule.get("ip", []):
+            for ip in ips:
+                match = (_is_private_ip(ip) if ref == "geoip:private" else _ip_in_geoip_ru(ip) if ref == "geoip:ru" else _ip_in_geoip(ip, [ref]) if ref.startswith("geoip:") else _custom_matches(ref, None, ip))
+                if match:
+                    hit = ref
+                    break
+            if hit:
+                break
+        if not hit and ("domain" in rule or "ip" in rule):
+            continue
+        reason = rule.get("_reason", "subscription")
+        if reason in ("geosite_database", "geoip_database"):
+            reason = hit
+        source = "custom_rule" if reason.startswith(("custom:", "profile:custom:")) else "block_probe" if reason == "probe:discovered" else "geosite_database" if reason.startswith("geosite:") else "geoip_database" if reason.startswith("geoip:") or reason == "shared-edge" else "global_profile_fallback"
+        r = result(rule["outboundTag"], reason, "В списке заблокированных адресов" if reason == "geoip:ru-blocked" else "", rule_source=source)
+        if disabled_hit:
+            r["note"] += " — " + disabled_hit
+        if rule.get("source"):
+            r["rule_source"] = "device_or_group_policy"
+        return r
+    return result(final, "catch-all")
 
 # ── Connection Explain ─────────────────────────────────────────────────────────
 _explain_cache: dict[str, dict] = {}  # key → result
@@ -1985,12 +1922,8 @@ def explain_connection(src_ip: str, dst: str, dst_port: int,
     matched_rule = outbound
     note = ""
 
-    if device_policy != "inherit":
-        rule_source = "device_policy"
-        matched_rule = f"device:{device_policy}"
-        note = f"Device policy '{device_policy}' overrides global profile"
-    elif outbound in ("proxy", "direct"):
-        result = route_test(dst, settings)
+    if outbound in ("proxy", "direct"):
+        result = route_test(dst, settings, source_ip=src_ip)
         rule_source = result.get("rule_source", "")
         matched_rule = result.get("matched_rule", outbound)
         note = result.get("note", "")
@@ -2544,8 +2477,8 @@ async def get_status(u: str = Depends(auth_dep)):
             "topology": _net_conf().get("TOPOLOGY", "loop"), "mgmt_ip": _get_mgmt_ip(),
             "nav": _nav_flags(s),
             "vpn": vpn_meta, "geo_updated": s.get("geo_updated"), "speeds": speeds,
-            "force_aaplimg_vpn": s.get("force_aaplimg_vpn", True),
-            "realtime_direct": s.get("realtime_direct", True),
+            "force_aaplimg_vpn": _profiles.effective(s)["apple_vpn"],
+            "realtime_direct": _profiles.effective(s)["realtime_direct"],
             "wan_change": _recent_wan_change(),
             "attention": _active_attention()[:4],
             "vpn_server_count": len(servers)}
@@ -3176,24 +3109,32 @@ async def del_key(u: str = Depends(auth_dep)):
 # ── Profile ────────────────────────────────────────────────────────────────────
 @app.post("/api/profile")
 async def set_profile(req: ProfileReq, u: str = Depends(auth_dep)):
-    if req.profile not in ("blocked_only", "all_except_ru", "all", "direct"):
+    s = load_settings()
+    if req.profile not in _profiles.ids(s):
         raise HTTPException(400, "Invalid profile")
-    s = load_settings(); old_s = dict(s); s["profile"] = req.profile; save_settings(s)
+    import copy
+    old_s = copy.deepcopy(s)
+    s["profile"] = req.profile
     ok, err = apply_config(s, "profile_change", _pre_settings=old_s)
+    save_settings(s if ok else old_s)
     return {"ok": ok, "error": err or None}
 
 @app.post("/api/aaplimg-vpn")
 async def set_aaplimg_vpn(req: AaplimgReq, u: str = Depends(auth_dep)):
-    s = load_settings(); old_s = dict(s); s["force_aaplimg_vpn"] = req.enabled; save_settings(s)
-    ok, err = apply_config(s, "aaplimg_toggle", _pre_settings=old_s)
-    return {"ok": ok, "error": err or None}
+    import profile_api
+    old = load_settings()
+    ident = old.get("profile", "all_except_ru")
+    new = _profiles.update(old, ident, {"apple_vpn": req.enabled})
+    return profile_api.persist(__import__(__name__), old, new, ident, "aaplimg_toggle")
 
 @app.post("/api/realtime-direct")
 async def set_realtime_direct(req: AaplimgReq, u: str = Depends(auth_dep)):
     """Whether conferencing media bypasses the tunnel. On by default."""
-    s = load_settings(); old_s = dict(s); s["realtime_direct"] = req.enabled; save_settings(s)
-    ok, err = apply_config(s, "realtime_direct_toggle", _pre_settings=old_s)
-    return {"ok": ok, "error": err or None}
+    import profile_api
+    old = load_settings()
+    ident = old.get("profile", "all_except_ru")
+    new = _profiles.update(old, ident, {"realtime_direct": req.enabled})
+    return profile_api.persist(__import__(__name__), old, new, ident, "realtime_direct_toggle")
 
 # ── Custom Rules ───────────────────────────────────────────────────────────────
 @app.get("/api/custom-rules")
@@ -3302,7 +3243,7 @@ async def set_device_name(key: str, req: DeviceNameReq, u: str = Depends(auth_de
 
 @app.post("/api/devices/{key:path}/policy")
 async def set_device_policy(key: str, req: DevicePolicyReq, u: str = Depends(auth_dep)):
-    if req.policy not in DEVICE_POLICIES:
+    if req.policy not in (*DEVICE_POLICIES, *_profiles.ids(load_settings())):
         raise HTTPException(400, f"Invalid policy. Must be one of: {DEVICE_POLICIES}")
     s = load_settings(); old_s = dict(s)
     s.setdefault("devices", {})
@@ -3745,13 +3686,14 @@ async def get_alert_log(u: str = Depends(auth_dep)):
 async def geo_update(u: str = Depends(auth_dep)):
     global _geoip_ru_nets, _geosite_sets
     try:
-        r = subprocess.run([str(SCRIPT / "update-geo.sh")],
-                           capture_output=True, text=True, timeout=120)
+        r = await asyncio.to_thread(subprocess.run, [str(SCRIPT / "update-geo.sh")],
+                           capture_output=True, text=True, timeout=1800)
         if r.returncode == 0:
             s = load_settings(); s["geo_updated"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
             save_settings(s)
             _geoip_ru_nets = None; _geosite_sets = {}
-            subprocess.run(["systemctl", "restart", "shunt"])
+            if "UNCHANGED:" not in r.stdout:
+                subprocess.run(["systemctl", "restart", "shunt"])
             return {"ok": True, "output": r.stdout[-500:]}
         fire_alert("geo_update_failed", r.stderr[-200:])
         return {"ok": False, "error": r.stderr[-500:]}
@@ -3767,7 +3709,12 @@ async def geo_info(u: str = Depends(auth_dep)):
             b = p.stat().st_size
             return f"{b/1024/1024:.1f} MB" if b > 1024*1024 else f"{b//1024} KB"
         except Exception: return "—"
-    return {"geo_updated": s.get("geo_updated"),
+    try:
+        metadata = json.loads((CFG_DIR / "geo-version.json").read_text())
+    except (OSError, ValueError):
+        metadata = {}
+    return {"geo_updated": metadata.get("updated") or s.get("geo_updated"),
+            "geo_version": metadata.get("tag"),
             "geoip_size": fsize(CFG_DIR/"geoip.dat"),
             "geosite_size": fsize(CFG_DIR/"geosite.dat")}
 
@@ -4164,7 +4111,7 @@ async def get_groups(u: str = Depends(auth_dep)):
 
 @app.post("/api/groups")
 async def create_group(req: GroupCreateReq, u: str = Depends(auth_dep)):
-    errs = _ft.validate_group({"name": req.name, "routing_policy": req.routing_policy})
+    errs = _ft.validate_group({"name": req.name, "routing_policy": req.routing_policy}, load_settings())
     if errs: raise HTTPException(400, "; ".join(errs))
     s = load_settings(); old_s = dict(s)
     gid = str(_uuid_mod.uuid4())
@@ -4183,7 +4130,7 @@ async def update_group(gid: str, req: GroupUpdateReq, u: str = Depends(auth_dep)
     if req.name is not None: grp["name"] = req.name.strip()[:64]
     if req.description is not None: grp["description"] = req.description.strip()[:256]
     if req.routing_policy is not None:
-        if req.routing_policy not in _ft.GROUP_POLICIES:
+        if req.routing_policy not in (*_ft.GROUP_POLICIES, *_profiles.ids(load_settings())):
             raise HTTPException(400, f"Invalid policy")
         grp["routing_policy"] = req.routing_policy
     save_settings(s)
@@ -4784,6 +4731,11 @@ async def serve_static(path: str):
     media, _ = mimetypes.guess_type(target.name)
     return FileResponse(target, media_type=media or "application/octet-stream")
 
+
+# Register before the SPA catch-all so profile GETs never return HTML.
+import profile_api as _profile_api
+import sys as _sys
+_profile_api.register(app, _sys.modules[__name__])
 
 # ── SPA ────────────────────────────────────────────────────────────────────────
 @app.get("/{full_path:path}")

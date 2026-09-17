@@ -22,6 +22,9 @@ def test_gateway_serves_every_runtime_asset_without_external_dependencies():
     for asset in assets.paths:
         assert asset.startswith('/static/'), asset
         assert (STATIC / asset.removeprefix('/static/')).is_file(), asset
+    html = (STATIC / 'index.html').read_text()
+    assert 'href="/favicon.svg"' in html
+    assert (STATIC / 'favicon.svg').is_file()
 
 def test_ui_is_initialized_before_authentication_can_show_the_app():
     html = (STATIC / 'index.html').read_text()

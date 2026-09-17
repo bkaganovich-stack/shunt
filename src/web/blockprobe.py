@@ -39,6 +39,7 @@ import time
 # a code means nothing on its own -- Cloudflare answers 403 to a bare curl on
 # sites that work perfectly in a browser.
 OK, REFUSED, FAILED = "ok", "refused", "failed"
+UNCERTAIN = "uncertain"
 
 BLOCKED, OPEN, DOWN, EXIT_TROUBLE = "blocked", "open", "down", "exit_trouble"
 
@@ -62,7 +63,7 @@ def classify(direct: dict, tunnel: dict) -> str:
     d, t = direct.get("state"), tunnel.get("state")
     if d == OK:
         return OPEN
-    if t == OK:
+    if t == OK and d in (REFUSED, FAILED):
         return BLOCKED
     if d in (REFUSED, FAILED) and t in (REFUSED, FAILED):
         return DOWN
@@ -82,6 +83,8 @@ def probe(host: str, runner, timeout: int = 12) -> dict:
         return {"state": FAILED, "code": None, "detail": err[:120]}
     if code in REFUSAL_CODES:
         return {"state": REFUSED, "code": code, "detail": ""}
+    if code == 429 or code >= 500:
+        return {"state": UNCERTAIN, "code": code, "detail": "HTTP error; availability is inconclusive"}
     return {"state": OK, "code": code, "detail": ""}
 
 
