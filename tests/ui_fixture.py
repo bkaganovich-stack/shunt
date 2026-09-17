@@ -45,6 +45,8 @@ class Handler(BaseHTTPRequestHandler):
   if path=='/__fixture/requests':return self.respond(requests[-200:])
   if path=='/__fixture/state':return self.respond(state)
   if path=='/api/profiles':return self.respond(self.catalog())
+  if path in ('/favicon.svg','/favicon.ico'):
+   b=(ROOT/'favicon.svg').read_bytes();self.send_response(200);self.send_header('Content-Type','image/svg+xml');self.send_header('Cache-Control','public, max-age=86400');self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b);return
   if not path.startswith('/api/'):
    name='index.html' if path=='/' else path.removeprefix('/static/');p=(ROOT/name).resolve()
    if ROOT not in p.parents or not p.is_file():return self.respond({'error':'not found'},404)
