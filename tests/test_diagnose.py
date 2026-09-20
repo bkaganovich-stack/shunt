@@ -56,13 +56,15 @@ class TestEnvironmentChanges:
 
     def test_a_lease_that_changed_by_an_order_of_magnitude(self):
         after = dict(self.BEFORE, lease_band="короткая (до 30 мин)")
-        assert any("по порядку величины" in m
+        assert any("Категория срока DHCP-аренды" in m
                    for m in dg.environment_changes(self.BEFORE, after))
 
-    def test_a_new_dhcp_server_is_called_a_session_rebuild(self):
+    def test_a_new_dhcp_server_does_not_invent_a_cause(self):
         after = dict(self.BEFORE, dhcp_server="100.105.144.1")
         msgs = dg.environment_changes(self.BEFORE, after)
-        assert any("пересборку сессии" in m for m in msgs)
+        assert any("DHCP-сервер изменился" in m for m in msgs)
+        assert all("пересборку сессии" not in m for m in msgs)
+        assert any("не установлена" in m for m in msgs)
 
     def test_nothing_moved_means_nothing_said(self):
         assert dg.environment_changes(self.BEFORE, dict(self.BEFORE)) == []

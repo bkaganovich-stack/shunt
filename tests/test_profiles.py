@@ -122,3 +122,18 @@ def test_noop_does_not_erase_last_meaningful_undo():
     assert p.effective(p.undo(repeated, 'blocked_only'), 'blocked_only') == p.effective(original, 'blocked_only')
     reset = p.reset(changed, 'blocked_only')
     assert p.reset(reset, 'blocked_only') == reset
+
+
+def test_catalog_baseline_matches_reset_target_and_is_detached():
+    original = base()
+    changed = p.update(original, 'blocked_only', {'services': ['openai']})
+    entry = next(r for r in p.catalog(changed)['profiles'] if r['id'] == 'blocked_only')
+    assert entry['baseline_config'] == p.effective(p.reset(changed, 'blocked_only'), 'blocked_only')
+    assert entry['modified']
+    entry['baseline_config']['services'].clear()
+    assert p.effective(original, 'blocked_only')['services']
+    copied = p.clone(changed, 'blocked_only', 'My variant')
+    ident = next(iter(copied['custom_profiles']))
+    renamed = p.update(copied, ident, {'name': 'Renamed'})
+    entry = next(r for r in p.catalog(renamed)['profiles'] if r['id'] == ident)
+    assert entry['baseline_config'] == p.effective(p.reset(renamed, ident), ident)

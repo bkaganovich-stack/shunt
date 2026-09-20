@@ -254,8 +254,7 @@ def describe_chain(settings: dict, lan_ip: str | None = None) -> list[dict]:
         "step": "Устройства в сети",
         "to": "%s:53 → dnsmasq на 5335" % (lan_ip or "?"),
         "via": "перенаправление в nat PREROUTING",
-        "note": "устройства спрашивают порт 53, слушает dnsmasq на 5335; "
-                "их соединяет правило перенаправления",
+        "note": "DNS-запросы устройств на порт 53 перенаправляются в dnsmasq на порт 5335",
     }]
     ru = list(dns.get("upstream_ru", []))
     if ru:
@@ -263,8 +262,7 @@ def describe_chain(settings: dict, lan_ip: str | None = None) -> list[dict]:
             "step": "Имена .ru и .local",
             "to": ", ".join(ru),
             "via": "напрямую, мимо туннеля",
-            "note": "резолверы провайдера — единственный путь, не зависящий "
-                    "от туннеля",
+            "note": "Для этих имён используются настроенные DNS-серверы прямого маршрута",
         })
     up = list(dns.get("upstream", []))
     if up:

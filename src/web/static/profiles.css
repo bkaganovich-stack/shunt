@@ -93,3 +93,16 @@
  .pe-status{padding:0 16px}
  .pe-status:not(:empty){padding-top:8px;min-height:28px}
 }
+
+/* Profile customization is an inspectable state, not a warning. */
+.pe-modified{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;text-align:left;margin:8px 0 0;padding:0;border:0;border-radius:0;background:none;color:var(--muted);font-size:11px;line-height:1.5}
+.pe-modified>span:first-child{font-weight:600;color:var(--text)}
+.pe-modified-hint{text-decoration:underline;text-underline-offset:3px}
+.pe-changes{padding:12px 26px;border-bottom:1px solid var(--border);flex:0 0 auto;overflow:auto;min-height:44px;max-height:32dvh;font-size:12px}
+.pe-changes summary{cursor:pointer;font-weight:500}
+.pe-diff{display:grid;grid-template-columns:minmax(140px,1fr) minmax(0,2fr);gap:12px 20px;margin:14px 0 0}
+.pe-diff dt{font-weight:600;overflow-wrap:anywhere}.pe-diff dd{margin:0;display:grid;gap:6px;overflow-wrap:anywhere}
+.pe-diff dd>div{display:grid;grid-template-columns:48px minmax(0,1fr);gap:8px}.pe-diff-label{color:var(--muted)}.pe-diff ol{margin:0;padding-left:18px}
+.pe-state:not(:empty)+.pe-state:not(:empty){padding-left:12px;border-left:1px solid var(--border)}
+.pe-state:empty+.pe-state{padding-left:0;border:0}
+@media(max-width:700px){.pe-changes{padding:10px 16px}.pe-diff{grid-template-columns:1fr;gap:8px}.pe-diff dd{margin-bottom:8px}.pe-tabs{gap:8px}.pe-tab{font-size:11px}}

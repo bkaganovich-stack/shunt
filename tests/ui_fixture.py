@@ -60,7 +60,7 @@ class Handler(BaseHTTPRequestHandler):
     for _ in range(300):self.wfile.write(('data: '+json.dumps(payload)+'\n\n').encode());self.wfile.flush();time.sleep(2)
    except (BrokenPipeError,ConnectionResetError):pass
    return
-  status={'state':'connected','gateway_ip':'192.168.100.1','profile':state['profile'],'egress':{'kind':'adguard','location':'United States'},'egress_active':'adguard','fptn_enabled':True,'nav':{},'topology':'inline','mgmt_ip':'192.168.100.1','attention':[],'geo_updated':'2026-09-14','vpn':None}
+  status={'state':'connected','gateway_ip':'192.168.100.1','profile':state['profile'],'egress':{'kind':'adguard','location':'United States'},'egress_active':'adguard','fptn_enabled':True,'nav':{},'topology':'inline','mgmt_ip':'192.168.100.1','attention':state.get('attention',[]),'geo_updated':'2026-09-14','vpn':None}
   if path=='/api/status' and state['fail_status']:return self.respond({'error':'fixture unavailable'},503)
   data={
    '/api/auth-check':{'ok':self.headers.get('Cookie')!='fixture=loggedout'},'/api/status':status,'/api/version':{'version':'fixture','xray_core':'fixture'},

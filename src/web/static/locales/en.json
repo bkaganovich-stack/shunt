@@ -703,7 +703,7 @@
     "Шлюз провайдера": "Provider gateway",
     "Аренда": "Lease",
     "DNS от провайдера": "Provider DNS",
-    "Сейчас": "Right now",
+    "Сейчас": "Now",
     "несёт трафик": "carrying traffic",
     "за секунду измерения — ни байта": "not one byte during the measured second",
     "Наружу / внутрь": "Out / in",
@@ -1027,9 +1027,122 @@
     "Ниже": "Move down",
     "Удалить правило": "Delete rule",
     "Сначала добавьте введённое значение кнопкой «Добавить» или очистите поле.": "Add the entered value using the Add button, or clear the field first.",
-    "С поддоменами": "With subdomains"
+    "С поддоменами": "With subdomains",
+    "Общие правила": "Global rules",
+    "Правила профиля": "Profile rules",
+    "Поиск по разделам": "Search sections",
+    "Найти раздел…": "Find a section…",
+    "Разделы и подразделы": "Sections and subsections",
+    "Раздел не найден": "No matching section",
+    "Обнаружены замечания к работе сети.": "Network issues detected.",
+    "Включён резервный профиль.": "The fallback profile is active.",
+    "Диагностика → Сетевой тракт": "Diagnostics → Network path",
+    "Отличия от стандартных настроек": "Changes from profile defaults",
+    "Отличия от исходной копии": "Changes from the original copy",
+    "Состав изменений недоступен. Обновите данные профиля.": "Change details are unavailable. Refresh the profile data.",
+    "Сравнение сохранённых настроек. Несохранённые изменения здесь не учитываются.": "Comparison of saved settings. Unsaved edits are not included.",
+    "Было": "Before",
+    "Отсутствует": "Not included",
+    "Действуют независимо от выбранного профиля и имеют приоритет перед его правилами. В аварийном профиле «Всё напрямую» не применяются.": "Apply across profiles and take priority over profile rules. Bypassed in the emergency All direct profile.",
+    "Сброс настроек профиля не удаляет общие правила.": "Resetting a profile does not delete global rules.",
+    "Действуют только при использовании этого профиля. Общие правила имеют приоритет. Внутри профиля проверка идёт сверху вниз до первого совпадения.": "Apply only when this profile is used. Global rules take priority. Profile rules are checked from top to bottom until the first match.",
+    "Правила профиля сверху вниз: первое совпадение определяет маршрут.": "Profile rules from top to bottom: the first match determines the route.",
+    "Частные сети всегда идут напрямую. Общие правила имеют фиксированный приоритет перед профилем и редактируются в разделе «Общие правила».": "Private networks always go direct. Global rules take priority over the profile and can be edited under Global rules.",
+    "Эти правила действуют только в выбранном профиле, раньше сервисов и списков. Частные сети, общие правила и защищённый список ru-available-only-inside имеют приоритет.": "These rules apply only in the selected profile, before services and lists. Private networks, global rules and the protected ru-available-only-inside list take priority.",
+    "Маршрут трафика: подключение, адрес, перехват и выход в интернет": "Traffic path: link, address, interception and internet egress",
+    "Двойной NAT: шлюз видит устройства за роутером как один IP. Отдельные политики и аналитика для этих устройств недоступны.": "Double NAT: the gateway sees devices behind the router as one IP. Per-device policies and analytics are unavailable.",
+    "DNS-запросы устройств на порт 53 перенаправляются в dnsmasq на порт 5335": "Device DNS requests to port 53 are redirected to dnsmasq on port 5335",
+    "Для этих имён используются настроенные DNS-серверы прямого маршрута": "These names use the configured direct-route DNS servers",
+    "мин": "min",
+    "ч": "h",
+    "с": "s",
+    "WAN-адрес не менялся; наблюдение идёт меньше часа.": "WAN address unchanged; less than one hour of observation.",
+    "Нет данных о длительности наблюдения за WAN-адресом.": "WAN address observation duration is unavailable.",
+    "Результаты проверки соединения": "Connection check results",
+    "Проверка останавливается на первом сбое. Последующие этапы не проверены.": "The check stops at the first failure. Subsequent stages have not been checked.",
+    "Счётчики пакетов по правилам перехвата. Для отсутствующих правил счётчик недоступен.": "Packet counters by interception rule. Counters are unavailable for missing rules.",
+    "Нет отчёта службы мониторинга": "No monitoring report available",
+    "Проверка соответствия настроек текущим параметрам сети провайдера.": "Checks whether the settings match the current provider network parameters.",
+    "Параметры сети провайдера": "Provider network parameters",
+    "Проверка маршрута": "Route check",
+    "Трафик выхода": "Egress traffic",
+    "Таблица общих правил": "Global rules table",
+    "Порядок списков": "List order",
+    "Порядок сервисов": "Service order",
+    "Порядок точных исключений": "Exact exception order"
   },
   "patterns": [
+    [
+      "^Смена WAN-адреса: (.+)\\. Зарегистрировано за 24 ч: (\\d+)\\. DHCP-сервер: (.+)\\. Возможен разрыв внешних соединений\\. Причина смены адреса не установлена\\.$",
+      "WAN address change: $1. Recorded in 24 h: $2. DHCP server: $3. External connections may be interrupted. The cause is unknown."
+    ],
+    [
+      "^Смена WAN-адреса: (.+)\\. Зарегистрировано за 24 ч: (\\d+)\\. Возможен разрыв внешних соединений\\. Причина смены адреса не установлена\\.$",
+      "WAN address change: $1. Recorded in 24 h: $2. External connections may be interrupted. The cause is unknown."
+    ],
+    [
+      "^Смена WAN-адреса: (.+)\\. DHCP-сервер: (.+)\\. Возможен разрыв внешних соединений\\. Причина смены адреса не установлена\\.$",
+      "WAN address change: $1. DHCP server: $2. External connections may be interrupted. The cause is unknown."
+    ],
+    [
+      "^Смена WAN-адреса: (.+)\\. Возможен разрыв внешних соединений\\. Причина смены адреса не установлена\\.$",
+      "WAN address change: $1. External connections may be interrupted. The cause is unknown."
+    ],
+    [
+      "^(.+) • изменён — применён$",
+      "$1 • modified — applied",
+      [
+        1
+      ]
+    ],
+    [
+      "^Общие правила туннеля: (\\d+)\\. Списки применяются согласно профилю\\.$",
+      "Global tunnel rules: $1. Lists are applied according to the profile."
+    ],
+    [
+      "^Сервис: (.+)$",
+      "Service: $1"
+    ],
+    [
+      "^Точное исключение: (.+)$",
+      "Exact exception: $1"
+    ],
+    [
+      "^Срок DHCP-аренды: (\\d+) (мин|ч|с)\\.(.*)$",
+      "DHCP lease duration: $1 $2. $3",
+      [
+        2,
+        3
+      ]
+    ],
+    [
+      "^Запрос продления через (\\d+) (мин|ч|с) после получения адреса\\.(.*)$",
+      "Renewal request $1 $2 after address acquisition. $3",
+      [
+        2,
+        3
+      ]
+    ],
+    [
+      "^За последние 24 ч зарегистрирована смена WAN-адреса: (\\d+) раз(?:а)?\\. При смене WAN-адреса возможен разрыв внешних соединений\\.$",
+      "Recorded WAN address changes in the last 24 h: $1. External connections may be interrupted when the WAN address changes."
+    ],
+    [
+      "^WAN-адрес не менялся за (\\d+) ч наблюдения\\.$",
+      "WAN address unchanged during $1 h of observation."
+    ],
+    [
+      "^Категория срока DHCP-аренды изменилась: (.+) → (.+)\\.$",
+      "DHCP lease duration category changed: $1 → $2."
+    ],
+    [
+      "^DHCP-сервер изменился: (.+) → (.+)\\. Причина смены сервера не установлена\\.$",
+      "DHCP server changed: $1 → $2. The cause of the server change is unknown."
+    ],
+    [
+      "^Восстановлено файлов: (\\d+)\\. Применение конфигурации…$",
+      "Restored files: $1. Applying configuration…"
+    ],
     [
       "^Загружено (\\d+) правил, (\\d+) ошибок$",
       "$1 rules loaded, $2 errors"

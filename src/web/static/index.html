@@ -898,10 +898,10 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
     <!-- ── СЕТЕВОЙ ТРАКТ ──────────────────────────────────────────────────── -->
     <div id="page-path" class="page">
       <h2>Сетевой тракт</h2>
-      <p class="page-desc">Где на самом деле идёт пакет — от кабеля до выхода</p>
+      <p class="page-desc">Маршрут трафика: подключение, адрес, перехват и выход в интернет</p>
 
       <div class="card">
-        <div class="card-title">Куда пойдёт пакет</div>
+        <div class="card-title">Проверка маршрута</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
           Имя или адрес. Ответ учитывает все три слоя: перехват, выбор ядра,
           решение xray.</p>
@@ -914,18 +914,16 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       </div>
 
       <div class="card">
-        <div class="card-title">Что сейчас не так</div>
+        <div class="card-title">Результаты проверки соединения</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Проверки идут по порядку и останавливаются на первой неуспешной.
-          Всё, что ниже неё, — следствие.</p>
+          Проверка останавливается на первом сбое. Последующие этапы не проверены.</p>
         <div id="path-ladder"><span class="text-muted">загрузка…</span></div>
       </div>
 
       <div class="card">
-        <div class="card-title">Допущения о провайдере</div>
+        <div class="card-title">Параметры сети провайдера</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Настройки опираются на то, как ведёт себя провайдер. Эти допущения
-          перечислены здесь и проверяются.</p>
+          Проверка соответствия настроек текущим параметрам сети провайдера.</p>
         <div id="provider-audit"><span class="text-muted">загрузка…</span></div>
       </div>
 
@@ -938,7 +936,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       </div>
 
       <div class="card">
-        <div class="card-title">Выход наружу</div>
+        <div class="card-title">Трафик выхода</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
           Сколько байт прошло за секунду измерения.</p>
         <div id="path-egress"><span class="text-muted">загрузка…</span></div>
@@ -947,8 +945,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Правила перехвата</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Счётчики правил, которые решают, кого забирать в туннель.
-          Отсутствующее правило показано как отсутствующее.</p>
+          Счётчики пакетов по правилам перехвата. Для отсутствующих правил счётчик недоступен.</p>
         <div id="path-counters"><span class="text-muted">загрузка…</span></div>
       </div>
     </div>
@@ -2634,7 +2631,7 @@ function topoSelect(mode) {
                style="width:100%;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font-family:monospace;font-size:12px">
         <div class="text-muted" style="font-size:11px;margin-top:3px">${topoRouterMac ? 'Подставлен MAC текущего роутера. ' : ''}Пусто — без клонирования.</div>
       </div>
-      <div class="text-muted" style="margin-top:8px">Двойной NAT: роутер не трогаем, но шлюз увидит все устройства как один IP — пофевайсные политики/аналитика по устройствам работать не будут.</div>`;
+      <div class="text-muted" style="margin-top:8px">Двойной NAT: шлюз видит устройства за роутером как один IP. Отдельные политики и аналитика для этих устройств недоступны.</div>`;
   } else {
     detail.innerHTML = `
       <div style="padding:10px;border-radius:8px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);margin-bottom:8px">
@@ -2849,7 +2846,7 @@ async function importSettings(input) {
   const r = await apiJ('POST', '/api/settings/import', fd);
   if (r?.ok) {
     const n = r.restored?.length ?? 0;
-    toast(`Восстановлено файлов: ${n}. Применяю конфигурацию…`);
+    toast(`Восстановлено файлов: ${n}. Применение конфигурации…`);
     setTimeout(refreshStatus, 3000);
   } else toast(r?.error || 'Ошибка импорта', false);
   input.value = '';
@@ -3042,7 +3039,7 @@ async function loadLadder() {
   const d = await apiJ('GET', '/api/health/diagnosis');
   const diag = d && d.diagnosis;
   if (!diag) {
-    el.innerHTML = '<span class="text-muted">сторож ещё не отчитался</span>';
+    el.innerHTML = '<span class="text-muted">Нет отчёта службы мониторинга</span>';
     return;
   }
   let h = '';
@@ -3051,7 +3048,7 @@ async function loadLadder() {
   else
     h += '<div style="color:var(--red);margin-bottom:8px">' + escHtml(diag.summary) +
          ' · неисправность <b>' + escHtml(diag.owner || '—') + '</b>' +
-         (diag.fixable_here ? '' : ' — на шлюзе не чинится') + '</div>';
+         (diag.fixable_here ? '' : ' — требуется проверка оборудования или сети за пределами шлюза') + '</div>';
   (diag.rungs || []).forEach((r, i) => {
     const mark = r.ok === true ? '<span style="color:var(--green)">✓</span>'
                : r.ok === false ? '<span style="color:var(--red)">✕</span>'
@@ -3075,7 +3072,7 @@ async function loadProviderAudit() {
   const d = await apiJ('GET', '/api/provider');
   const p = d && d.provider;
   if (!p) {
-    el.innerHTML = '<span class="text-muted">сторож ещё не отчитался</span>';
+    el.innerHTML = '<span class="text-muted">Нет отчёта службы мониторинга</span>';
     return;
   }
   let h = '';
@@ -4927,23 +4924,17 @@ async function setRealtimeDirect(enabled) {
   }
 }
 
-// Смена адреса провайдера рвёт разом все соединения через шлюз. Раньше об этом
-// знал только журнал, и единственным видимым следом был вопрос «почему всё
-// подвисло». Теперь это написано там, где смотрят.
+// Display recorded WAN changes; the event does not establish an outage cause.
 function renderWanChange(c) {
   const el = document.getElementById('wan-change-banner');
   if (!el) return;
   if (!c || !c.when) { el.style.display = 'none'; return; }
   el.style.display = '';
-  let txt = 'Адрес провайдера сменился ' + c.when + ': ' + c.from +
-    ' → ' + c.to + '. В этот момент оборвались все соединения через шлюз' +
-    (c.count > 1 ? ' (за сутки таких смен: ' + c.count + ')' : '') + '.';
-  // Другой DHCP-сервер — это провайдер пересобрал сессию, а не аренда
-  // подошла к концу. Разница между этими двумя объяснениями стоила разговора.
+  let txt = 'Смена WAN-адреса: ' + c.when + ', ' + c.from + ' → ' + c.to + '.';
+  if (c.count) txt += ' Зарегистрировано за 24 ч: ' + c.count + '.';
   if (c.different_server)
-    txt += ' Адрес выдал другой сервер провайдера (' + (c.server_from || '?') +
-           ' → ' + (c.server_to || '?') + '): похоже на пересборку сессии — ' +
-           'например, после оплаты или аварии, — а не на обычное продление.';
+    txt += ' DHCP-сервер: ' + (c.server_from || '?') + ' → ' + (c.server_to || '?') + '.';
+  txt += ' Возможен разрыв внешних соединений. Причина смены адреса не установлена.';
   el.textContent = txt;
 }
 

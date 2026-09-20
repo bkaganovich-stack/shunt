@@ -47,7 +47,7 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
   const make=(tag,cls,html)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(html)e.innerHTML=html;return e;};
   const icon=name=>`<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
   const text=(key,value)=>$$(`[data-ui="${key}"]`).forEach(e=>{e.textContent=value??'—';});
-  const label={dashboard:'Обзор',geo:'Гео-базы',subscriptions:'Подписки',rules:'Ручные правила',discovered:'Найдено проверкой',vpn:'Активный выход',servers:'VPN серверы',proxy:'Proxy',devices:'Устройства',groups:'Группы',dns:'DNS',adblock:'Adblock',inbound:'Входящий доступ',router:'Подключение роутера',path:'Сетевой тракт',analytics:'Аналитика',logs:'Логи',system:'Ресурсы',updates:'Обновления',scheduler:'Планировщик',alerts:'Уведомления',settings:'Настройки',terminal:'Терминал'};
+  const label=M.pageLabels;
   const descriptions={blocked_only:'Недоступные сервисы — через VPN. Всё остальное — напрямую.',all_except_ru:'Иностранные сайты — через VPN. Российские IP и домены — напрямую.',all:'Весь трафик через VPN, кроме локальной сети.',direct:'Туннель не используется.'};
   const app=$('#app-screen'), main=app.querySelector('main');main.classList.add('main');
   document.body.insertAdjacentHTML('afterbegin',UI_SYMBOLS);
@@ -64,6 +64,48 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
   const mobileTop=make('div','mobile-top');mobileTop.innerHTML=`<a href="#overview/dashboard" class="brand"><span class="brand-mark">${icon('shunt')}</span><span class="brand-name">shunt</span></a><button class="theme-mobile" onclick="toggleTheme()" aria-label="Переключить тему">${icon('system')}</button>`;app.prepend(mobileTop);
   const mobileNav=make('nav','mobile-nav');mobileNav.setAttribute('aria-label','Мобильная навигация');mobileNav.innerHTML=`<a href="#overview/dashboard" data-ui-group="overview">${icon('overview')}<span>Обзор</span></a><a href="#routing/geo" data-ui-group="routing">${icon('route')}<span>Маршруты</span></a><a href="#network/devices" data-ui-group="network">${icon('network')}<span>Сеть</span></a><button onclick="toggleNav()" aria-label="Все разделы">${icon('system')}<span>Ещё</span></button>`;app.append(mobileNav);
   const header=make('header','topbar');header.innerHTML='<div><h1 id="ui-title">Обзор</h1><p class="subtitle" id="ui-subtitle">Ваша сеть. Каждый маршрут на виду.</p></div><div class="top-actions"><span class="badge"><span class="dot" data-ui-dot style="background:var(--muted)"></span><span data-ui="state">Не измерено</span></span></div>';main.prepend(header);
+  // The same navigation model supplies tabs, breadcrumbs and search results.
+  const navSearch=make('div','ui-nav-search');
+  navSearch.innerHTML='<label class="ui-sr-only" for="ui-nav-query">Поиск по разделам</label><input id="ui-nav-query" type="search" placeholder="Найти раздел…" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ui-nav-results" autocomplete="off"><div class="ui-nav-dropdown" hidden><ul id="ui-nav-results" role="listbox" aria-label="Разделы и подразделы"></ul><p class="ui-nav-empty" role="status" hidden>Раздел не найден</p></div>';
+  header.querySelector('.top-actions').prepend(navSearch);
+  const navInput=$('#ui-nav-query'),navDrop=navSearch.querySelector('.ui-nav-dropdown'),navResults=$('#ui-nav-results');
+  let navMatches=[],navIndex=-1;
+  const translate=s=>typeof t==='function'?t(s):s;
+  function closeNavSearch(){navDrop.hidden=true;navInput.setAttribute('aria-expanded','false');navInput.removeAttribute('aria-activedescendant');navIndex=-1;}
+  function selectNavResult(index){
+    navIndex=index;
+    [...navResults.children].forEach((n,i)=>n.setAttribute('aria-selected',i===index?'true':'false'));
+    if(index>=0){navInput.setAttribute('aria-activedescendant','ui-nav-result-'+index);navResults.children[index]?.scrollIntoView({block:'nearest'});}
+    else navInput.removeAttribute('aria-activedescendant');
+  }
+  async function openNavResult(entry){
+    closeNavSearch();navInput.value='';showPage(entry.route);
+    if(entry.panel){await window.ShuntProfiles?.open({panel:entry.panel});}
+    else {const heading=$('#ui-title');heading.tabIndex=-1;heading.focus({preventScroll:true});}
+  }
+  function renderNavSearch(){
+    navMatches=M.searchNavigation(navInput.value,translate);navResults.replaceChildren();
+    navMatches.forEach((entry,i)=>{
+      const option=document.createElement('li');option.id='ui-nav-result-'+i;option.setAttribute('role','option');option.setAttribute('aria-selected','false');
+      option.setAttribute('data-i18n-skip','');
+      const title=document.createElement('strong'),trail=document.createElement('span');
+      title.textContent=translate(entry.labels.at(-1));trail.textContent=entry.labels.slice(0,-1).map(translate).join(' → ');
+      option.append(title,trail);option.onmousedown=e=>e.preventDefault();option.onclick=()=>openNavResult(entry);navResults.append(option);
+    });
+    navSearch.querySelector('.ui-nav-empty').hidden=navMatches.length>0;navDrop.hidden=false;navInput.setAttribute('aria-expanded','true');selectNavResult(-1);
+  }
+  navInput.addEventListener('input',renderNavSearch);navInput.addEventListener('focus',renderNavSearch);
+  navInput.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){e.preventDefault();closeNavSearch();return;}
+    if(e.key==='Tab'){closeNavSearch();return;}
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+      e.preventDefault();if(navDrop.hidden)renderNavSearch();if(!navMatches.length)return;
+      selectNavResult(navIndex<0?(e.key==='ArrowDown'?0:navMatches.length-1):(navIndex+(e.key==='ArrowDown'?1:-1)+navMatches.length)%navMatches.length);
+    } else if(e.key==='Enter'&&!navDrop.hidden&&navMatches.length){e.preventDefault();openNavResult(navMatches[Math.max(navIndex,0)]);}
+  });
+  document.addEventListener('click',e=>{if(!navSearch.contains(e.target))closeNavSearch();});
+  document.addEventListener('focusin',e=>{if(!navSearch.contains(e.target))closeNavSearch();});
+  document.addEventListener('keydown',e=>{if(ui.authenticated&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'&&!document.querySelector('dialog[open]')){e.preventDefault();navInput.focus();navInput.select();}});
   const tabs=make('div','route-tabs ui-primary-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Разделы экрана');header.after(tabs);
   const secondary=make('div','ui-secondary-tabs');tabs.after(secondary);
   function dialog(title,id){const d=make('dialog','ui-dialog');d.id=id;d.setAttribute('aria-labelledby',id+'-title');d.innerHTML=`<div class="row between"><h2 id="${id}-title">${title}</h2><button class="close" type="button" aria-label="Закрыть">×</button></div>`;d.querySelector('button').onclick=()=>d.close();document.body.append(d);return d;}
@@ -75,7 +117,7 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
   const profileBar=make('article','card routing-profile');profileBar.innerHTML=`<div class="profile-label"><p class="eyebrow muted">Профиль маршрутов</p><span class="small" id="ui-profile-state">Сейчас применяется</span></div><div class="profile-select-wrap"><label class="ui-sr-only" for="ui-profile-select">Выберите режим маршрутизации трафика</label><select id="ui-profile-select">${Object.entries(PROFILE_LABELS).map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select></div><p class="small muted" data-ui="profileDescription">Нет данных</p><button class="primary" id="ui-profile-apply" hidden>Применить профиль</button><button class="plain" id="ui-profile-more">Настроить</button>`;
   routing.append(profileBar);
   const routeGrid=make('div','routing-grid'),routeMain=make('div','ui-route-main'),routeAside=make('aside','ui-route-aside');routeGrid.append(routeMain,routeAside);routing.append(routeGrid);
-  routeAside.innerHTML='<article class="card sidebar-card"><h2>Откуда берётся решение</h2><ol class="priority-list"><li><span class="step">1</span><div><h3>Профиль</h3><p>Задаёт общий режим для домашней сети.</p></div></li><li><span class="step">2</span><div><h3>Списки</h3><p>Помогают разделить назначения по маршрутам.</p></div></li><li><span class="step">3</span><div><h3>Ручные правила</h3><p>Переопределяют гео-базы для конкретного домена или IP.</p></div></li></ol><p class="small muted">Схема настройки, не порядок обработки пакета.</p></article>';
+  routeAside.innerHTML='<article class="card sidebar-card"><h2>Откуда берётся решение</h2><ol class="priority-list"><li><span class="step">1</span><div><h3>Профиль</h3><p>Задаёт общий режим для домашней сети.</p></div></li><li><span class="step">2</span><div><h3>Списки</h3><p>Помогают разделить назначения по маршрутам.</p></div></li><li><span class="step">3</span><div><h3>Общие правила</h3><p>Переопределяют гео-базы для конкретного домена или IP.</p></div></li></ol><p class="small muted">Схема настройки, не порядок обработки пакета.</p></article>';
   routeTester.classList.add('test-card');routeAside.append(routeTester);
   const discoveredPage=make('section','page');discoveredPage.id='page-discovered';
   const discoveredCard=$('#discovered-meta').closest('.card');discoveredPage.append(discoveredCard);
@@ -91,8 +133,8 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
   const rulePage=$('#page-rules'),ruleDialog=dialog('Добавить правило','ui-rule-dialog');
   Array.from(rulePage.querySelectorAll('.card')).forEach(c=>ruleDialog.append(c));
   ruleDialog.querySelectorAll('.rules-list').forEach(e=>e.hidden=true);
-  const ruleEditor=make('article','card workspace');ruleEditor.innerHTML='<div class="table-head"><div><h2>Ручные правила</h2><p>Явные исключения для доменов и IP</p></div><button class="primary" id="ui-rule-add">Добавить правило</button></div><div class="filterbar"><div class="segmented" aria-label="Фильтр правил"><button data-filter="all" aria-pressed="true">Все</button><button data-filter="direct" aria-pressed="false">Напрямую</button><button data-filter="vpn" aria-pressed="false">Туннель</button></div><input id="ui-rule-search" class="search" type="search" placeholder="Домен или IP" aria-label="Найти правило"></div><table class="data-table"><thead><tr><th>ПРАВИЛО</th><th>МАРШРУТ</th><th>СОСТОЯНИЕ</th><th>ДЕЙСТВИЯ</th></tr></thead><tbody id="ui-rule-rows"></tbody></table><p class="table-note" id="ui-rule-note">Нет данных</p></article>';
-  const tableScroll=make('div','ui-table-scroll');tableScroll.tabIndex=0;tableScroll.setAttribute('role','region');tableScroll.setAttribute('aria-label','Таблица ручных правил');ruleEditor.querySelector('table').replaceWith(tableScroll);
+  const ruleEditor=make('article','card workspace');ruleEditor.innerHTML='<div class="table-head"><div><h2>Общие правила</h2><p>Действуют независимо от выбранного профиля и имеют приоритет перед его правилами. В аварийном профиле «Всё напрямую» не применяются.</p></div><button class="primary" id="ui-rule-add">Добавить правило</button></div><div class="filterbar"><div class="segmented" aria-label="Фильтр правил"><button data-filter="all" aria-pressed="true">Все</button><button data-filter="direct" aria-pressed="false">Напрямую</button><button data-filter="vpn" aria-pressed="false">Туннель</button></div><input id="ui-rule-search" class="search" type="search" placeholder="Домен или IP" aria-label="Найти правило"></div><table class="data-table"><thead><tr><th>ПРАВИЛО</th><th>МАРШРУТ</th><th>СОСТОЯНИЕ</th><th>ДЕЙСТВИЯ</th></tr></thead><tbody id="ui-rule-rows"></tbody></table><p class="table-note" id="ui-rule-note">Нет данных</p></article>';
+  const tableScroll=make('div','ui-table-scroll');tableScroll.tabIndex=0;tableScroll.setAttribute('role','region');tableScroll.setAttribute('aria-label','Таблица общих правил');ruleEditor.querySelector('table').replaceWith(tableScroll);
   const ruleTable=make('table','data-table');ruleTable.innerHTML='<thead><tr><th>ПРАВИЛО</th><th>МАРШРУТ</th><th>СОСТОЯНИЕ</th><th>ДЕЙСТВИЯ</th></tr></thead><tbody id="ui-rule-rows"></tbody>';tableScroll.append(ruleTable);
   rulePage.prepend(ruleEditor);const saveRow=rulePage.querySelector('.btn-row');ruleEditor.after(saveRow);
   $('#ui-rule-add').onclick=()=>ruleDialog.showModal();
@@ -126,7 +168,7 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
   app.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(a){e.preventDefault();showPage(a.getAttribute('href').slice(1));}});
   addEventListener('popstate',()=>{if(ui.authenticated)showPage(location.hash.slice(1),null,true);});
   // Source counters and status never depend on whether their detail tab is open.
-  ui.profileSelected=p=>{ui.profileDirty=true;$('#ui-profile-select').value=p;$('#ui-profile-apply').hidden=false;$('#ui-profile-state').textContent='Не применено';};
+  ui.profileSelected=p=>{ui.profileDirty=true;$('#ui-profile-select').value=p;$('#ui-profile-apply').hidden=false;$('#ui-profile-state').textContent='Не применено';window.ShuntProfiles?.updateSummary();};
   ui.profileApplied=()=>{ui.profileDirty=false;$('#ui-profile-apply').hidden=true;$('#ui-profile-state').textContent='Сейчас применяется';};
   ui.status=d=>{
     if(!ui.authenticated)return;ui.lastStatus=d;
@@ -136,12 +178,13 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
     text('profile',PROFILE_LABELS[d.profile]||'Не измерено');text('profileDescription',descriptions[d.profile]||'Не измерено');text('lan',d.gateway_ip||'—');
     if(!ui.profileDirty)$('#ui-profile-select').value=d.profile;
     window.ShuntProfiles?.refresh();
-    const problem=(d.attention||[]).length||d.in_fallback;const alert=$('#ui-overview-error');alert.hidden=!problem;alert.textContent=d.in_fallback?'Включён резервный профиль. Проверьте сетевой тракт.':problem?'Есть замечания к работе сети. Откройте «Сетевой тракт».':'';
+    const problem=(d.attention||[]).length||d.in_fallback;const alert=$('#ui-overview-error');alert.hidden=!problem;alert.replaceChildren();
+    if(problem){const message=document.createElement('span');message.textContent=d.in_fallback?'Включён резервный профиль.':'Обнаружены замечания к работе сети.';const link=document.createElement('a');link.href='#diagnostics/path';link.textContent='Диагностика → Сетевой тракт';alert.append(message,link);}
   };
   ui.offline=()=>{text('state','Нет связи со шлюзом');$$('[data-ui-dot]').forEach(n=>n.style.background='var(--muted)');const alert=$('#ui-overview-error');alert.hidden=false;alert.textContent='Нет связи со шлюзом. Показаны последние полученные данные.';};
   ui.geo=r=>{text('geoSiteSize',r.geosite_size||'—');text('geoIpSize',r.geoip_size||'—');text('geoUpdated',r.geo_updated||'Никогда');};
   ui.discovered=r=>{const d=M.discovery(r?.rows);text('discoveredTotal',d?fmtNum(d.total):'—');text('discoveredRouted',d?fmtNum(r.routed??d.routed):'—');text('discoveredSummary',d?`В туннеле: ${fmtNum(r.routed??d.routed)}. Не направлено: ${fmtNum(d.total-(r.routed??d.routed))}.`:'Нет данных');};
-  function reasons(r){if(!r){text('directReason','Нет данных');text('vpnReason','Нет данных');return;}const direct=(r.always_direct||[]).filter(v=>ruleOf(v).enabled).length,vpn=(r.always_vpn||[]).filter(v=>ruleOf(v).enabled).length;text('directReason',`Правила прямого маршрута: ${fmtNum(direct)}. Остальное определяется профилем.`);text('vpnReason',`Ручные правила туннеля: ${fmtNum(vpn)}. Списки применяются согласно профилю.`);}
+  function reasons(r){if(!r){text('directReason','Нет данных');text('vpnReason','Нет данных');return;}const direct=(r.always_direct||[]).filter(v=>ruleOf(v).enabled).length,vpn=(r.always_vpn||[]).filter(v=>ruleOf(v).enabled).length;text('directReason',`Правила прямого маршрута: ${fmtNum(direct)}. Остальное определяется профилем.`);text('vpnReason',`Общие правила туннеля: ${fmtNum(vpn)}. Списки применяются согласно профилю.`);}
   ui.rulesLoaded=()=>{ui.rulesDirty=false;reasons(_rulesData);ui.renderRules();};
   ui.markRulesDirty=()=>{ui.rulesDirty=true;};
   ui.rulesSaved=()=>{ui.rulesDirty=false;reasons(_rulesData);ui.renderRules();};
@@ -149,7 +192,7 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
     const body=$('#ui-rule-rows');if(!body)return;body.replaceChildren();const query=$('#ui-rule-search').value.trim().toLowerCase();
     for(const type of ['direct','vpn']){const rows=_rulesData[type==='direct'?'always_direct':'always_vpn']||[];rows.forEach((raw,index)=>{const r=ruleOf(raw);if((ui.filter!=='all'&&ui.filter!==type)||!r.rule.toLowerCase().includes(query))return;const tr=make('tr');const value=make('td','mono');value.textContent=r.rule;const route=make('td',type==='vpn'?'accent':'');route.textContent=type==='vpn'?'Туннель':'Напрямую';const state=make('td');const toggle=make('button','plain');toggle.textContent=r.enabled?'Включено':'Выключено';toggle.setAttribute('aria-pressed',r.enabled);toggle.onclick=()=>toggleRule(type,index);state.append(toggle);const actions=make('td');const del=make('button','plain');del.textContent='Удалить';del.onclick=()=>removeRule(type,index);actions.append(del);tr.append(value,route,state,actions);body.append(tr);});}
     if(!body.children.length){const tr=make('tr'),td=make('td','empty-state');td.colSpan=4;td.textContent='Нет правил';tr.append(td);body.append(tr);}
-    $('#ui-rule-note').textContent=ui.rulesDirty?'Есть несохранённые изменения. Нажмите «Сохранить правила».':'Ручные правила имеют приоритет над гео-базами.';
+    $('#ui-rule-note').textContent=ui.rulesDirty?'Есть несохранённые изменения. Нажмите «Сохранить правила».':'Сброс настроек профиля не удаляет общие правила.';
     $$('[data-filter]').forEach(b=>{b.classList.toggle('active',b.dataset.filter===ui.filter);b.setAttribute('aria-pressed',b.dataset.filter===ui.filter);});
   };
   function renderTraffic(raw){

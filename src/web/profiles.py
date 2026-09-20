@@ -172,5 +172,6 @@ def catalog(settings):
     rows = []
     for ident in ids(settings):
         c = effective(settings, ident)
-        rows.append({"id": ident, "name": c["name"], "description": BUILTINS[ident][1] if ident in BUILTINS else "Пользовательский профиль", "builtin": ident in BUILTINS, "modified": c != (_base(settings, ident) if ident in BUILTINS else _validate(settings["custom_profiles"][ident]["original"], ident)), "can_undo": ident in settings.get("profile_history", {}), "config": c})
+        baseline = _base(settings, ident) if ident in BUILTINS else _validate(settings["custom_profiles"][ident]["original"], ident)
+        rows.append({"id": ident, "name": c["name"], "description": BUILTINS[ident][1] if ident in BUILTINS else "Пользовательский профиль", "builtin": ident in BUILTINS, "modified": c != baseline, "baseline_config": deepcopy(baseline), "can_undo": ident in settings.get("profile_history", {}), "config": c})
     return {"active_profile": settings.get("profile", "all_except_ru"), "profiles": rows, "tunnel_lists": deepcopy(TUNNEL_LISTS), "services": deepcopy(SERVICES)}
