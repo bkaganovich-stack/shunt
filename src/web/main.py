@@ -4729,7 +4729,8 @@ async def serve_static(path: str):
     if not str(target).startswith(str(root) + os.sep) or not target.is_file():
         raise HTTPException(404, "not found")
     media, _ = mimetypes.guess_type(target.name)
-    return FileResponse(target, media_type=media or "application/octet-stream")
+    return FileResponse(target, media_type=media or "application/octet-stream",
+                        headers={"Cache-Control": "no-cache"})
 
 
 # Register before the SPA catch-all so profile GETs never return HTML.
@@ -4741,7 +4742,23 @@ _profile_api.register(app, _sys.modules[__name__])
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
     html_path = STATIC / "index.html"
-    if html_path.exists(): return HTMLResponse(html_path.read_text())
+    if html_path.exists():
+        # A package can be updated without changing VERSION. Content hashes
+        # give changed assets new URLs even when a browser still considers the
+        # old, unversioned response fresh. No frontend build step is needed.
+        root = STATIC.resolve()
+
+        def version_asset(match):
+            prefix, url, quote = match.groups()
+            target = (root / url.removeprefix("/static/")).resolve()
+            if not target.is_relative_to(root) or not target.is_file():
+                return match.group(0)
+            revision = hashlib.sha256(target.read_bytes()).hexdigest()[:16]
+            return f"{prefix}{url}?v={revision}{quote}"
+
+        html = re.sub(r'''((?:src|href)=["'])(/static/[^"'?]+)(["'])''',
+                      version_asset, html_path.read_text())
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
     return HTMLResponse("<h1>UI not installed</h1>", 500)
 
 if __name__ == "__main__":
