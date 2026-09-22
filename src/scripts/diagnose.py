@@ -165,11 +165,10 @@ def environment_changes(old: dict, new: dict) -> list[str]:
         out.append("Сменился шлюз провайдера: %s → %s."
                    % (old.get("gateway") or "—", new.get("gateway")))
     if old.get("lease_band") != new.get("lease_band"):
-        out.append("Аренда стала другой по порядку величины: %s → %s."
+        out.append("Категория срока DHCP-аренды изменилась: %s → %s."
                    % (old.get("lease_band"), new.get("lease_band")))
     if old.get("dhcp_server") != new.get("dhcp_server") and new.get("dhcp_server"):
-        out.append("Адрес выдал другой DHCP-сервер: %s → %s — похоже на "
-                   "пересборку сессии провайдером, а не на продление аренды."
+        out.append("DHCP-сервер изменился: %s → %s. Причина смены сервера не установлена."
                    % (old.get("dhcp_server") or "—", new.get("dhcp_server")))
     return out
 

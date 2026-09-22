@@ -73,3 +73,17 @@
 .btn-primary{border-color:transparent}
 .ui-icon-action{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;border:0;background:none;color:var(--muted)}
 .ui-icon-action .icon{width:18px;height:18px}
+
+/* Navigation search uses the route registry; no external requests. */
+.ui-nav-search{position:relative;width:260px;max-width:100%;color:var(--text)}
+.ui-nav-search input{width:100%;height:40px;font-size:13px;padding:9px 12px}
+.ui-nav-dropdown{position:absolute;right:0;top:calc(100% + 8px);width:360px;max-width:calc(100vw - 32px);z-index:45;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 32px #0003;overflow:hidden}
+#ui-nav-results{list-style:none;margin:0;padding:6px;max-height:340px;overflow:auto}
+#ui-nav-results li{padding:10px 12px;border-radius:6px;cursor:pointer;display:grid;gap:3px;min-height:48px}
+#ui-nav-results li:hover,#ui-nav-results li[aria-selected=true]{background:var(--bg3)}
+#ui-nav-results strong{font-size:13px}#ui-nav-results span{font-size:11px;color:var(--muted)}
+.ui-nav-empty{padding:16px;font-size:13px;color:var(--muted)}
+#ui-overview-error{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#ui-overview-error a{font-weight:500;text-decoration:underline;text-underline-offset:3px}
+@media(max-width:1000px){.topbar{height:auto;min-height:74px;flex-wrap:wrap;margin-bottom:16px}.top-actions{gap:10px}.ui-nav-search{width:220px}}
+@media(max-width:700px){#app-screen .topbar{gap:14px}.topbar>.top-actions{width:100%;display:flex;flex-wrap:wrap}.ui-nav-search{flex:1;min-width:180px;width:auto}.ui-nav-dropdown{left:0;right:auto;width:calc(100vw - 32px)}.ui-nav-search input{font-size:16px}}

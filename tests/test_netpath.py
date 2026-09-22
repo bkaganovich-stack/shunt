@@ -119,7 +119,7 @@ class TestLease:
 
     def test_a_short_lease_states_the_facts(self):
         note = np.lease_note(np.parse_lease_file(LEASE_FILE))
-        assert "10 мин" in note and "каждые 5 мин" in note
+        assert "10 мин" in note and "через 5 мин" in note
 
     def test_a_quiet_address_is_reassurance_not_a_warning(self):
         # The gateway's own record: ~305 renewals in 25 hours, zero changes.
@@ -128,13 +128,14 @@ class TestLease:
         import time as _t
         note = np.lease_note(np.parse_lease_file(LEASE_FILE),
                              stable_since=_t.time() - 25.5 * 3600)
-        assert "25 ч" in note and "ни одной смены" in note
+        assert "25 ч" in note and "не менялся" in note
         assert "обрывает" not in note
 
     def test_the_consequence_is_named_only_when_it_happened(self):
         note = np.lease_note(np.parse_lease_file(LEASE_FILE), changes_24h=2)
         assert "2 раза" in note
-        assert "обрывает все соединения" in note
+        assert "возможен разрыв" in note
+        assert "все соединения" not in note
 
     def test_a_short_watch_does_not_claim_much(self):
         import time as _t
@@ -144,7 +145,7 @@ class TestLease:
 
     def test_without_a_record_it_says_only_what_is_generally_true(self):
         note = np.lease_note(np.parse_lease_file(LEASE_FILE))
-        assert "обычно сохраняет адрес" in note
+        assert "Нет данных о длительности наблюдения" in note
 
     def test_a_long_lease_says_so_briefly(self):
         note = np.lease_note({"lifetime": 86400, "t1": 43200})
@@ -302,3 +303,10 @@ class TestChainParsing:
     def test_the_header_lines_are_not_rules(self):
         rows = np.parse_chain(IPTABLES_PREROUTING)
         assert all(r["target"] in ("RETURN", "TPROXY", "MARK") for r in rows)
+
+
+def test_lease_does_not_invent_renewal_timer_or_round_to_zero_hours():
+    note = np.lease_note({'lifetime': 2700})
+    assert '45 мин' in note
+    assert 'Запрос продления' not in note
+    assert '0 ч' not in note

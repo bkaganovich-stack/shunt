@@ -157,7 +157,7 @@ class TestChain:
         assert len(hops) == 3
         assert "192.168.100.1:53" in hops[0]["to"]
         assert "213.234.193.1" in hops[1]["to"]
-        assert "туннел" in hops[1]["note"]
+        assert "прямого маршрута" in hops[1]["note"]
         assert "DoH" in hops[2]["via"] and "1.1.1.1" in hops[2]["note"]
 
     def test_without_split_dns_there_is_no_ru_hop(self, monkeypatch):

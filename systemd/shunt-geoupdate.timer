@@ -1,8 +1,8 @@
 [Unit]
-Description=Shunt — weekly refresh of the geoip/geosite rule sets
+Description=Shunt — daily refresh of the geoip/geosite rule sets
 
 [Timer]
-OnCalendar=Sun 04:00
+OnCalendar=*-*-* 04:00:00
 RandomizedDelaySec=2h
 Persistent=true
 

@@ -18,13 +18,14 @@ jobs:
         with:
           node-version: '22'
       - name: Install test dependencies
-        run: python -m pip install -r src/web/requirements.txt pytest
+        run: python -m pip install -r src/web/requirements.txt pytest httpx2
       - name: Python and UI tests
         run: |
           python -m pytest tests/ -q
           node --test tests/ui-model.test.cjs
           node --check src/web/static/ui.js
           node --check src/web/static/ui-model.js
+          node --check src/web/static/profiles.js
       - name: Build Debian package
         run: ./packaging/build.sh
       - name: Verify package contents

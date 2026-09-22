@@ -194,44 +194,30 @@ def _times(n: int) -> str:
 def lease_note(lease: dict, stable_since: float | None = None,
                changes_24h: int = 0, now: float | None = None,
                short_sec: int = 1800) -> str | None:
-    """
-    One sentence about the lease -- describing what happened, not what could.
-
-    An earlier version of this said a short lease meant every renewal was a
-    chance for the address to move, and that each move cut every connection. The
-    second half is true; the first half made it sound like a coin flip every
-    five minutes, and the gateway's own logs say otherwise: about three hundred
-    renewals in twenty-five hours without a single change, and nine
-    re-acquisitions in one afternoon of cable-pulling that returned the very
-    same address every time. Renewal normally keeps the address -- the server
-    holds the binding -- and an address only moves when the provider decides it
-    should.
-
-    So this reports the lease as a fact and the changes as a count. A number
-    that is nearly always zero is reassurance; the same number at three is worth
-    acting on. Neither is a warning about something that has not happened.
-    """
+    """Report lease parameters and recorded address changes without inferring outages."""
     life, t1 = lease.get("lifetime"), lease.get("t1")
     if not life:
         return None
     now = now if now is not None else time.time()
-    if life <= short_sec:
-        head = "Аренда на %d мин, продление каждые %d мин." % (
-            life // 60, (t1 or life // 2) // 60)
-    else:
-        head = "Аренда на %d ч." % (life // 3600)
-
+    def duration(seconds):
+        if seconds % 3600 == 0:
+            return "%d ч" % (seconds // 3600)
+        if seconds % 60 == 0:
+            return "%d мин" % (seconds // 60)
+        return "%d с" % seconds
+    parts = ["Срок DHCP-аренды: %s." % duration(life)]
+    if t1:
+        parts.append("Запрос продления через %s после получения адреса." % duration(t1))
     if changes_24h:
-        return (head + " Продление обычно сохраняет адрес, но за последние "
-                "сутки он сменился %s — а смена адреса разом обрывает все "
-                "соединения через шлюз." % _times(changes_24h))
-    if stable_since:
-        hours = (now - stable_since) / 3600.0
-        if hours >= 1:
-            return (head + " Продление сохраняет адрес: за %d ч наблюдения "
-                    "ни одной смены." % int(hours))
-        return head + " Продление сохраняет адрес; наблюдение идёт меньше часа."
-    return head + " Продление обычно сохраняет адрес."
+        parts.append("За последние 24 ч зарегистрирована смена WAN-адреса: %s." % _times(changes_24h))
+        parts.append("При смене WAN-адреса возможен разрыв внешних соединений.")
+    elif stable_since:
+        hours = max(0, now - stable_since) / 3600.0
+        parts.append("WAN-адрес не менялся за %d ч наблюдения." % int(hours) if hours >= 1
+                     else "WAN-адрес не менялся; наблюдение идёт меньше часа.")
+    else:
+        parts.append("Нет данных о длительности наблюдения за WAN-адресом.")
+    return " ".join(parts)
 
 
 def address_state(iface: str) -> dict:

@@ -5,5 +5,4 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/opt/shunt/scripts/update-geo.sh
-ExecStartPost=/bin/sh -c 'systemctl is-active --quiet shunt.service && systemctl restart shunt.service || true'
+ExecStart=/opt/shunt/scripts/refresh-geo.sh
