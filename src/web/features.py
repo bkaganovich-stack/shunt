@@ -130,14 +130,73 @@ MAX_SUB_RULES = 50_000
 _SUB_LINE_RE = re.compile(
     r'^(?:(?:0\.0\.0\.0|127\.0\.0\.1)\s+)?'          # optional hosts-file prefix
     r'(?:\|\||@@\|\|)?'                                # optional adblock prefix/exception
-    r'([a-zA-Z0-9*_.\-]+)'                             # domain or IP
+    r'([a-zA-Z0-9*_.\-/:]+)'                           # domain, IP or network
     r'(?:\^|\|)?'                                      # optional adblock suffix
     r'(?:\s.*)?$'                                      # optional comment/rest
 )
 
 
+# Cloud providers publish the address space they own as JSON, not as a list, and
+# the address space is the thing worth subscribing to. A throttle applied to a
+# provider's networks catches every site that provider hosts -- on 2026-09-23 32
+# of the 54 destinations measured broken on the direct path were Amazon's,
+# none of them in any blocklist -- and no list of names keeps up with that. The
+# two shapes recognised are the two in use:
+#   AWS     {"prefixes": [{"ip_prefix": ..}], "ipv6_prefixes": [{"ipv6_prefix": ..}]}
+#   Google  {"prefixes": [{"ipv4Prefix": ..} or {"ipv6Prefix": ..}]}
+_RANGE_LISTS = ("prefixes", "ipv6_prefixes")
+_RANGE_KEYS = ("ip_prefix", "ipv6_prefix", "ipv4Prefix", "ipv6Prefix")
+
+
+def parse_ip_ranges_document(text: str) -> Optional[tuple[list[str], list[str]]]:
+    """
+    Networks from a published IP-range document, or None when `text` is not JSON.
+
+    Any JSON object is answered here rather than handed to the line parser,
+    which would report every line of it as an unparseable domain. The networks
+    are collapsed: AWS lists ten thousand prefixes, many of them nested inside
+    one another, which fold into under two thousand without changing a single
+    routing decision.
+    """
+    import ipaddress as _ip
+    body = text.lstrip()
+    if not body.startswith("{"):
+        return None
+    try:
+        doc = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(doc, dict) or not any(k in doc for k in _RANGE_LISTS):
+        return [], ["JSON document is not a published IP-range list"]
+    nets, errors = [], []
+    for list_key in _RANGE_LISTS:
+        for entry in doc.get(list_key) or []:
+            if not isinstance(entry, dict):
+                continue
+            for key in _RANGE_KEYS:
+                raw = entry.get(key)
+                if not isinstance(raw, str):
+                    continue
+                try:
+                    nets.append(_ip.ip_network(raw, strict=False))
+                except ValueError:
+                    if len(errors) < 5:
+                        errors.append(f"invalid prefix «{raw[:60]}»")
+    if not nets:
+        return [], errors or ["no network prefixes in the document"]
+    rules = [str(n) for version in (4, 6)
+             for n in _ip.collapse_addresses(n for n in nets if n.version == version)]
+    if len(rules) > MAX_SUB_RULES:
+        errors.append(f"Truncated at {MAX_SUB_RULES} rules")
+        rules = rules[:MAX_SUB_RULES]
+    return rules, errors
+
+
 def parse_subscription_content(text: str, sub_type: str) -> tuple[list[str], list[str]]:
     """Parse a subscription file. Returns (valid_rules, errors)."""
+    ranges = parse_ip_ranges_document(text)
+    if ranges is not None:
+        return ranges
     rules: list[str] = []
     errors: list[str] = []
     for i, raw in enumerate(text.splitlines()):
@@ -501,21 +560,66 @@ def _task_backup() -> tuple[str, str]:
 
 
 def _task_sub_update(settings: dict) -> tuple[str, str]:
-    updated = 0
-    errors = []
+    """
+    Refresh every enabled subscription and put the result in front of xray.
+
+    This used to stop at the database. The new rules were stored and nothing
+    rebuilt the config, so a scheduled refresh reached the datapath only when
+    some unrelated change next applied one -- a subscription could run a week
+    behind its own schedule without saying so. It also stored whatever arrived,
+    and for a fetch that got an error page or an empty body that meant routing
+    silently lost the whole list.
+
+    Now an empty result is refused and the previous rules are kept, stored
+    rules are replaced only when they differ, and the config is rebuilt once,
+    at the end, only if something changed: rebuilding restarts xray and drops
+    every connection in the house, which a refresh that changed nothing has no
+    business doing.
+    """
+    import main as _main  # deferred
+
+    changed, unchanged, errors = [], 0, []
+    outcome: dict[str, tuple[Optional[str], Optional[str]]] = {}
     for sub in settings.get("subscriptions", []):
         if not sub.get("enabled"):
             continue
+        name = sub.get("name", "?")
         try:
             text = fetch_subscription(sub["url"])
             rules, errs = parse_subscription_content(text, sub.get("type", "direct"))
-            _db.replace_subscription_rules(sub["id"], rules)
-            updated += 1
         except Exception as e:
-            errors.append(f"{sub.get('name','?')}: {e}")
+            errors.append(f"{name}: {e}")
+            outcome[sub["id"]] = (None, str(e)[:200])
+            continue
+        if not rules:
+            why = "empty result, previous rules kept" + (f": {errs[0]}" if errs else "")
+            errors.append(f"{name}: {why}")
+            outcome[sub["id"]] = (None, why[:200])
+            continue
+        if set(rules) != set(_db.get_subscription_rules(sub["id"])):
+            _db.replace_subscription_rules(sub["id"], rules)
+            changed.append(name)
+        else:
+            unchanged += 1
+        outcome[sub["id"]] = (datetime.now(timezone.utc).isoformat(), None)
+
+    fresh = _main.load_settings()
+    for sub in fresh.get("subscriptions", []):
+        if sub.get("id") in outcome:
+            done, err = outcome[sub["id"]]
+            if done:
+                sub["last_update"] = done
+            sub["last_error"] = err
+    _main.save_settings(fresh)
+
+    detail = "changed: %s; unchanged: %d" % (", ".join(changed) or "—", unchanged)
+    if changed:
+        ok, err = _main.apply_config(fresh, "subscription_update")
+        if not ok:
+            errors.append("apply failed: " + (err or "?"))
     if errors:
-        return "error", f"updated {updated}, errors: {'; '.join(errors[:3])}"
-    return "ok", f"updated {updated} subscriptions"
+        return "error", detail + "; errors: " + "; ".join(errors[:3])
+    return "ok", detail
 
 
 def _task_health_check() -> tuple[str, str]:

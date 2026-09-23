@@ -196,9 +196,17 @@ class TestSubscriptionParsing:
         assert "tracker.bad.com" in rules
 
     def test_ip_cidr_accepted(self):
+        # Both, not either: a network line used to be rejected outright because
+        # "/" was not a character the line pattern allowed, and the single
+        # address on the next line hid that.
         text = "1.2.3.0/24\n5.6.7.8\n"
         rules, errors = _ft.parse_subscription_content(text, "block")
-        assert "1.2.3.0/24" in rules or "5.6.7.8" in rules
+        assert "1.2.3.0/24" in rules and "5.6.7.8" in rules
+        assert errors == []
+
+    def test_ipv6_network_accepted(self):
+        rules, errors = _ft.parse_subscription_content("2001:db8::/32\n", "vpn")
+        assert rules == ["2001:db8::/32"] and errors == []
 
     def test_comments_skipped(self):
         text = "# This is a comment\n! adblock comment\nexample.com\n"
@@ -216,6 +224,104 @@ class TestSubscriptionParsing:
         rules, errors = _ft.parse_subscription_content(text, "block")
         assert "valid.com" in rules
         assert not any("not!valid" in r for r in rules)
+
+
+class TestPublishedIpRanges:
+    AWS = json.dumps({
+        "syncToken": "1", "createDate": "2026-09-23-18-47-06",
+        "prefixes": [
+            {"ip_prefix": "3.0.0.0/15", "region": "x", "service": "AMAZON"},
+            {"ip_prefix": "3.0.5.0/24", "region": "x", "service": "EC2"},      # inside the /15
+            {"ip_prefix": "3.2.0.0/15", "region": "x", "service": "AMAZON"},   # adjacent: folds to /14
+            {"ip_prefix": "52.95.0.0/16", "region": "x", "service": "S3"},
+        ],
+        "ipv6_prefixes": [{"ipv6_prefix": "2600:1f00::/24", "service": "AMAZON"}],
+    })
+
+    def test_aws_document_is_collapsed(self):
+        rules, errors = _ft.parse_subscription_content(self.AWS, "vpn")
+        assert rules == ["3.0.0.0/14", "52.95.0.0/16", "2600:1f00::/24"]
+        assert errors == []
+
+    def test_google_document(self):
+        doc = json.dumps({"prefixes": [{"ipv4Prefix": "8.8.4.0/24"},
+                                       {"ipv6Prefix": "2001:4860::/32"}]})
+        rules, errors = _ft.parse_subscription_content(doc, "vpn")
+        assert rules == ["8.8.4.0/24", "2001:4860::/32"]
+
+    def test_bad_prefix_reported_rest_kept(self):
+        doc = json.dumps({"prefixes": [{"ip_prefix": "10.0.0.0/8"}, {"ip_prefix": "nonsense"}]})
+        rules, errors = _ft.parse_subscription_content(doc, "vpn")
+        assert rules == ["10.0.0.0/8"] and any("nonsense" in e for e in errors)
+
+    def test_other_json_is_refused_not_line_parsed(self):
+        rules, errors = _ft.parse_subscription_content('{"hello": "world"}', "vpn")
+        assert rules == [] and errors == ["JSON document is not a published IP-range list"]
+
+    def test_document_without_prefixes(self):
+        rules, errors = _ft.parse_subscription_content('{"prefixes": []}', "vpn")
+        assert rules == [] and errors
+
+    def test_plain_list_unaffected(self):
+        rules, _ = _ft.parse_subscription_content("example.com\n10.0.0.0/8\n", "vpn")
+        assert rules == ["example.com", "10.0.0.0/8"]
+
+
+class TestScheduledSubscriptionUpdate:
+    """The scheduled refresh: reach xray when something changed, never otherwise."""
+
+    SID = "sub-aws-test"
+
+    def _settings(self):
+        s = _s(subscriptions=[{"id": self.SID, "name": "AWS", "type": "vpn", "enabled": True,
+                               "url": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+                               "last_update": None, "last_error": None}])
+        m.save_settings(s)
+        return s
+
+    def _run(self, body=None, exc=None):
+        fetch = MagicMock(side_effect=exc) if exc else MagicMock(return_value=body)
+        apply = MagicMock(return_value=(True, ""))
+        with patch.object(_ft, "fetch_subscription", fetch), patch.object(m, "apply_config", apply):
+            result = _ft._task_sub_update(m.load_settings())
+        sub = next(x for x in m.load_settings()["subscriptions"] if x["id"] == self.SID)
+        return result, apply, sub
+
+    def setup_method(self):
+        _db.delete_subscription_rules(self.SID)
+        self._settings()
+
+    def test_change_is_stored_and_applied_once(self):
+        (res, detail), apply, sub = self._run(TestPublishedIpRanges.AWS)
+        assert res == "ok" and "AWS" in detail
+        assert sorted(_db.get_subscription_rules(self.SID)) == sorted(
+            ["3.0.0.0/14", "52.95.0.0/16", "2600:1f00::/24"])
+        apply.assert_called_once()
+        assert sub["last_update"] and sub["last_error"] is None
+
+    def test_unchanged_refresh_does_not_restart_the_datapath(self):
+        self._run(TestPublishedIpRanges.AWS)
+        (res, _), apply, sub = self._run(TestPublishedIpRanges.AWS)
+        assert res == "ok"
+        apply.assert_not_called()
+        assert sub["last_update"]
+
+    def test_empty_result_keeps_previous_rules(self):
+        self._run(TestPublishedIpRanges.AWS)
+        before = sorted(_db.get_subscription_rules(self.SID))
+        (res, detail), apply, sub = self._run("<html>503 Service Unavailable</html>")
+        assert res == "error"
+        assert sorted(_db.get_subscription_rules(self.SID)) == before
+        apply.assert_not_called()
+        assert "previous rules kept" in sub["last_error"]
+
+    def test_fetch_failure_is_recorded(self):
+        self._run(TestPublishedIpRanges.AWS)
+        (res, _), apply, sub = self._run(exc=OSError("timed out"))
+        assert res == "error"
+        assert _db.get_subscription_rules(self.SID)
+        apply.assert_not_called()
+        assert "timed out" in sub["last_error"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

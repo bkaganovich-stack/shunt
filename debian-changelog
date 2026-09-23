@@ -1,3 +1,24 @@
+shunt (2.22.1) stable; urgency=medium
+
+  * Subscribe to a cloud provider's address space. A subscription URL may now
+    point at a published IP-range document -- AWS ip-ranges.json or Google's
+    goog.json -- and its networks are collapsed and routed like any list.
+    The direct path to Amazon's networks is throttled or cut here: of 54
+    destinations measured broken direct and working through the tunnel, 32
+    were on AWS, none of them in any blocklist.
+  * Plain subscription lists accept networks. "1.2.3.0/24" was rejected by the
+    line pattern, which had no room for a "/", and a test that asked for the
+    network OR the single address beside it let that pass.
+  * The scheduled subscription refresh now reaches the datapath. It stored the
+    new rules and never rebuilt the config, so a refresh took effect only when
+    something unrelated next applied one. It rebuilds once, only if a list
+    actually changed, and records each subscription's result.
+  * An empty result no longer replaces a working list. A fetch that got an
+    error page used to store nothing and take the whole subscription out of
+    routing; the previous rules are now kept and the failure is shown.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Wed, 23 Sep 2026 23:55:00 +0300
+
 shunt (2.22.0) stable; urgency=medium
 
   * Use a shared routing profile compiler for network, device and group rules.

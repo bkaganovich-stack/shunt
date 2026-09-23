@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.22.0"
+VERSION = "2.22.1"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -4228,6 +4228,18 @@ async def refresh_subscription(sid: str, u: str = Depends(auth_dep)):
                 x["last_error"] = str(e)[:200]
         save_settings(s2)
         return {"ok": False, "error": str(e)[:200]}
+
+    # An empty result is a failed fetch, not an empty list: storing it would
+    # take the whole subscription out of routing without a word. The scheduled
+    # refresh refuses it too.
+    if not rules:
+        why = "empty result, previous rules kept" + (f": {errs[0]}" if errs else "")
+        s2 = load_settings()
+        for x in s2.get("subscriptions", []):
+            if x["id"] == sid:
+                x["last_error"] = why[:200]
+        save_settings(s2)
+        return {"ok": False, "error": why[:200], "parse_errors": errs}
 
     # Apply
     _db.replace_subscription_rules(sid, rules)
