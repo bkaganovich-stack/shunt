@@ -1,3 +1,26 @@
+shunt (2.23.0) stable; urgency=medium
+
+  * Detect freezes from the household's own traffic. The direct path often
+    lets a connection start and then stops it for good after about 16 KB --
+    the page hangs -- and neither the blocklists nor the block probe can see
+    it: the status line arrives before the freeze, so the probe reads "200".
+    The gateway now follows xray's outgoing sockets from birth. A freeze
+    discards everything the server sends, acknowledgements included, so what
+    our side sends afterwards -- usually the FIN when the client gives up --
+    is never acknowledged. Three such connections to an address within a day
+    route it through the tunnel; after 14 days it goes back to direct to find
+    out whether it still freezes. A connection that died idle in the
+    provider's NAT ends the same way and is told apart by when its data
+    stopped: a freeze stops it in the first seconds. Found entries appear in
+    the discovered list marked as found in live traffic, can be switched off
+    one by one, and the config is rebuilt at most once per 30 minutes.
+  * The block probe no longer re-asks entries found in live traffic; it would
+    only ever read them as open and route them straight back into the freeze.
+  * "Routed through tunnel" counts addresses as well as names. It read 5 with
+    six entries in the tunnel.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Thu, 24 Sep 2026 01:30:00 +0300
+
 shunt (2.22.1) stable; urgency=medium
 
   * Subscribe to a cloud provider's address space. A subscription URL may now

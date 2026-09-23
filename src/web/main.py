@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.22.1"
+VERSION = "2.23.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -21,6 +21,7 @@ import inbound as _in
 import dnspath as _dns
 import geosite as _geo
 import blockprobe as _bp
+import freezewatch as _fw
 import profiles as _profiles
 
 import uvicorn
@@ -2330,6 +2331,83 @@ async def _analytics_loop() -> None:
             pass
         await _idle(60)
 
+def _wan_ipv4(settings: dict) -> str:
+    """The WAN port's IPv4 address, or "" when there is none to watch."""
+    wan = _ft._probe_paths(settings)[0]
+    if not wan:
+        return ""
+    r = subprocess.run(["ip", "-4", "-o", "addr", "show", wan],
+                       capture_output=True, text=True, timeout=5)
+    parts = r.stdout.split()
+    return parts[3].split("/")[0] if len(parts) > 3 else ""
+
+
+def _ss_outgoing(wan_ip: str) -> str:
+    """
+    xray's direct connections, selected by the fwmark it sets on them.
+
+    By mark rather than by `ss -p`: resolving owners walks every process's
+    file descriptors and doubled the cost of a sample, and an orphaned socket
+    -- where most of the evidence turns up -- has no owner left to name.
+    """
+    mark = _sockopt()["mark"]
+    r = subprocess.run(["ss", "-tniHa", f"src {wan_ip} and fwmark = {mark:#x}/0xffffffff"],
+                       capture_output=True, text=True, timeout=10)
+    return r.stdout
+
+
+async def _freeze_watch_loop() -> None:
+    """
+    Route addresses whose direct connections freeze. See freezewatch.py.
+
+    Samples every few seconds (freezewatch.SAMPLE_EVERY): a frozen connection
+    shows itself between the client giving up and the kernel giving up on the
+    FIN, which is minutes. Rebuilds the config at most once per `apply_every_min`,
+    since every rebuild restarts xray and drops every connection in the house --
+    a detector that did that on each find would be worse than the freezes.
+    """
+    await _idle(45)
+    loop = asyncio.get_event_loop()
+    tracker = _fw.Tracker()
+    wan_ip, wan_checked = "", 0.0
+    pending, last_apply, last_expire = False, 0.0, 0.0
+    while True:
+        try:
+            cfg = _fw.settings_of(load_settings())
+            if not cfg["enabled"]:
+                tracker = _fw.Tracker()
+                await _idle(30)
+                continue
+            now = time.time()
+            if now - wan_checked > 60:
+                wan_ip = await loop.run_in_executor(None, _wan_ipv4, load_settings())
+                wan_checked = now
+            if wan_ip:
+                text = await loop.run_in_executor(None, _ss_outgoing, wan_ip)
+                events = tracker.observe(_fw.parse_ss(text, owned=True), now)
+                if events:
+                    s = load_settings()
+                    s["discovered"], changed = _fw.record(s.get("discovered", []), events, cfg)
+                    save_settings(s)
+                    pending = pending or changed
+            if now - last_expire > 3600:
+                s = load_settings()
+                rows, changed = _fw.expire(s.get("discovered", []), cfg)
+                if changed:
+                    s["discovered"] = rows
+                    save_settings(s)
+                    pending = True
+                last_expire = now
+            if pending and now - last_apply >= float(cfg["apply_every_min"]) * 60:
+                ok, err = apply_config(load_settings(), "freeze_detector")
+                last_apply, pending = now, False
+                if not ok:
+                    fire_alert("scheduler_error", "freeze detector: apply failed: " + (err or "?"))
+        except Exception:
+            pass
+        await _idle(_fw.SAMPLE_EVERY)
+
+
 @app.on_event("startup")
 async def startup_event():
     _install_stop_hook()
@@ -2342,6 +2420,7 @@ async def startup_event():
     asyncio.create_task(_analytics_loop())
     asyncio.create_task(_metrics_loop())
     asyncio.create_task(_egress_fallback_loop())
+    asyncio.create_task(_freeze_watch_loop())
 
 # ── Pydantic Models ────────────────────────────────────────────────────────────
 class LoginReq(BaseModel):        username: str; password: str
@@ -3173,7 +3252,10 @@ async def get_discovered(u: str = Depends(auth_dep)):
     task = next((t for t in s.get("scheduler_tasks", [])
                  if t.get("type") == "block_probe"), None)
     return {"rows": rows,
-            "routed": len(_discovered_domains(s)),
+            # Names and addresses both: an address routed on the evidence of a
+            # probe or of live traffic is in the tunnel just the same, and a
+            # count of names alone read "5" with six entries routed.
+            "routed": len(_bp.routed(s.get("discovered", []))),
             "probe": s.get("probe", {}),
             "schedule": (task or {}).get("schedule"),
             "last_run": (task or {}).get("last_run_ts")}

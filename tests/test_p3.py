@@ -543,3 +543,16 @@ class TestXrayConfigP3:
         import main as m2
         parts = m2.VERSION.split(".")
         assert len(parts) == 3 and all(x.isdigit() for x in parts), m2.VERSION
+
+
+class TestDiscoveredCount:
+    def test_routed_count_includes_addresses(self):
+        # It counted names only, so the interface read "5" with six entries in
+        # the tunnel -- and live-detected entries are all addresses.
+        import asyncio
+        m.save_settings(_s(discovered=[
+            {"domain": "example.org", "routed": True, "enabled": True},
+            {"domain": "93.184.216.34", "routed": True, "enabled": True, "source": "live"},
+            {"domain": "example.net", "routed": False, "enabled": True},
+            {"domain": "93.184.216.35", "routed": True, "enabled": False}]))
+        assert asyncio.run(m.get_discovered(u="t"))["routed"] == 2

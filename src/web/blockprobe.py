@@ -273,7 +273,11 @@ def probe_set(hosts: list[str], known: list[dict], limit: int = 40) -> list[str]
     reserve = max(1, limit // 3)
     # By what asking again can change, and within a band oldest first, so a long
     # record is covered over several runs rather than the same head every time.
-    ranked = sorted((d for d in known if d.get("enabled", True)),
+    # Entries found by the freeze detector are left out. They are routed on
+    # evidence this probe cannot see -- a frozen site answers "200" here -- so
+    # asking would only ever un-route them. They go back to direct on their own
+    # schedule instead (freezewatch.expire).
+    ranked = sorted((d for d in known if d.get("enabled", True) and d.get("source") != "live"),
                     key=lambda d: (recheck_rank(d), d.get("last_checked", 0)))
     # Parked entries are held out of the claim on the budget entirely rather
     # than merely sorted last. A record that is nothing BUT parked entries --
