@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.23.0"
+VERSION = "2.23.1"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -2342,6 +2342,21 @@ def _wan_ipv4(settings: dict) -> str:
     return parts[3].split("/")[0] if len(parts) > 3 else ""
 
 
+def _tunnel_answers(ip: str, socks: str) -> bool:
+    """
+    Whether `ip` answers on 443 through the tunnel at all.
+
+    Any reply counts -- an HTTP status, a TLS alert, a certificate that does not
+    match a bare address. Only silence (a timeout) or no connection means no.
+    """
+    if not socks:
+        return False
+    r = subprocess.run(["curl", "-sk", "-m", "8", "--socks5", socks, "-o", "/dev/null",
+                        "-w", "%{http_code}", f"https://{ip}/"],
+                       capture_output=True, text=True, timeout=15)
+    return (r.stdout.strip() not in ("", "000")) or r.returncode in (35, 51, 58, 60)
+
+
 def _ss_outgoing(wan_ip: str) -> str:
     """
     xray's direct connections, selected by the fwmark it sets on them.
@@ -2388,6 +2403,15 @@ async def _freeze_watch_loop() -> None:
                 if events:
                     s = load_settings()
                     s["discovered"], changed = _fw.record(s.get("discovered", []), events, cfg)
+                    save_settings(s)
+                    pending = pending or changed
+            waiting = _fw.pending(load_settings().get("discovered", []))
+            if waiting:
+                socks = _ft._probe_paths(load_settings())[1]
+                for ip in waiting[:5]:
+                    ok = await loop.run_in_executor(None, _tunnel_answers, ip, socks)
+                    s = load_settings()
+                    s["discovered"], changed = _fw.confirm(s.get("discovered", []), ip, ok)
                     save_settings(s)
                     pending = pending or changed
             if now - last_expire > 3600:

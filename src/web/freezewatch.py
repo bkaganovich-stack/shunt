@@ -39,6 +39,12 @@ import time
 SAMPLE_EVERY = 5.0      # seconds between samples
 STALL_WITHIN = 30.0     # the data must stop this early in a socket's life
 HANDSHAKE_BYTES = 8192  # below this the cut came before any real answer
+# TLS only. The freeze is applied to TLS connections, and on 2026-09-24 the
+# first day of the detector showed why the port matters: something in the
+# house was knocking on 22, 21, 179 and 554 across hosting networks, and
+# those attempts end the same way while having nothing to do with a page
+# that hangs.
+PORTS = ("443",)
 
 DEFAULTS = {
     "enabled": True,
@@ -126,7 +132,7 @@ class Tracker:
             if k in self.preexisting or s["state"] == "SYN-SENT":
                 continue
             if k not in self.born:
-                if not s["xray"]:
+                if not s["xray"] or s["port"] not in PORTS:
                     continue
                 self.born[k] = now
             self.peak[k] = max(self.peak.get(k, 0), s["rcv"])
@@ -205,11 +211,57 @@ def record(known: list[dict], events: list[dict], cfg: dict,
         row["last_checked"] = now
         row["direct"] = _describe(row)
         row["tunnel"] = "по живому трафику"
+        if ev["stage"] == "freeze":
+            row["answered"] = True
         if (not row.get("routed") and row.get("enabled", True)
+                and row.get("check") != "pending"
                 and len(row["events"]) >= int(cfg["min_events"])):
-            row["routed"] = True
-            row["routed_since"] = now
+            if row.get("answered"):
+                _route(row, now)
+                changed = True
+            else:
+                # Nothing ever came back, so a freeze cannot be told from an
+                # address that is simply dead or closed to everyone. The loop
+                # asks through the tunnel before anything is routed.
+                row["check"] = "pending"
+    return rows, changed
+
+
+def _route(row: dict, now: int) -> None:
+    row["routed"] = True
+    row["routed_since"] = now
+    row.pop("check", None)
+
+
+def pending(known: list[dict]) -> list[str]:
+    """Addresses waiting to be asked through the tunnel."""
+    return [r["domain"] for r in known if r.get("source") == "live" and r.get("check") == "pending"]
+
+
+def confirm(known: list[dict], ip: str, answers: bool,
+            now: float | None = None) -> tuple[list[dict], bool]:
+    """
+    Settle a pending address with what the tunnel said.
+
+    Routed only if it answers there: moving a dead address into the tunnel
+    fixes nothing and costs a rebuild. One that answers nowhere is recorded
+    as such and starts again from no evidence.
+    """
+    now = int(now if now is not None else time.time())
+    rows = [dict(r) for r in known]
+    changed = False
+    for r in rows:
+        if r.get("domain") != ip or r.get("check") != "pending":
+            continue
+        if answers and r.get("enabled", True):
+            _route(r, now)
+            r["tunnel"] = "по живому трафику; через туннель отвечает"
             changed = True
+        else:
+            r["check"] = "dead"
+            r["events"] = []
+            r["last_checked"] = now
+            r["tunnel"] = "не отвечает и через туннель"
     return rows, changed
 
 
@@ -224,6 +276,7 @@ def expire(known: list[dict], cfg: dict, now: float | None = None) -> tuple[list
     """
     now = int(now if now is not None else time.time())
     ttl = int(cfg["ttl_days"]) * 86400
+    window = int(cfg["window_hours"]) * 3600
     rows = [dict(r) for r in known]
     changed = False
     for r in rows:
@@ -231,5 +284,16 @@ def expire(known: list[dict], cfg: dict, now: float | None = None) -> tuple[list
             r["routed"] = False
             r["events"] = []
             r["direct"] = "срок истёк — снова напрямую, на проверку"
+            r["last_checked"] = now
             changed = True
-    return rows, changed
+    # Unrouted live entries whose evidence has aged out are dropped. On the
+    # first day most finds were a single event that never recurred, and a
+    # record that only grows is one nobody reads.
+    keep = []
+    for r in rows:
+        stale = (r.get("source") == "live" and not r.get("routed") and r.get("enabled", True)
+                 and r.get("check") != "pending"
+                 and now - int(r.get("last_checked", 0)) > window)
+        if not stale:
+            keep.append(r)
+    return keep, changed

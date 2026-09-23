@@ -196,3 +196,56 @@ class TestOwnedListing:
                                 (30, ss(sock(40001, owner=None, state="FIN-WAIT-1", rcv=20000,
                                              unacked=1, backoff=2, lastrcv=20000)))])
         assert ev == []            # parsed without owned=True: nobody's socket, ignored
+
+
+class TestOnlyTls:
+    def test_other_ports_are_not_judged(self):
+        # 22, 21, 179, 554: a scanner in the house, not a page that hangs.
+        ev = run(fw.Tracker(), [
+            (0, ss()),
+            (10, ss(sock(40001, remote="93.184.216.34:22", rcv=0))),
+            (20, ss(sock(40001, remote="93.184.216.34:22", rcv=0, unacked=1, backoff=3))),
+        ])
+        assert ev == []
+
+
+def hs_events(ip, *times):
+    return [{"ip": ip, "port": "443", "rcv": 0, "at": t, "stage": "handshake"} for t in times]
+
+
+class TestSilentAddresses:
+    def test_silent_address_waits_for_the_tunnel(self):
+        rows, changed = fw.record([], hs_events("93.184.216.34", 1, 2, 3), CFG, now=3)
+        assert not changed and not rows[0]["routed"] and fw.pending(rows) == ["93.184.216.34"]
+
+    def test_answers_through_tunnel_is_routed(self):
+        rows, _ = fw.record([], hs_events("93.184.216.34", 1, 2, 3), CFG, now=3)
+        rows, changed = fw.confirm(rows, "93.184.216.34", True, now=10)
+        assert changed and rows[0]["routed"] and fw.pending(rows) == []
+
+    def test_dead_everywhere_stays_direct(self):
+        rows, _ = fw.record([], hs_events("93.184.216.34", 1, 2, 3), CFG, now=3)
+        rows, changed = fw.confirm(rows, "93.184.216.34", False, now=10)
+        assert not changed and not rows[0]["routed"] and rows[0]["check"] == "dead"
+        assert rows[0]["events"] == [] and fw.pending(rows) == []
+
+    def test_one_real_answer_is_enough_to_skip_the_check(self):
+        evs = hs_events("93.184.216.34", 1, 2) + events("93.184.216.34", 3)
+        rows, changed = fw.record([], evs, CFG, now=3)
+        assert changed and rows[0]["routed"]
+
+
+class TestPrune:
+    def test_single_find_that_never_recurred_is_dropped(self):
+        rows, _ = fw.record([], events("93.184.216.34", 100), CFG, now=100)
+        kept, _ = fw.expire(rows, CFG, now=100 + 3600)
+        assert len(kept) == 1
+        kept, _ = fw.expire(rows, CFG, now=100 + 25 * 3600)
+        assert kept == []
+
+    def test_routed_and_switched_off_entries_are_kept(self):
+        rows, _ = fw.record([], events("93.184.216.34", 1, 2, 3), CFG, now=3)
+        rows.append({"domain": "93.184.216.35", "source": "live", "enabled": False, "routed": False,
+                     "events": [1], "last_checked": 1})
+        kept, _ = fw.expire(rows, CFG, now=3 + 2 * 86400)
+        assert [r["domain"] for r in kept] == ["93.184.216.34", "93.184.216.35"]
