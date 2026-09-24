@@ -2,7 +2,7 @@
 """Shunt — web management interface."""
 
 import asyncio, base64, fcntl, hashlib, hmac, io, ipaddress, json, os, pty
-import re, secrets, shutil, signal, socket, struct, subprocess, tarfile, termios, time
+import re, secrets, shutil, signal, socket, struct, subprocess, tarfile, tempfile, termios, time
 import urllib.parse, urllib.request
 import uuid as _uuid_mod
 from datetime import datetime, timezone
@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.23.1"
+VERSION = "2.24.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -884,7 +884,20 @@ def _discovered_addresses(settings: dict) -> list[str]:
     client that dials one never sent a name for xray to record. Telegram is
     the case that made this necessary rather than tidy.
     """
-    return _bp.routed_addresses(settings.get("discovered", []))
+    return _bp.routed_addresses([r for r in settings.get("discovered", [])
+                                 if r.get("source") != "live"])
+
+
+def _live_addresses(settings: dict) -> list[str]:
+    """
+    Addresses the freeze detector routed. Kept in a rule of their own, last
+    before the catch-all, so they can be replaced in the running xray without a
+    restart (see _hot_update_live). The position loses nothing: the detector
+    only ever sees traffic that fell through to the catch-all -- anything an
+    earlier rule already sent to the tunnel never froze on the direct path.
+    """
+    return _bp.routed_addresses([r for r in settings.get("discovered", [])
+                                 if r.get("source") == "live"])
 
 
 def _profile_rules(settings, ident, final):
@@ -928,6 +941,8 @@ def _profile_rules(settings, ident, final):
         rules.extend(dict(r, _reason="shared-edge") for r in _shared_edge_rules())
         add("ip", ip_lists, final, "geoip_database")
     rules.append({"type": "field", "network": "tcp", "port": "5228", "outboundTag": "direct", "_reason": "push-notifications"})
+    if config["use_discovered"]:
+        add("ip", _live_addresses(settings), final, "freeze:live")
     add("network", "tcp,udp", final if config["default_route"] == "tunnel" else "direct", "catch-all")
     return rules
 
@@ -948,6 +963,22 @@ def _compiled_rules(settings, final, proxy_server_ip=None):
     rules.extend(_ft.build_group_policy_rules(settings, final))
     rules.extend(_build_subscription_rules(settings, final))
     rules.extend(_profile_rules(settings, profile, final))
+    return _tag_tail(rules)
+
+
+# The two rules the running xray can have replaced without a restart. Only the
+# global ones are tagged: device and group policies reuse the profile compiler
+# with a source condition, and a tag shared with them would make a removal by
+# tag take their rules out too.
+LIVE_TAG, CATCH_TAG = "freeze-live", "catch-all"
+XRAY_API = "127.0.0.1:10085"
+
+
+def _tag_tail(rules: list[dict]) -> list[dict]:
+    if rules and rules[-1].get("_reason") == "catch-all" and "source" not in rules[-1]:
+        rules[-1] = dict(rules[-1], ruleTag=CATCH_TAG)
+        if len(rules) > 1 and rules[-2].get("_reason") == "freeze:live" and "source" not in rules[-2]:
+            rules[-2] = dict(rules[-2], ruleTag=LIVE_TAG)
     return rules
 
 
@@ -1004,6 +1035,10 @@ def build_xray_config(settings: dict) -> dict:
         }],
         "outbounds": outbounds,
         "routing": {"domainStrategy": "IPIfNonMatch", "rules": rules},
+        # Routing service only, on loopback: lets the freeze detector swap its
+        # rule into the running xray instead of restarting it, which drops
+        # every connection in the house. No stats service -- see below.
+        "api": {"tag": "api", "listen": XRAY_API, "services": ["RoutingService"]},
         # stats/policy removed: per-connection goroutine counters leaked file descriptors,
         # causing "accept4: too many open files" after 3 days of operation (65535 FD exhaustion).
     }
@@ -2357,6 +2392,81 @@ def _tunnel_answers(ip: str, socks: str) -> bool:
     return (r.stdout.strip() not in ("", "000")) or r.returncode in (35, 51, 58, 60)
 
 
+def _xray_api(command: str, *args: str) -> subprocess.CompletedProcess:
+    """
+    One call to the running xray's API. The CLI builds the rules itself before
+    sending them, so it has to be told where the geo files are -- without that
+    it looks beside its own binary and fails on the first geosite reference.
+    """
+    return subprocess.run([str(BASE / "bin" / "xray"), "api", command, "-s", XRAY_API, "-t", "20", *args],
+                          capture_output=True, text=True, timeout=40,
+                          env=dict(os.environ, XRAY_LOCATION_ASSET=str(CFG_DIR)))
+
+
+def _split_tail(rules: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(everything else, the replaceable pair) -- by ruleTag, whatever suffix it carries."""
+    is_tail = lambda r: str(r.get("ruleTag", "")).startswith((LIVE_TAG, CATCH_TAG))
+    return [r for r in rules if not is_tail(r)], [r for r in rules if is_tail(r)]
+
+
+def _hot_update_live(settings: dict) -> tuple[bool, str]:
+    """
+    Put the freeze detector's current addresses into the running xray without
+    restarting it. Returns (done, detail); when not done, nothing was touched
+    and the change waits for the next ordinary apply, which builds the same rule.
+
+    A whole-config swap through the API is impossible: the CLI expands every
+    geo list into the message, and the gateway's rules came to 65.8 MB against
+    gRPC's 4 MB. So only the tail is replaced -- the live rule and the catch-all
+    after it -- in an order that is never without a catch-all: the new pair is
+    appended first, where the old catch-all still shadows it, and the old pair
+    is removed after. Measured on a copy of the live rules: 0.5 s, and a
+    download running through the swap finished intact.
+
+    Refused unless the only difference between the running config and the new
+    one is that pair: anything else (a device policy carrying its own copy of
+    the rule, an edit made meanwhile) needs a full apply, and this path must
+    never leave the file on disk and the running xray disagreeing.
+    """
+    new = build_xray_config(settings)
+    try:
+        cur = json.loads(XCFG.read_text())
+    except (OSError, ValueError):
+        return False, "no current config"
+    if (cur.get("api") or {}).get("listen") != XRAY_API:
+        return False, "the running config has no API yet"
+    body = lambda c: dict(c, routing=dict(c["routing"], rules=_split_tail(c["routing"]["rules"])[0]))
+    if body(new) != body(cur):
+        return False, "other changes are pending; they need a full apply"
+    new_tail = _split_tail(new["routing"]["rules"])[1]
+    if new_tail == _split_tail(cur["routing"]["rules"])[1]:
+        return True, "unchanged"
+    ls = _xray_api("lsrules")
+    if ls.returncode != 0:
+        return False, "API unavailable: " + (ls.stderr or ls.stdout).strip()[:120]
+    running = sorted(set(re.findall(r"(?:%s|%s)[\w.-]*" % (LIVE_TAG, CATCH_TAG), ls.stdout)))
+    if not any(t.startswith(CATCH_TAG) for t in running):
+        return False, "the running xray has no tagged catch-all"
+    suffix = "-%d" % int(time.time() * 1000)
+    add = [dict(r, ruleTag=r["ruleTag"] + suffix) for r in new_tail]
+    fd, path = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({"routing": {"rules": add}}, f)
+        a = _xray_api("adrules", "-append", path)
+    finally:
+        os.unlink(path)
+    if a.returncode != 0:
+        return False, "adrules failed: " + (a.stderr or a.stdout).strip()[:120]
+    r = _xray_api("rmrules", *running)
+    if r.returncode != 0:
+        # Take the new pair back out: the old one is still in front and still deciding.
+        _xray_api("rmrules", *[x["ruleTag"] for x in add])
+        return False, "rmrules failed: " + (r.stderr or r.stdout).strip()[:120]
+    XCFG.write_text(json.dumps(new, indent=2))
+    return True, "replaced in the running xray: %d addresses" % len(_live_addresses(settings))
+
+
 def _ss_outgoing(wan_ip: str) -> str:
     """
     xray's direct connections, selected by the fwmark it sets on them.
@@ -2377,15 +2487,14 @@ async def _freeze_watch_loop() -> None:
 
     Samples every few seconds (freezewatch.SAMPLE_EVERY): a frozen connection
     shows itself between the client giving up and the kernel giving up on the
-    FIN, which is minutes. Rebuilds the config at most once per `apply_every_min`,
-    since every rebuild restarts xray and drops every connection in the house --
-    a detector that did that on each find would be worse than the freezes.
+    FIN, which is minutes. New finds go into the running xray without a
+    restart (_hot_update_live): a restart drops every connection in the house.
     """
     await _idle(45)
     loop = asyncio.get_event_loop()
     tracker = _fw.Tracker()
     wan_ip, wan_checked = "", 0.0
-    pending, last_apply, last_expire = False, 0.0, 0.0
+    pending, retry_at, last_expire = False, 0.0, 0.0
     while True:
         try:
             cfg = _fw.settings_of(load_settings())
@@ -2422,11 +2531,15 @@ async def _freeze_watch_loop() -> None:
                     save_settings(s)
                     pending = True
                 last_expire = now
-            if pending and now - last_apply >= float(cfg["apply_every_min"]) * 60:
-                ok, err = apply_config(load_settings(), "freeze_detector")
-                last_apply, pending = now, False
-                if not ok:
-                    fire_alert("scheduler_error", "freeze detector: apply failed: " + (err or "?"))
+            if pending and now >= retry_at:
+                # Never a restart from here: every restart drops every
+                # connection in the house, and on 2026-09-24 the detector's
+                # finds turned "at most once per 30 minutes" into nine drops
+                # in one morning. What cannot go in live waits for the next
+                # ordinary apply, which compiles the same rule.
+                done, detail = await loop.run_in_executor(None, _hot_update_live, load_settings())
+                pending = not done
+                retry_at = now + (60 if done else 600)
         except Exception:
             pass
         await _idle(_fw.SAMPLE_EVERY)

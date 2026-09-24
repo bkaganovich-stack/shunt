@@ -1,3 +1,25 @@
+shunt (2.24.0) stable; urgency=medium
+
+  * The freeze detector no longer restarts xray. Its finds went in through a
+    full rebuild, and a rebuild restarts xray and drops every connection in
+    the house; at "at most once per 30 minutes" the finds of one night came
+    to nine drops by morning, one of them in the middle of music playing.
+    xray now runs its routing API on loopback, and the detector's addresses
+    live in one rule right before the catch-all. A change replaces that pair
+    in the running xray: the new pair is appended while the old catch-all
+    still shadows it, then the old pair is removed. Measured on a copy of
+    the gateway's rules: half a second, and a download running through the
+    swap finished intact. The position loses nothing -- the detector only
+    sees traffic that fell through to the catch-all.
+  * A whole-config swap through the API is not possible and is not
+    attempted: the CLI expands every geo list into the message, 65.8 MB for
+    this gateway against gRPC's 4 MB.
+  * Anything that cannot go in live -- a device policy carrying its own copy
+    of the rule, another change made meanwhile -- waits for the next ordinary
+    apply, which compiles the same rule. Nothing on this path restarts.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Thu, 24 Sep 2026 14:30:00 +0300
+
 shunt (2.23.1) stable; urgency=medium
 
   * The freeze detector judges TLS connections only. Its first day turned up

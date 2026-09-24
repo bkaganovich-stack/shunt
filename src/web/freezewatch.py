@@ -51,7 +51,6 @@ DEFAULTS = {
     "min_events": 3,        # frozen connections to one address before it is routed
     "window_hours": 24,     # ...within this long
     "ttl_days": 14,         # then back to direct, to find out whether it still freezes
-    "apply_every_min": 30,  # at most one rebuild per this long: each one drops every connection
 }
 
 # States in which our side has closed. An unacknowledged FIN there is the most
