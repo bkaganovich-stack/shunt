@@ -37,6 +37,7 @@ ATTENTION = BASE / "logs" / "attention.json"
 NET_CONF = BASE / "config" / "network.conf"
 
 REMEDY = "restart-adguard"
+OWN_KINDS = ("egress", "uplink")
 MAX_ATTEMPTS = 3
 WINDOW_SEC = 1800
 
@@ -131,7 +132,10 @@ def main() -> int:
             log("выход снова работает — счётчик попыток сброшен")
         dg.clear_remedy(state, REMEDY)
         save_state(state)
-        clear_attention("egress")
+        # Both of the watchdog's own concerns end here. Clearing only "egress"
+        # left a provider outage on the overview for days after it was over.
+        for kind in OWN_KINDS:
+            clear_attention(kind)
         return 0
 
     allowed, why = dg.remedy_allowed(state, REMEDY, d,
@@ -141,11 +145,15 @@ def main() -> int:
         # The two reasons read very differently to a person, and both are more
         # useful than another restart.
         log("НЕ перезапускаю adguardvpn: %s | состояние: %s" % (why, d["summary"]))
+        # The diagnosis can move from one side to the other mid-outage; the
+        # concern it no longer supports goes, so only the current one shows.
         if d.get("fixable_here"):
+            clear_attention("uplink")
             attention("egress",
                       "Туннель не поднимается: %s" % d["summary"],
                       "Автоматические перезапуски прекращены — %s" % why)
         else:
+            clear_attention("egress")
             attention("uplink",
                       "Связь нарушена выше туннеля: %s" % d["summary"],
                       "Это не чинится на шлюзе (%s). Перезапуск туннеля "
