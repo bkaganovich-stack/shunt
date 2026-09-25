@@ -4913,7 +4913,9 @@ async function loadFptn() {
   const sel = document.getElementById('fptn-server');
   if (sel && d.servers) {
     sel.innerHTML = '';
-    const groups = [['regular', 'Обычные'], ['premium', 'Премиальные'], ['restricted', 'С ограниченным доступом']];
+    // The list comes from the token itself; the built-in one is only a fallback.
+    const groups = [['premium', 'Премиальные'], ['regular', 'Обычные'], ['restricted', 'С ограниченным доступом']];
+    let found = false;
     groups.forEach(([key, label]) => {
       const list = d.servers[key] || [];
       if (!list.length) return;
@@ -4922,18 +4924,26 @@ async function loadFptn() {
       list.forEach(n => {
         const o = document.createElement('option');
         o.value = n;
-        o.textContent = n + (n === 'USA-1' ? ' — не подключается' : '');
-        if (n === d.server) o.selected = true;
+        o.textContent = n;
+        if (n === d.server) { o.selected = true; found = true; }
         g.appendChild(o);
       });
       sel.appendChild(g);
     });
+    if (d.server && !found) {
+      // A name the token no longer has: the client would pick any server instead.
+      const o = document.createElement('option');
+      o.value = ''; o.selected = true;
+      o.textContent = d.server + ' — нет в токене, выберите другой';
+      sel.insertBefore(o, sel.firstChild);
+    }
+    sel.title = d.servers_source === 'token' ? 'Список серверов из токена' : 'Токен не прочитан — встроенный список, может быть устаревшим';
   }
 }
 
 async function saveFptn(payload) {
   const r = await apiJ('POST', '/api/fptn', payload);
-  if (!r || !r.ok) { toast('Не удалось сохранить', true); return; }
+  if (!r || !r.ok) { toast('Не удалось сохранить', false); return; }
   toast(payload.enabled === false ? 'Резервный выход выключен'
       : payload.enabled === true ? 'Резервный выход включён' : 'Сохранено');
   loadFptn();
@@ -4993,7 +5003,7 @@ async function saveAgProtocol() {
 
 async function setAutoFallback(on) {
   const r = await apiJ('POST', '/api/auto-fallback', { enabled: on });
-  if (!r || !r.ok) { toast('Не удалось сохранить', true); return; }
+  if (!r || !r.ok) { toast('Не удалось сохранить', false); return; }
   if (r.restored_profile)
     toast('Автооткат выключен, профиль возвращён: ' + (PROFILE_LABELS[r.restored_profile] || r.restored_profile));
   else

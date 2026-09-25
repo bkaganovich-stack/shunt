@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.24.3"
+VERSION = "2.24.4"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -2841,9 +2841,10 @@ async def _egress_fallback_loop() -> None:
 
 # Server names as the FPTN client reports them. It matches --preferred-server
 # exactly and falls back to auto-selection in silence when a name is unknown, so
-# guessing region words like "usa" quietly lands you in Poland. The list is
-# transcribed from the vendor's own client; USA-1 has never once connected in
-# testing, which is why USA-2 is the default.
+# guessing region words like "usa" quietly lands you in Poland. This copy was
+# transcribed from the vendor's client and is only the fallback now: the token
+# carries the real list, and by Sep 25 this one had three servers that no longer
+# existed and was missing six, including two of the fastest.
 FPTN_SERVERS = {
     "premium": ["Norway-Premium", "Finland-Premium", "Czechia-Premium",
                 "Austria-Premium", "Poland-Premium", "France-Premium",
@@ -2861,6 +2862,45 @@ FPTN_SERVERS = {
     "restricted": ["Russia-Moscow"],
 }
 FPTN_SERVER_FILE = CFG_DIR / "fptn-server"
+
+
+def _decode_fptn_token(token: str) -> Optional[dict]:
+    """The token is "fptn:" + base64 JSON, or "fptnb:" + base64 of the same JSON
+    brotli-compressed. Python has no brotli here, but the system library does."""
+    prefix, _, body = token.strip().partition(":")
+    if not prefix.startswith("fptn") or not body:
+        return None
+    try:
+        raw = base64.b64decode(body + "=" * (-len(body) % 4))
+        if prefix == "fptnb":
+            import ctypes
+            lib = ctypes.CDLL("libbrotlidec.so.1")
+            out = ctypes.create_string_buffer(1 << 20)
+            size = ctypes.c_size_t(len(out))
+            if lib.BrotliDecoderDecompress(ctypes.c_size_t(len(raw)), raw,
+                                           ctypes.byref(size), out) != 1:
+                return None
+            raw = out.raw[:size.value]
+        data = json.loads(raw)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _fptn_servers() -> tuple[dict, str]:
+    """Selectable servers grouped for the page, and where the list came from.
+    Only names leave this function: the token also holds the login and password.
+    The censored-zone servers are left out -- the client refuses them by name."""
+    try:
+        data = _decode_fptn_token(FPTN_TOKEN.read_text())
+    except OSError:
+        data = None
+    names = [s.get("name") for s in (data or {}).get("servers") or []
+             if isinstance(s, dict) and isinstance(s.get("name"), str)]
+    if not names:
+        return FPTN_SERVERS, "builtin"
+    return {"premium": [n for n in names if "premium" in n.lower()],
+            "regular": [n for n in names if "premium" not in n.lower()]}, "token"
 # Renamed with everything else on Sep 5; the old name no longer resolves, so the
 # page read "inactive" and a server change never restarted the client.
 FPTN_UNIT = "shunt-fptn-egress"
@@ -2952,12 +2992,14 @@ async def get_fptn(u: str = Depends(auth_dep)):
             alive = out.decode().strip() == "204"
         except Exception:
             pass
+    servers, source = _fptn_servers()
     try:
         token_updated = int(FPTN_TOKEN.stat().st_mtime)
     except OSError:
         token_updated = None
     return {"enabled": bool(fp.get("enabled")), "server": current,
-            "service": svc, "alive": alive, "servers": FPTN_SERVERS,
+            "service": svc, "alive": alive, "servers": servers,
+            "servers_source": source,
             "token_updated": token_updated,
             "active": s.get("egress_active", "adguard") == "fptn"}
 
@@ -2967,7 +3009,7 @@ async def set_fptn(req: FptnReq, u: str = Depends(auth_dep)):
     s = load_settings()
     fp = dict(s.get("fptn") or {})
     if req.server is not None:
-        known = sum(FPTN_SERVERS.values(), [])
+        known = sum(_fptn_servers()[0].values(), [])
         if req.server not in known:
             raise HTTPException(400, "Unknown server name")
         FPTN_SERVER_FILE.write_text(req.server + "\n")

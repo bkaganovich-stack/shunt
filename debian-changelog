@@ -1,3 +1,21 @@
+shunt (2.24.4) stable; urgency=medium
+
+  * The FPTN server list on the page comes from the access token itself
+    instead of a copy written into the interface. By 25 September that copy
+    was missing six servers -- among them UnitedKingdom-Premium and
+    Ireland-Premium, two of the fastest -- and still offered three that no
+    longer existed; the client silently connects to any server when given
+    an unknown name. The token is read with the system brotli library, and
+    only server names reach the page. If the token cannot be read, the old
+    list is the fallback.
+  * A server saved earlier that the token no longer has is shown as such,
+    and a server change is only accepted for a name the token contains.
+  * Moscow-zone servers are no longer offered: the client refuses them by
+    name.
+  * A failed FPTN save is reported in red, not as a success.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sat, 26 Sep 2026 00:10:00 +0300
+
 shunt (2.24.3) stable; urgency=medium
 
   * The AdGuard location selector lists every location the client offers

@@ -6,6 +6,7 @@ import copy
 import os
 import stat
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src/web"))
@@ -39,7 +40,10 @@ def api(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "load_settings", lambda: copy.deepcopy(state))
     monkeypatch.setattr(m, "FPTN_TOKEN", tmp_path / "fptn-client" / "token")
     runs = []
-    monkeypatch.setattr(m.subprocess, "run", lambda args, **k: runs.append(args))
+    def run(args, **k):
+        runs.append(args)
+        return SimpleNamespace(stdout="inactive", stderr="", returncode=0)
+    monkeypatch.setattr(m.subprocess, "run", run)
     m.app.dependency_overrides[m.auth_dep] = lambda: "test"
     yield TestClient(m.app), state, runs
     m.app.dependency_overrides.clear()
@@ -72,3 +76,47 @@ class TestFptnToken:
         r = client.post("/api/fptn/token", json={"token": TOKEN})
         assert r.json() == {"ok": True, "restarted": False}
         assert runs == []
+
+
+def _plain_token(servers, censored=()):
+    import base64
+    import json
+    body = {"version": 1, "service_name": "FPTN.ONLINE", "username": "u-secret",
+            "password": "p-secret",
+            "servers": [{"name": n, "host": "192.0.2.%d" % i, "port": 443}
+                        for i, n in enumerate(servers, 1)],
+            "censored_zone_servers": [{"name": n, "host": "192.0.2.99", "port": 443}
+                                      for n in censored]}
+    return "fptn:" + base64.b64encode(json.dumps(body).encode()).decode()
+
+
+class TestFptnServersFromToken:
+    """25 September: the built-in list had lost six servers and kept three dead ones."""
+
+    def test_list_comes_from_the_token_without_credentials(self, api):
+        client, _, _ = api
+        m.FPTN_TOKEN.parent.mkdir()
+        m.FPTN_TOKEN.write_text(_plain_token(
+            ["Ireland-Premium", "Czechia-Premium", "USA-2"], ["Russia-Moscow"]) + "\n")
+        r = client.get("/api/fptn")
+        d = r.json()
+        assert d["servers_source"] == "token"
+        assert d["servers"] == {"premium": ["Ireland-Premium", "Czechia-Premium"],
+                                "regular": ["USA-2"]}
+        assert "secret" not in r.text and "192.0.2" not in r.text
+
+    def test_only_names_in_the_token_can_be_chosen(self, api, monkeypatch, tmp_path):
+        client, _, _ = api
+        monkeypatch.setattr(m, "FPTN_SERVER_FILE", tmp_path / "fptn-server")
+        m.FPTN_TOKEN.parent.mkdir()
+        m.FPTN_TOKEN.write_text(_plain_token(["Ireland-Premium"]))
+        assert client.post("/api/fptn", json={"server": "Austria-Premium"}).status_code == 400
+        assert client.post("/api/fptn", json={"server": "Ireland-Premium"}).status_code == 200
+        assert m.FPTN_SERVER_FILE.read_text().strip() == "Ireland-Premium"
+
+    def test_unreadable_token_falls_back_to_the_builtin_list(self, api):
+        client, _, _ = api
+        m.FPTN_TOKEN.parent.mkdir()
+        m.FPTN_TOKEN.write_text("fptnb:not-brotli-at-all\n")
+        d = client.get("/api/fptn").json()
+        assert d["servers_source"] == "builtin" and d["servers"] == m.FPTN_SERVERS
