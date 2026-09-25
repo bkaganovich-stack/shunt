@@ -1,3 +1,21 @@
+shunt (2.24.3) stable; urgency=medium
+
+  * The AdGuard location selector lists every location the client offers
+    (83 on 25 September), grouped by country with their pings, instead of
+    nine hand-picked ones. Atlanta -- the location that turned out fast
+    when the default server carried 0.1-0.6 Mbit/s -- was not among them.
+    The short list, now with Atlanta, stays as the fallback.
+  * Location names keep non-ASCII letters: "São Paulo" and "Chișinău" were
+    cut into names the client does not know.
+  * The egress watchdog notices a tunnel that works but barely carries
+    anything. While the tunnel is healthy it downloads 2 MB through it
+    every 15 minutes (about 190 MB a day); below 2 Mbit/s it checks again
+    a minute later against a different host, and two slow samples in a row
+    put "the tunnel works, but slowly" on the overview with the AdGuard
+    server in use. A fast sample clears it.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 25 Sep 2026 23:30:00 +0300
+
 shunt (2.24.2) stable; urgency=medium
 
   * The FPTN backup egress backs off when its server does not answer:

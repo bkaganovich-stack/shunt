@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.24.2"
+VERSION = "2.24.3"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
