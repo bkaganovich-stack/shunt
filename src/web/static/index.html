@@ -245,6 +245,8 @@ table.conn-table { width: 100%; border-collapse: collapse; font-size: 12px; tabl
 .info-row { display: flex; align-items: center; justify-content: space-between;
             padding: 10px 0; border-bottom: 1px solid var(--border); }
 .info-row:last-child { border-bottom: none; }
+/* the row above already draws the divider; a second one 16px lower read as a glitch */
+.info-row + .override-row { border-top: none; margin-top: 0; }
 .info-key { color: var(--muted); font-size: 12px; }
 .info-val { font-size: 13px; font-weight: 500; }
 input[type="file"] { display: none; }
@@ -3577,6 +3579,9 @@ async function loadVpnServers() {
   }
   const pq = document.getElementById('egress-ag-pq');
   if (pq && ag) pq.checked = !!ag.post_quantum;
+  const proto = document.getElementById('ag-protocol');
+  if (proto && ag && ag.protocol && proto.querySelector('option[value="' + ag.protocol + '"]'))
+    proto.value = ag.protocol;
   // ── Server list ──
   if (!r) return;
   const el = document.getElementById('vpn-servers-list');
@@ -4836,10 +4841,13 @@ async function loadFptn() {
   if (det) det.style.display = d.enabled ? '' : 'none';
   const svc = document.getElementById('fptn-service');
   if (svc) {
-    svc.textContent = d.service === 'active'
+    const up = d.service === 'active' && d.alive;
+    svc.textContent = up
       ? (d.active ? 'работает — трафик идёт через неё' : 'работает, в резерве')
+      : d.service === 'active' ? 'подключается…'
+      : d.service === 'activating' ? 'сервер не отвечает, повтор позже'
       : (d.service || 'остановлена');
-    svc.className = 'info-val monospace ' + (d.service === 'active' ? 'text-green' : 'text-muted');
+    svc.className = 'info-val monospace ' + (up ? 'text-green' : d.service === 'inactive' ? 'text-muted' : 'text-red');
   }
   const sel = document.getElementById('fptn-server');
   if (sel && d.servers) {

@@ -2861,6 +2861,9 @@ FPTN_SERVERS = {
     "restricted": ["Russia-Moscow"],
 }
 FPTN_SERVER_FILE = CFG_DIR / "fptn-server"
+# Renamed with everything else on Sep 5; the old name no longer resolves, so the
+# page read "inactive" and a server change never restarted the client.
+FPTN_UNIT = "shunt-fptn-egress"
 
 
 class SystemActionReq(BaseModel):
@@ -2927,10 +2930,26 @@ async def get_fptn(u: str = Depends(auth_dep)):
         current = FPTN_SERVER_FILE.read_text().strip()
     except Exception:
         current = "USA-2"
-    r = subprocess.run(["systemctl", "is-active", "fptn-egress"],
+    r = subprocess.run(["systemctl", "is-active", FPTN_UNIT],
                        capture_output=True, text=True)
+    svc = r.stdout.strip()
+    # "active" only says the client process is up; while its server refuses the
+    # login it is up for ~45 s at a time and carries nothing. A short look through
+    # the bridge tells the two apart.
+    alive = False
+    if svc == "active":
+        sock = "%s:%s" % (fp.get("socks_host", "192.168.244.2"), fp.get("socks_port", 1082))
+        try:
+            p = await asyncio.create_subprocess_exec(
+                "curl", "-s", "-o", "/dev/null", "-m", "4", "-w", "%{http_code}",
+                "--socks5", sock, "http://cp.cloudflare.com/generate_204",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            out, _ = await p.communicate()
+            alive = out.decode().strip() == "204"
+        except Exception:
+            pass
     return {"enabled": bool(fp.get("enabled")), "server": current,
-            "service": r.stdout.strip(), "servers": FPTN_SERVERS,
+            "service": svc, "alive": alive, "servers": FPTN_SERVERS,
             "active": s.get("egress_active", "adguard") == "fptn"}
 
 
@@ -2951,12 +2970,12 @@ async def set_fptn(req: FptnReq, u: str = Depends(auth_dep)):
     save_settings(s)
     # enable/disable and (re)start so a new server name takes effect
     if fp.get("enabled"):
-        subprocess.run(["systemctl", "enable", "--now", "fptn-egress"],
+        subprocess.run(["systemctl", "enable", "--now", FPTN_UNIT],
                        capture_output=True)
         if req.server is not None:
-            subprocess.run(["systemctl", "restart", "fptn-egress"], capture_output=True)
+            subprocess.run(["systemctl", "restart", FPTN_UNIT], capture_output=True)
     else:
-        subprocess.run(["systemctl", "disable", "--now", "fptn-egress"],
+        subprocess.run(["systemctl", "disable", "--now", FPTN_UNIT],
                        capture_output=True)
     return {"ok": True, "enabled": fp.get("enabled"), "server": req.server}
 
@@ -4634,6 +4653,17 @@ def _set_adguard_pq(on: bool) -> bool:
     except Exception:
         return False
 
+def _adguard_protocol() -> Optional[str]:
+    """The protocol the CLI will use, read back from its own config. The page kept
+    no copy, so after a reload the selector said "do not change" whatever was set."""
+    try:
+        r = subprocess.run(_AGVPN + ["config", "show"], capture_output=True,
+                           text=True, timeout=10)
+    except Exception:
+        return None
+    m = re.search(r"^\s*Protocol:\s*(\S+)", re.sub(r"\x1b\[[0-9;]*m", "", r.stdout or ""), re.M)
+    return m.group(1).lower() if m else None
+
 @app.get("/api/adguard")
 async def get_adguard(u: str = Depends(auth_dep)):
     s = load_settings()
@@ -4643,6 +4673,7 @@ async def get_adguard(u: str = Depends(auth_dep)):
     st = _adguard_status()
     return {"enabled": ag.get("enabled", False), "socks_port": ag.get("socks_port", 1081),
             "location": ag.get("location"), "post_quantum": ag.get("post_quantum", False),
+            "protocol": _adguard_protocol(),
             "service": svc, "connected": st["connected"], "exit_location": st["location"]}
 
 @app.get("/api/adguard/locations")

@@ -13,7 +13,13 @@ ExecStartPre=/opt/shunt/scripts/fptn-egress.sh setup
 ExecStart=/opt/shunt/scripts/fptn-egress.sh run
 ExecStopPost=/opt/shunt/scripts/fptn-egress.sh teardown
 Restart=always
+# Each failed start builds and tears down veth-fptn, and the AdGuard client
+# reconnects on every link change it sees. With a dead FPTN server that was a
+# flap every 45 s under the primary tunnel (Sep 25). Back off to one attempt
+# per 10 minutes; a manual restart (server change, toggle) starts over at 10 s.
 RestartSec=10
+RestartSteps=6
+RestartMaxDelaySec=600
 
 [Install]
 WantedBy=multi-user.target
