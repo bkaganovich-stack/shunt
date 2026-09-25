@@ -4669,7 +4669,10 @@ def _adguard_status() -> dict:
 
 def _set_adguard_location(loc: str) -> bool:
     """Persist the location in the systemd unit's ExecStart. Caller restarts the service."""
-    loc = re.sub(r'[^A-Za-z ,.\-]', '', loc)[:64].strip()
+    # \w is Unicode here: the CLI's own list has "São Paulo" and "Chișinău", and an
+    # ASCII-only filter turned them into names it does not know. Quotes and
+    # backslashes still cannot get into the unit file.
+    loc = re.sub(r'[^\w ,.\-]', '', loc)[:64].strip()
     if not loc:
         return False
     unit = Path("/etc/systemd/system/adguardvpn.service")

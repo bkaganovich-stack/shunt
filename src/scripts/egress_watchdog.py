@@ -41,6 +41,23 @@ OWN_KINDS = ("egress", "uplink")
 MAX_ATTEMPTS = 3
 WINDOW_SEC = 1800
 
+# A tunnel can answer every check and still be useless. On Sep 25 one AdGuard
+# endpoint carried 0.1-0.6 Mbit/s for the whole house while the neighbouring
+# one carried 12-19; the ladder called it healthy throughout and YouTube on the
+# TV barely moved. So the healthy path also measures, cheaply: 2 MB every 15
+# minutes (~190 MB a day), and one confirming sample a minute later against a
+# different host before anything is said, so one slow CDN node is not blamed on
+# the tunnel. The household shares the tunnel with the probe, but a working one
+# still leaves it several Mbit/s.
+SOCKS = "127.0.0.1:1081"
+SPEED_EVERY = 900
+SLOW_MBIT = 2.0
+SLOW_CONFIRM = 2
+SPEED_TARGETS = (
+    ("https://speed.cloudflare.com/__down?bytes=2000000", None),
+    ("https://proof.ovh.net/files/10Mb.dat", "0-1999999"),
+)
+
 
 def log(msg: str) -> None:
     line = "%s %s" % (time.strftime("%F %T"), msg)
@@ -118,6 +135,64 @@ def wan_iface() -> str:
     return ""
 
 
+def measure_mbit(n: int) -> float:
+    """Download ~2 MB through the tunnel; 0.0 when nothing arrived."""
+    url, rng = SPEED_TARGETS[n % len(SPEED_TARGETS)]
+    cmd = ["curl", "-s", "-o", "/dev/null", "-m", "12",
+           "-w", "%{size_download} %{time_total}", "--socks5-hostname", SOCKS]
+    if rng:
+        cmd += ["-r", rng]
+    try:
+        r = subprocess.run(cmd + [url], capture_output=True, text=True, timeout=20)
+        size, secs = r.stdout.split()
+        size, secs = float(size), float(secs)
+    except Exception:
+        return 0.0
+    return size * 8 / secs / 1e6 if secs > 0 else 0.0
+
+
+def adguard_endpoint() -> str:
+    """The server address the client last picked -- what a person would change."""
+    try:
+        r = subprocess.run(["journalctl", "-u", "adguardvpn", "-n", "400", "--no-pager",
+                            "-o", "cat", "-g", "Using endpoint"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    for ln in reversed(r.stdout.splitlines()):
+        for part in ln.replace(",", " ").split():
+            if part.startswith("address="):
+                return part.split("=", 1)[1]
+    return ""
+
+
+def check_speed(state: dict) -> None:
+    sp = state.setdefault("speed", {})
+    now = int(time.time())
+    streak = sp.get("slow_streak", 0)
+    if not streak and now - sp.get("at", 0) < SPEED_EVERY:
+        return
+    n = sp.get("n", 0)
+    mbit = measure_mbit(n)
+    sp.update(at=now, n=n + 1, mbit=round(mbit, 2))
+    if mbit >= SLOW_MBIT:
+        if streak:
+            log("туннель снова быстрый: %.1f Мбит/с" % mbit)
+        sp["slow_streak"] = 0
+        clear_attention("slow")
+        return
+    sp["slow_streak"] = streak + 1
+    log("туннель медленный: %.2f Мбит/с (замер %d из %d)"
+        % (mbit, streak + 1, SLOW_CONFIRM))
+    if streak + 1 >= SLOW_CONFIRM:
+        ep = adguard_endpoint()
+        attention("slow",
+                  "Туннель работает, но медленно: %.1f Мбит/с" % mbit,
+                  "Сервер AdGuard %s. Разные локации AdGuard идут через разные "
+                  "серверы — смените локацию на странице «VPN серверы» и "
+                  "замерьте снова." % (ep or "не определён"))
+
+
 def main() -> int:
     wan = wan_iface()
     if not wan:
@@ -131,11 +206,12 @@ def main() -> int:
         if state.get("remedies", {}).get(REMEDY):
             log("выход снова работает — счётчик попыток сброшен")
         dg.clear_remedy(state, REMEDY)
-        save_state(state)
         # Both of the watchdog's own concerns end here. Clearing only "egress"
         # left a provider outage on the overview for days after it was over.
         for kind in OWN_KINDS:
             clear_attention(kind)
+        check_speed(state)
+        save_state(state)
         return 0
 
     allowed, why = dg.remedy_allowed(state, REMEDY, d,

@@ -710,6 +710,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
               <option value="Netherlands">Нидерланды</option>
               <option value="Germany">Германия</option>
               <option value="Estonia">Эстония</option>
+              <option value="Atlanta">США — Атланта</option>
             </select>
           </div>
           <div class="btn-row" style="margin-top:2px">
@@ -3594,7 +3595,7 @@ async function loadVpnServers() {
   }
   const pq = document.getElementById('egress-ag-pq');
   if (pq && ag) pq.checked = !!ag.post_quantum;
-  if (agOn) loadAgLicense();
+  if (agOn) { loadAgLicense(); loadAgLocations(ag.location); }
   const proto = document.getElementById('ag-protocol');
   if (proto && ag && ag.protocol && proto.querySelector('option[value="' + ag.protocol + '"]'))
     proto.value = ag.protocol;
@@ -4448,6 +4449,46 @@ function toggleAllSections() {
     window._navShowAll ? 'Скрыть неиспользуемые' : 'Показать все разделы';
   if (window._navShowAll) document.querySelectorAll('.nav-link').forEach(el => el.style.display = '');
   else refreshStatus();
+}
+
+// The full list comes from the CLI itself (83 locations on Sep 25). The page
+// used to carry nine hand-picked ones, and "Atlanta" -- the one that turned out
+// fast -- was not among them. The static options stay as the fallback.
+let _agLocationsLoaded = false;
+async function loadAgLocations(current) {
+  const sel = document.getElementById('egress-ag-location');
+  if (!sel) return;
+  const keep = sel.options[0];
+  keep.textContent = current ? '— оставить текущую (' + current + ') —' : '— оставить текущую —';
+  if (_agLocationsLoaded) return;
+  const r = await apiJ('GET', '/api/adguard/locations');
+  if (!r || !r.ok || !(r.locations || []).length) return;
+  _agLocationsLoaded = true;
+  let names = null;
+  try { names = new Intl.DisplayNames(['ru'], { type: 'region' }); } catch (e) {}
+  const byCountry = {};
+  r.locations.forEach(l => (byCountry[l.country] = byCountry[l.country] || { iso: l.iso, list: [] }).list.push(l));
+  const label = c => { try { return names ? names.of(byCountry[c].iso) : c; } catch (e) { return c; } };
+  const chosen = sel.value;
+  sel.innerHTML = '';
+  sel.appendChild(keep);
+  Object.keys(byCountry).sort((a, b) => label(a).localeCompare(label(b), 'ru')).forEach(c => {
+    const g = document.createElement('optgroup');
+    g.label = label(c);
+    const list = byCountry[c].list.sort((a, b) => a.ping - b.ping);
+    if (list.length > 1) {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = label(c) + ' — быстрейший';
+      g.appendChild(o);
+    }
+    list.forEach(l => {
+      const o = document.createElement('option');
+      o.value = l.city; o.textContent = l.city + ' · ' + l.ping + ' мс';
+      g.appendChild(o);
+    });
+    sel.appendChild(g);
+  });
+  if (chosen && [...sel.options].some(o => o.value === chosen)) sel.value = chosen;
 }
 
 async function measurePings() {
