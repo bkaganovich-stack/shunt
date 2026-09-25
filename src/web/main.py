@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.24.1"
+VERSION = "2.24.2"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -2864,6 +2864,10 @@ FPTN_SERVER_FILE = CFG_DIR / "fptn-server"
 # Renamed with everything else on Sep 5; the old name no longer resolves, so the
 # page read "inactive" and a server change never restarted the client.
 FPTN_UNIT = "shunt-fptn-egress"
+FPTN_TOKEN = Path("/etc/fptn-client/token")
+# What the vendor's bot hands out: "fptn:" or "fptnb:" and base64. Anything else
+# pasted here (a chat message, a link) would only make the client fail to log in.
+_FPTN_TOKEN_RE = re.compile(r"^fptn[a-z]*:[A-Za-z0-9+/=_-]{64,8192}$")
 
 
 class SystemActionReq(BaseModel):
@@ -2948,8 +2952,13 @@ async def get_fptn(u: str = Depends(auth_dep)):
             alive = out.decode().strip() == "204"
         except Exception:
             pass
+    try:
+        token_updated = int(FPTN_TOKEN.stat().st_mtime)
+    except OSError:
+        token_updated = None
     return {"enabled": bool(fp.get("enabled")), "server": current,
             "service": svc, "alive": alive, "servers": FPTN_SERVERS,
+            "token_updated": token_updated,
             "active": s.get("egress_active", "adguard") == "fptn"}
 
 
@@ -2978,6 +2987,36 @@ async def set_fptn(req: FptnReq, u: str = Depends(auth_dep)):
         subprocess.run(["systemctl", "disable", "--now", FPTN_UNIT],
                        capture_output=True)
     return {"ok": True, "enabled": fp.get("enabled"), "server": req.server}
+
+
+class FptnTokenReq(BaseModel):
+    token: str
+
+
+@app.post("/api/fptn/token")
+async def set_fptn_token(req: FptnTokenReq, u: str = Depends(auth_dep)):
+    """Replace the access token. The old one is kept beside it, since a token that
+    turns out not to log in is otherwise gone; the token itself never goes back
+    to the page."""
+    token = re.sub(r"\s+", "", req.token or "")
+    if not _FPTN_TOKEN_RE.match(token):
+        raise HTTPException(400, "Это не похоже на токен FPTN: он начинается с «fptn:» или «fptnb:»")
+    FPTN_TOKEN.parent.mkdir(parents=True, exist_ok=True)
+    if FPTN_TOKEN.exists():
+        prev = FPTN_TOKEN.with_name("token.prev")
+        prev.write_bytes(FPTN_TOKEN.read_bytes())
+        os.chmod(prev, 0o600)
+    tmp = FPTN_TOKEN.with_name("token.new")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(token + "\n")
+    os.replace(tmp, FPTN_TOKEN)
+    restarted = False
+    if (load_settings().get("fptn") or {}).get("enabled"):
+        # an explicit restart also resets the unit's retry backoff
+        subprocess.run(["systemctl", "restart", FPTN_UNIT], capture_output=True)
+        restarted = True
+    return {"ok": True, "restarted": restarted}
 
 
 class AutoFallbackReq(BaseModel):
@@ -4675,6 +4714,37 @@ async def get_adguard(u: str = Depends(auth_dep)):
             "location": ag.get("location"), "post_quantum": ag.get("post_quantum", False),
             "protocol": _adguard_protocol(),
             "service": svc, "connected": st["connected"], "exit_location": st["location"]}
+
+def _parse_adguard_license(out: str) -> dict:
+    """Read `adguardvpn-cli license`. Its wording is the only interface there is,
+    so anything unrecognised is passed through as text rather than guessed at."""
+    out = re.sub(r"\x1b\[[0-9;]*m", "", out or "")
+    lic = {"logged_in": False, "account": None, "plan": None,
+           "devices": None, "valid_until": None, "text": out.strip()[:400]}
+    m = re.search(r"Logged in as\s+(\S+)", out)
+    if m:
+        lic["logged_in"] = True
+        lic["account"] = m.group(1)
+    m = re.search(r"using the\s+(\S+)\s+version", out)
+    if m:
+        lic["plan"] = m.group(1).upper()
+    m = re.search(r"Up to\s+(\d+)\s+devices", out)
+    if m:
+        lic["devices"] = int(m.group(1))
+    m = re.search(r"valid until\s+(\d{4}-\d{2}-\d{2})", out)
+    if m:
+        lic["valid_until"] = m.group(1)
+    return lic
+
+@app.get("/api/adguard/license")
+async def get_adguard_license(u: str = Depends(auth_dep)):
+    try:
+        r = subprocess.run(_AGVPN + ["license"], capture_output=True, text=True, timeout=25)
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+    lic = _parse_adguard_license((r.stdout or "") + (r.stderr or ""))
+    lic["ok"] = True
+    return lic
 
 @app.get("/api/adguard/locations")
 async def get_adguard_locations(u: str = Depends(auth_dep)):

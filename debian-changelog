@@ -1,3 +1,26 @@
+shunt (2.24.2) stable; urgency=medium
+
+  * The FPTN backup egress backs off when its server does not answer:
+    10 s, then doubling up to one attempt every 10 minutes. Every failed
+    start builds and removes its veth pair, and the AdGuard client reacts
+    to each link change; with FPTN's server silent that was a flap every
+    45 seconds under the primary tunnel. Changing the server, the toggle or
+    the token starts over at 10 s.
+  * The web interface addressed FPTN by its pre-rename unit name: the page
+    read "inactive" while the client was running, and a server change or
+    the toggle never reached the service. Its status now also tells
+    "carrying traffic" from "logging in" and "waiting to retry".
+  * The FPTN access token can be replaced from the page. The previous one
+    is kept on the gateway as token.prev.
+  * The AdGuard licence (plan, expiry, devices) is shown next to the
+    connection state.
+  * The AdGuard protocol selector shows the protocol actually set instead
+    of "do not change" after a reload, and a successful change is no
+    longer reported in red.
+  * No double divider where a status row is followed by a settings row.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 25 Sep 2026 22:30:00 +0300
+
 shunt (2.24.1) stable; urgency=medium
 
   * The overview no longer keeps an ISP outage on screen after it is over.

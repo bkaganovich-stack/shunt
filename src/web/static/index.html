@@ -239,6 +239,7 @@ table.conn-table { width: 100%; border-collapse: collapse; font-size: 12px; tabl
 .text-muted { color: var(--muted); }
 .text-green { color: var(--green); }
 .text-red { color: var(--red); }
+.text-yellow { color: var(--yellow); }
 .monospace { font-family: 'SF Mono', monospace; font-size: 13px; }
 .mb-0 { margin-bottom: 0; }
 .mt-4 { margin-top: 16px; }
@@ -692,6 +693,10 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
             <span class="info-key">AdGuard: подключение</span>
             <span id="egress-ag-status" class="info-val monospace">—</span>
           </div>
+          <div class="info-row">
+            <span class="info-key">AdGuard: лицензия</span>
+            <span id="egress-ag-license" class="info-val monospace">—</span>
+          </div>
           <div class="override-row" style="padding:8px 0">
             <div class="override-label">Локация AdGuard</div>
             <select id="egress-ag-location" style="min-width:210px">
@@ -716,7 +721,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
             <div class="override-label">Постквантовая криптография <span class="hint" tabindex="0" data-tip="Защита от «записать сейчас — расшифровать потом»: перехваченный сегодня трафик могут расшифровать позже, когда квантовые компьютеры станут достаточно мощными. Переключение переподключит туннель.">?</span></div>
             <label class="toggle"><input type="checkbox" id="egress-ag-pq"><span class="slider"></span></label>
           </div>
-          <div class="text-muted" style="font-size:12px">Вход в аккаунт AdGuard — на шлюзе: <span class="monospace">adguardvpn-cli login</span></div>
+          <div class="text-muted" style="font-size:12px">Вход в аккаунт AdGuard и продление — на шлюзе: <span class="monospace">sudo runuser -u agvpn -- env HOME=/var/lib/agvpn adguardvpn-cli login</span></div>
         </div>
         <div class="btn-row" style="margin-top:6px">
           <button class="btn btn-primary" onclick="saveEgress()">Применить выход</button>
@@ -755,6 +760,16 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
             <button class="btn btn-sm btn-primary" onclick="applyFptnServer()">Применить сервер</button>
             <span id="fptn-result" class="text-muted" style="font-size:12px"></span>
           </div>
+        </div>
+
+        <div class="override-row" style="padding:10px 0 6px">
+          <div class="override-label">Токен FPTN <span class="hint" tabindex="0" data-tip="Токен выдаёт бот FPTN в Telegram; он начинается с «fptn:» или «fptnb:». Сохранение заменяет старый токен (он остаётся на шлюзе как token.prev) и переподключает FPTN.">?</span></div>
+          <span id="fptn-token-info" class="text-muted" style="font-size:12px">—</span>
+        </div>
+        <textarea id="fptn-token" rows="2" style="min-height:0;width:100%" placeholder="fptn:… — вставьте новый токен" autocomplete="off" spellcheck="false"></textarea>
+        <div class="btn-row">
+          <button class="btn btn-sm btn-secondary" onclick="saveFptnToken()">Сохранить токен</button>
+          <span id="fptn-token-result" class="text-muted" style="font-size:12px"></span>
         </div>
       </div>
 
@@ -3579,6 +3594,7 @@ async function loadVpnServers() {
   }
   const pq = document.getElementById('egress-ag-pq');
   if (pq && ag) pq.checked = !!ag.post_quantum;
+  if (agOn) loadAgLicense();
   const proto = document.getElementById('ag-protocol');
   if (proto && ag && ag.protocol && proto.querySelector('option[value="' + ag.protocol + '"]'))
     proto.value = ag.protocol;
@@ -4849,6 +4865,10 @@ async function loadFptn() {
       : (d.service || 'остановлена');
     svc.className = 'info-val monospace ' + (up ? 'text-green' : d.service === 'inactive' ? 'text-muted' : 'text-red');
   }
+  const tok = document.getElementById('fptn-token-info');
+  if (tok) tok.textContent = d.token_updated
+    ? 'обновлён ' + new Date(d.token_updated * 1000).toLocaleDateString('ru-RU')
+    : 'не задан';
   const sel = document.getElementById('fptn-server');
   if (sel && d.servers) {
     sel.innerHTML = '';
@@ -4878,6 +4898,41 @@ async function saveFptn(payload) {
   loadFptn();
 }
 
+async function loadAgLicense() {
+  const el = document.getElementById('egress-ag-license');
+  if (!el) return;
+  const d = await apiJ('GET', '/api/adguard/license');
+  if (!d || !d.ok) { el.textContent = 'не удалось узнать'; el.className = 'info-val monospace text-muted'; return; }
+  if (!d.logged_in) { el.textContent = 'вход не выполнен'; el.className = 'info-val monospace text-red'; return; }
+  let days = null;
+  if (d.valid_until) days = Math.floor((new Date(d.valid_until + 'T00:00:00Z') - Date.now()) / 86400000);
+  const parts = [d.plan || '?'];
+  if (d.valid_until) parts.push('до ' + new Date(d.valid_until + 'T00:00:00Z').toLocaleDateString('ru-RU'));
+  if (d.devices) parts.push(d.devices + ' устр.');
+  el.textContent = parts.join(' · ');
+  el.title = d.account || '';
+  el.className = 'info-val monospace ' + (days !== null && days < 0 ? 'text-red'
+    : days !== null && days < 14 ? 'text-yellow' : d.plan === 'PREMIUM' ? 'text-green' : '');
+}
+
+async function saveFptnToken() {
+  const ta = document.getElementById('fptn-token');
+  const res = document.getElementById('fptn-token-result');
+  const token = (ta && ta.value || '').trim();
+  if (!token) return;
+  if (res) res.textContent = 'сохраняю…';
+  const r = await api('POST', '/api/fptn/token', { token });
+  const d = r ? await r.json().catch(() => ({})) : null;
+  if (r && r.ok && d.ok) {
+    ta.value = '';
+    if (res) res.textContent = d.restarted ? 'сохранён, FPTN переподключается' : 'сохранён';
+    setTimeout(loadFptn, 15000);
+    loadFptn();
+  } else if (res) {
+    res.textContent = (d && d.detail) || 'не удалось';
+  }
+}
+
 async function applyFptnServer() {
   const sel = document.getElementById('fptn-server');
   const res = document.getElementById('fptn-result');
@@ -4892,7 +4947,7 @@ async function saveAgProtocol() {
   const sel = document.getElementById('ag-protocol');
   if (!sel || !sel.value) return;
   const r = await apiJ('POST', '/api/adguard/protocol', { protocol: sel.value });
-  toast((r && r.ok) ? 'Протокол AdGuard: ' + sel.value + ' (сервис перезапущен)' : 'Не удалось', !(r && r.ok));
+  toast((r && r.ok) ? 'Протокол AdGuard: ' + sel.value + ' (сервис перезапущен)' : 'Не удалось', !!(r && r.ok));
 }
 
 async function setAutoFallback(on) {
