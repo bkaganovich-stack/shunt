@@ -20,6 +20,7 @@ the attempts: the fourth one in half an hour is not a fix in progress, it is
 proof the diagnosis is wrong, and it escalates instead.
 """
 import json
+import re
 import subprocess
 import sys
 import time
@@ -193,6 +194,149 @@ def check_speed(state: dict) -> None:
                   "замерьте снова." % (ep or "не определён"))
 
 
+# A tunnel can also be fast and still useless for what it is there for. On Sep
+# 29 Claude, ChatGPT, Gemini and Perplexity stopped opening at once while the
+# ladder and the speed probe both passed: the sites were refusing the exit, not
+# the tunnel failing. Changing the AdGuard location fixed three of them.
+#
+# Each check below reads a refusal the service states in words, measured from
+# the direct path here (Russia is refused by all of them) against the tunnel on
+# the same afternoon. A plain request is otherwise met by Cloudflare's bot
+# challenge, which a working site answers too, so "403" alone says nothing.
+# Perplexity refuses no region it can be asked about this way and is not checked.
+SERVICES_EVERY = 1800
+SERVICE_CONFIRM = 2
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/140.0 Safari/537.36")
+# Google puts its country domain for the caller into the Gemini page; these are
+# countries Gemini is not offered in.
+GEMINI_REFUSED = {"ru": "Россия", "by": "Беларусь", "cn": "Китай",
+                  "com.hk": "Гонконг", "ir": "Иран", "kp": "КНДР",
+                  "sy": "Сирия", "cu": "Куба"}
+_GEMINI_TLD = re.compile(r'og\.qtm\.[a-z]{2}_[A-Z]{2}\.[^"]+\.O","([a-z.]{2,8})"')
+
+
+def fetch(url: str) -> tuple[int, dict, str]:
+    """One request through the tunnel, redirects not followed; status 0 when
+    nothing came back."""
+    cmd = ["curl", "-s", "-m", "15", "-A", UA, "-D", "-", "-o", "-",
+           "--socks5-hostname", SOCKS, url]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=25)
+    except (OSError, subprocess.SubprocessError):
+        return 0, {}, ""
+    raw = r.stdout.decode("utf-8", "replace")
+    head, _, body = raw.partition("\r\n\r\n")
+    lines = head.split("\r\n")
+    try:
+        status = int(lines[0].split()[1])
+    except (IndexError, ValueError):
+        return 0, {}, ""
+    headers = {}
+    for ln in lines[1:]:
+        k, sep, v = ln.partition(":")
+        if sep:
+            headers[k.strip().lower()] = v.strip()
+    return status, headers, body
+
+
+def _claude(status: int, headers: dict, body: str) -> str | None:
+    if "unavailable-in-region" in headers.get("location", ""):
+        return "недоступен в регионе выхода"
+    return None
+
+
+def _chatgpt(status: int, headers: dict, body: str) -> str | None:
+    # A working exit gets the challenge (cf-mitigated); a refused one gets
+    # OpenAI's own block page with the same status and no challenge.
+    if status == 403 and "cf-mitigated" not in headers:
+        return "страница блокировки OpenAI"
+    return None
+
+
+def _openai_api(status: int, headers: dict, body: str) -> str | None:
+    if "unsupported_country" in body:
+        return "страна выхода не поддерживается"
+    return None
+
+
+def _gemini(status: int, headers: dict, body: str) -> str | None:
+    m = _GEMINI_TLD.search(body)
+    if m and m.group(1) in GEMINI_REFUSED:
+        return "Google относит выход к стране «%s»" % GEMINI_REFUSED[m.group(1)]
+    return None
+
+
+# (name, url, verdict, host whose /cdn-cgi/trace shows the exit it sees)
+SERVICE_CHECKS = (
+    ("Claude", "https://claude.ai/", _claude, "claude.ai"),
+    ("ChatGPT", "https://chatgpt.com/", _chatgpt, "chatgpt.com"),
+    ("OpenAI API", "https://api.openai.com/v1/models", _openai_api, None),
+    ("Gemini", "https://gemini.google.com/app", _gemini, None),
+)
+
+
+def exit_seen_by(host: str) -> str:
+    """The address and country Cloudflare sees for this host. AdGuard does not
+    use one exit for everything: on Sep 29 ChatGPT left through a Dallas address
+    while the rest of the Atlanta location left through Atlanta."""
+    status, _, body = fetch("https://%s/cdn-cgi/trace" % host)
+    kv = dict(ln.split("=", 1) for ln in body.splitlines() if "=" in ln)
+    if status != 200 or "ip" not in kv:
+        return ""
+    return "%s (%s)" % (kv["ip"], kv.get("loc", "?"))
+
+
+def refused_services() -> dict:
+    refused, answered = {}, False
+    for name, url, verdict, _ in SERVICE_CHECKS:
+        status, headers, body = fetch(url)
+        if not status:
+            refused[name] = "не отвечает"
+            continue
+        answered = True
+        why = verdict(status, headers, body)
+        if why:
+            refused[name] = why
+    # Nothing answered at all: that is the tunnel, and the ladder's to judge.
+    return refused if answered else {}
+
+
+def check_services(state: dict) -> None:
+    sv = state.setdefault("services", {})
+    now = int(time.time())
+    streak = sv.get("streak", 0)
+    if not streak and now - sv.get("at", 0) < SERVICES_EVERY:
+        return
+    refused = refused_services()
+    sv["at"] = now
+    if not refused:
+        if streak:
+            log("сервисы снова принимают выход")
+        sv["streak"] = 0
+        clear_attention("services")
+        return
+    sv["streak"] = streak + 1
+    listed = ", ".join("%s — %s" % kv for kv in refused.items())
+    log("сервисы отказывают через туннель: %s (замер %d из %d)"
+        % (listed, streak + 1, SERVICE_CONFIRM))
+    if streak + 1 < SERVICE_CONFIRM:
+        return
+    common = exit_seen_by("www.cloudflare.com")
+    own = []
+    for name, _, _, host in SERVICE_CHECKS:
+        if name in refused and host:
+            seen = exit_seen_by(host)
+            if seen and seen != common:
+                own.append("%s выходит через %s" % (name, seen))
+    detail = ("Выход локации AdGuard: %s. Смените локацию на странице "
+              "«VPN серверы»." % (common or "не определён"))
+    if own:
+        detail += (" У части сервисов у AdGuard свой выход, смена локации его "
+                   "может не затронуть: %s." % "; ".join(own))
+    attention("services", "Через туннель не открываются: %s" % listed, detail)
+
+
 def main() -> int:
     wan = wan_iface()
     if not wan:
@@ -211,6 +355,7 @@ def main() -> int:
         for kind in OWN_KINDS:
             clear_attention(kind)
         check_speed(state)
+        check_services(state)
         save_state(state)
         return 0
 

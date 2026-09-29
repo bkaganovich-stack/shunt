@@ -1,3 +1,26 @@
+shunt (2.24.5) stable; urgency=medium
+
+  * The egress watchdog now notices when the tunnel works but the services
+    it exists for refuse its exit. On 29 September Claude, ChatGPT, Gemini
+    and Perplexity stopped opening at once while every check passed and the
+    tunnel ran at full speed. Every half hour, while the tunnel is healthy,
+    it asks Claude, ChatGPT, the OpenAI API and Gemini through the tunnel and
+    reads the refusal each states in words: Claude's redirect to
+    "app-unavailable-in-region", OpenAI's block page (a 403 without
+    Cloudflare's bot challenge), "unsupported_country", and the country
+    Google puts into the Gemini page. The same checks were run against the
+    direct path from Russia, which all four refuse, and against the tunnel,
+    which all four accept.
+  * A refusal is confirmed a minute later before anything is said. The
+    notice names the services and the exit address they see. AdGuard sends
+    ChatGPT through an exit of its own (a Dallas address while the Atlanta
+    location used Atlanta), so the notice says when changing the location
+    may not reach it.
+  * Perplexity is not checked: it states no regional refusal that a plain
+    request can see.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Tue, 29 Sep 2026 23:00:00 +0300
+
 shunt (2.24.4) stable; urgency=medium
 
   * The FPTN server list on the page comes from the access token itself
