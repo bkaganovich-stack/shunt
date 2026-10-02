@@ -165,3 +165,16 @@ class TestHotUpdate:
         assert [c[0] for c in api.calls] == ["lsrules", "adrules", "rmrules", "rmrules"]
         assert set(api.calls[3][1:]) == {r["ruleTag"] for r in api.added}
         assert json.loads(xcfg.read_text()) == cur
+
+
+class TestCutDirect:
+    def test_runs_one_ss_kill_per_address_and_survives_failure(self):
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            raise subprocess.TimeoutExpired(cmd, 10)
+        with patch.object(m.subprocess, "run", run):
+            m._cut_direct(["2.21.200.81", "93.184.216.34"])
+        assert [c[:3] for c in calls] == [["ss", "-K", "-tn"]] * 2
+        assert "fwmark = 0xff/0xffffffff" in calls[0][3]

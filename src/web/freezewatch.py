@@ -273,6 +273,31 @@ def _route_site(rows: list[dict], by_ip: dict, row: dict, names, now: int) -> No
         _route(sib, now)
 
 
+def routed_live(known: list[dict]) -> set[str]:
+    """Addresses the detector currently sends through the tunnel."""
+    return {r["domain"] for r in known
+            if r.get("source") == "live" and r.get("routed") and r.get("enabled", True)}
+
+
+def cut_commands(ips, mark: int) -> list[list[str]]:
+    """
+    `ss -K` for xray's own connections to these addresses.
+
+    Routing an address changes where its next connection goes, not the one a
+    browser is already waiting on. On 2 October corporate.comcast.com was in
+    the tunnel and still did not open: the browser kept asking over the frozen
+    direct connection, which never answers and is never closed by the server.
+    Those connections are dead already, so ending them costs nothing, and the
+    browser's next try goes through the tunnel. Selected by xray's fwmark and
+    the destination, so nothing that reaches the tunnel (127.0.0.1:1081) and
+    nothing of the gateway's own is touched.
+    """
+    # ss reads an IPv6 address only in brackets; bare, it stops at the first colon.
+    return [["ss", "-K", "-tn", "dst %s and fwmark = %#x/0xffffffff"
+             % ("[%s]" % ip if ":" in ip else ip, mark)]
+            for ip in sorted(ips)]
+
+
 def pending(known: list[dict]) -> list[str]:
     """Addresses waiting to be asked through the tunnel."""
     return [r["domain"] for r in known if r.get("source") == "live" and r.get("check") == "pending"]

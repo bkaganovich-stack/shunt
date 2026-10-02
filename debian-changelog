@@ -1,3 +1,20 @@
+shunt (2.24.7) stable; urgency=medium
+
+  * When the freeze detector routes an address, it also ends xray's
+    connections to it that are still hanging on the direct path. Routing
+    only changes where the next connection goes: on 2 October
+    corporate.comcast.com was already in the tunnel and still did not open,
+    because the browser kept waiting on its frozen direct connection, which
+    the server never answers and never closes. Ending those connections the
+    moment the rule is live in xray makes the browser's next try go through
+    the tunnel, so a reload opens the page.
+  * Only xray's own connections (by its fwmark) to the newly routed
+    addresses are ended -- nothing that already goes to the tunnel, and
+    nothing of the gateway's own. If the rule cannot go into the running
+    xray yet, nothing is ended until it does.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 02 Oct 2026 13:00:00 +0300
+
 shunt (2.24.6) stable; urgency=medium
 
   * The freeze detector counts frozen connections per site, not per address,

@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.24.6"
+VERSION = "2.24.7"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -2482,6 +2482,15 @@ def _ss_outgoing(wan_ip: str) -> str:
     return r.stdout
 
 
+def _cut_direct(ips: list[str]) -> None:
+    """End xray's hanging direct connections to addresses just routed (freezewatch.cut_commands)."""
+    for cmd in _fw.cut_commands(ips, _sockopt()["mark"]):
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
 async def _freeze_watch_loop() -> None:
     """
     Route addresses whose direct connections freeze. See freezewatch.py.
@@ -2496,6 +2505,7 @@ async def _freeze_watch_loop() -> None:
     tracker = _fw.Tracker()
     wan_ip, wan_checked = "", 0.0
     pending, retry_at, last_expire = False, 0.0, 0.0
+    to_cut: set = set()     # newly routed addresses whose direct connections still hang
     while True:
         try:
             cfg = _fw.settings_of(load_settings())
@@ -2515,9 +2525,11 @@ async def _freeze_watch_loop() -> None:
                     # so the site goes into the tunnel whole (freezewatch.record).
                     names = await loop.run_in_executor(None, _dnames.NameMap.load)
                     s = load_settings()
+                    before = _fw.routed_live(s.get("discovered", []))
                     s["discovered"], changed = _fw.record(s.get("discovered", []), events, cfg,
                                                           names=names)
                     save_settings(s)
+                    to_cut |= _fw.routed_live(s["discovered"]) - before
                     pending = pending or changed
             waiting = _fw.pending(load_settings().get("discovered", []))
             if waiting:
@@ -2526,9 +2538,11 @@ async def _freeze_watch_loop() -> None:
                 for ip in waiting[:5]:
                     ok = await loop.run_in_executor(None, _tunnel_answers, ip, socks)
                     s = load_settings()
+                    before = _fw.routed_live(s.get("discovered", []))
                     s["discovered"], changed = _fw.confirm(s.get("discovered", []), ip, ok,
                                                            names=names)
                     save_settings(s)
+                    to_cut |= _fw.routed_live(s["discovered"]) - before
                     pending = pending or changed
             if now - last_expire > 3600:
                 s = load_settings()
@@ -2547,6 +2561,11 @@ async def _freeze_watch_loop() -> None:
                 done, detail = await loop.run_in_executor(None, _hot_update_live, load_settings())
                 pending = not done
                 retry_at = now + (60 if done else 600)
+                # Only once the rule is live: cut earlier and the browser's
+                # retry would go direct again and freeze again.
+                if done and to_cut:
+                    await loop.run_in_executor(None, _cut_direct, sorted(to_cut))
+                    to_cut = set()
         except Exception:
             pass
         await _idle(_fw.SAMPLE_EVERY)

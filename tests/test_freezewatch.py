@@ -360,3 +360,29 @@ class TestAddressesOf:
         assert m.addresses_of("b.example.org", now=50) == ["104.26.7.51"]
         assert m.addresses_of("a.example.org", now=200) == []
         assert m.addresses_of("", now=50) == []
+
+
+class TestCutHangingConnections:
+    """
+    2 October: corporate.comcast.com was routed and still did not open -- the
+    browser kept waiting on its frozen direct connection.
+    """
+
+    def test_only_addresses_newly_routed_by_the_detector(self):
+        names = site_names()
+        known = [{"domain": "93.184.216.34", "routed": True, "enabled": True, "source": "live"},
+                 {"domain": "93.184.216.35", "routed": True, "enabled": True}]
+        before = fw.routed_live(known)
+        rows, _ = fw.record(known, events(ARDUCAM[0], 1, 2, 3), CFG, now=3, names=names)
+        assert fw.routed_live(rows) - before == set(ARDUCAM)
+
+    def test_switched_off_entries_are_not_counted_as_routed(self):
+        rows = [{"domain": "93.184.216.34", "routed": True, "enabled": False, "source": "live"}]
+        assert fw.routed_live(rows) == set()
+
+    def test_commands_select_xray_connections_to_each_address(self):
+        cmds = fw.cut_commands({"2.21.200.81", "2a02:26f0:41:2b1::182d"}, 255)
+        assert cmds == [
+            ["ss", "-K", "-tn", "dst 2.21.200.81 and fwmark = 0xff/0xffffffff"],
+            ["ss", "-K", "-tn", "dst [2a02:26f0:41:2b1::182d] and fwmark = 0xff/0xffffffff"],
+        ]
