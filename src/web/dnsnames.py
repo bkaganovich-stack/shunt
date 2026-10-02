@@ -144,6 +144,14 @@ class NameMap:
         name, seen = hit
         return name if now - seen <= self.ttl else ""
 
+    def addresses_of(self, name: str, now: float | None = None) -> list[str]:
+        """Every live address whose newest answer was for this name."""
+        now = int(now if now is not None else time.time())
+        if not name:
+            return []
+        return sorted(ip for ip, (n, seen) in list(self._m.items())
+                      if n == name and now - seen <= self.ttl)
+
     def _evict(self, now: int) -> None:
         # Snapshot first. This runs on the resolver's own threads, and
         # rebuilding a dict while another thread assigns into it raises

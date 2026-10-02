@@ -3389,7 +3389,8 @@ async function loadDiscovered() {
     <div class="rule-tag${routed ? '' : ' off'}">
       <button class="r-off" onclick="toggleDiscovered('${escHtml(row.domain)}')"
               title="${on ? 'Не отправлять в туннель' : 'Отправлять в туннель'}">${on ? '◉' : '◎'}</button>
-      <span class="r-val">${escHtml(row.domain)}</span>
+      <span class="r-val">${escHtml(row.domain)}</span>${row.name && row.name !== row.domain
+        ? `<span style="font-size:12px">${escHtml(row.name)}</span>` : ''}
       <span style="color:var(--muted);font-size:11px;white-space:nowrap">
         напрямую ${escHtml(String(row.direct))} · туннель ${escHtml(String(row.tunnel))} · ${seen}
       </span>

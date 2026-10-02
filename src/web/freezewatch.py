@@ -180,14 +180,23 @@ def _describe(row: dict) -> str:
 
 
 def record(known: list[dict], events: list[dict], cfg: dict,
-           now: float | None = None) -> tuple[list[dict], bool]:
+           now: float | None = None, names=None) -> tuple[list[dict], bool]:
     """
     Fold freeze events into the discovered record. Returns (record, routing_changed).
 
-    An address is routed once `min_events` frozen connections to it fell inside
-    the window: the freeze is often partial, so one frozen connection is
-    evidence, and three are a pattern. An entry somebody switched off keeps
-    collecting evidence but is never routed -- the switch is the operator's.
+    A site is routed once `min_events` frozen connections to it fell inside the
+    window: the freeze is often partial, so one frozen connection is evidence,
+    and three are a pattern. An entry somebody switched off keeps collecting
+    evidence but is never routed -- the switch is the operator's.
+
+    The evidence is counted per site, not per address, whenever the resolver
+    knows which name an address was handed out for (`names`, a dnsnames.NameMap).
+    Counted per address, a site behind several Cloudflare addresses opened only
+    on the ones that had each frozen three times: docs.arducam.com on 28
+    September had one of three addresses in the tunnel and opened every other
+    try, and www.thelayoff.com on 2 October took six frozen connections before
+    both of its addresses went. Now the site goes as a whole -- every address
+    its name currently resolves to -- on the third freeze anywhere on it.
     """
     now = int(now if now is not None else time.time())
     window = int(cfg["window_hours"]) * 3600
@@ -195,6 +204,7 @@ def record(known: list[dict], events: list[dict], cfg: dict,
     by_ip = {r.get("domain"): r for r in rows}
     changed = False
     for ev in events:
+        name = names.lookup(ev["ip"], now) if names is not None else ""
         row = by_ip.get(ev["ip"])
         if row is None:
             row = {"domain": ev["ip"], "enabled": True, "first_seen": now, "routed": False}
@@ -210,19 +220,26 @@ def record(known: list[dict], events: list[dict], cfg: dict,
         row["last_checked"] = now
         row["direct"] = _describe(row)
         row["tunnel"] = "по живому трафику"
+        if name:
+            row["name"] = name
         if ev["stage"] == "freeze":
             row["answered"] = True
-        if (not row.get("routed") and row.get("enabled", True)
-                and row.get("check") != "pending"
-                and len(row["events"]) >= int(cfg["min_events"])):
-            if row.get("answered"):
-                _route(row, now)
-                changed = True
-            else:
-                # Nothing ever came back, so a freeze cannot be told from an
-                # address that is simply dead or closed to everyone. The loop
-                # asks through the tunnel before anything is routed.
-                row["check"] = "pending"
+        if (row.get("routed") or not row.get("enabled", True)
+                or row.get("check") == "pending"):
+            continue
+        site = ([r for r in rows if r.get("source") == "live" and r.get("name") == name]
+                if name else [row])
+        frozen = sum(1 for r in site for t in r.get("events", []) if now - t <= window)
+        if frozen < int(cfg["min_events"]):
+            continue
+        if any(r.get("answered") for r in site):
+            _route_site(rows, by_ip, row, names, now)
+            changed = True
+        else:
+            # Nothing ever came back, so a freeze cannot be told from an
+            # address that is simply dead or closed to everyone. The loop
+            # asks through the tunnel before anything is routed.
+            row["check"] = "pending"
     return rows, changed
 
 
@@ -232,13 +249,37 @@ def _route(row: dict, now: int) -> None:
     row.pop("check", None)
 
 
+def _route_site(rows: list[dict], by_ip: dict, row: dict, names, now: int) -> None:
+    """Route this address and every other address of the same site."""
+    _route(row, now)
+    name = row.get("name")
+    if not name or names is None:
+        return
+    for ip in names.addresses_of(name, now):
+        if ip == row["domain"] or not _routable(ip):
+            continue
+        sib = by_ip.get(ip)
+        if sib is None:
+            sib = {"domain": ip, "enabled": True, "first_seen": now, "routed": False,
+                   "events": []}
+            rows.append(sib)
+            by_ip[ip] = sib
+        elif sib.get("source") != "live" or sib.get("routed") or not sib.get("enabled", True):
+            continue                          # someone else's decision, or the operator's
+        sib.update(source="live", verdict="frozen", name=name, last_checked=now,
+                   tunnel="по живому трафику")
+        if not sib.get("events"):
+            sib["direct"] = "тот же сайт замерзает на %s" % row["domain"]
+        _route(sib, now)
+
+
 def pending(known: list[dict]) -> list[str]:
     """Addresses waiting to be asked through the tunnel."""
     return [r["domain"] for r in known if r.get("source") == "live" and r.get("check") == "pending"]
 
 
 def confirm(known: list[dict], ip: str, answers: bool,
-            now: float | None = None) -> tuple[list[dict], bool]:
+            now: float | None = None, names=None) -> tuple[list[dict], bool]:
     """
     Settle a pending address with what the tunnel said.
 
@@ -248,12 +289,13 @@ def confirm(known: list[dict], ip: str, answers: bool,
     """
     now = int(now if now is not None else time.time())
     rows = [dict(r) for r in known]
+    by_ip = {r.get("domain"): r for r in rows}
     changed = False
-    for r in rows:
+    for r in list(rows):
         if r.get("domain") != ip or r.get("check") != "pending":
             continue
         if answers and r.get("enabled", True):
-            _route(r, now)
+            _route_site(rows, by_ip, r, names, now)
             r["tunnel"] = "по живому трафику; через туннель отвечает"
             changed = True
         else:

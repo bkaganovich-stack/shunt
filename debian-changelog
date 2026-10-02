@@ -1,3 +1,24 @@
+shunt (2.24.6) stable; urgency=medium
+
+  * The freeze detector counts frozen connections per site, not per address,
+    and routes the whole site at once. A site behind several Cloudflare
+    addresses used to open only on the addresses that had each frozen three
+    times: on 28 September docs.arducam.com had one of its three addresses in
+    the tunnel and opened every other try, and on 2 October
+    www.thelayoff.com took six frozen connections -- and as many failed page
+    loads -- before both of its addresses went. The site's name comes from
+    the gateway's own resolver, which already records which addresses each
+    name was answered with. On the third freeze anywhere on a site, every
+    address its name currently resolves to goes into the tunnel; a page that
+    opens three connections at once can be enough on the first try.
+  * Addresses with no known name are still judged one by one, as before. An
+    address switched off on the page stays off, and one routed on other
+    evidence is left alone. Addresses that joined with their site expire
+    after the same fourteen days.
+  * The list of finds shows the site name next to each address.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 02 Oct 2026 12:00:00 +0300
+
 shunt (2.24.5) stable; urgency=medium
 
   * The egress watchdog now notices when the tunnel works but the services

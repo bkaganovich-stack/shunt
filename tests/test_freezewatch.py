@@ -249,3 +249,114 @@ class TestPrune:
                      "events": [1], "last_checked": 1})
         kept, _ = fw.expire(rows, CFG, now=3 + 2 * 86400)
         assert [r["domain"] for r in kept] == ["93.184.216.34", "93.184.216.35"]
+
+
+import dnsnames as dn  # noqa: E402
+
+ARDUCAM = ["104.26.6.51", "104.26.7.51", "172.67.69.34"]
+
+
+def site_names(name="docs.arducam.com", ips=ARDUCAM, at=0):
+    m = dn.NameMap()
+    m.record(name, ips, now=at)
+    return m
+
+
+def by_domain(rows):
+    return {r["domain"]: r for r in rows}
+
+
+class TestWholeSite:
+    """
+    28 September: docs.arducam.com resolved to three Cloudflare addresses and
+    had one of them in the tunnel, so it opened every other try. 2 October:
+    www.thelayoff.com took six frozen connections before both addresses went.
+    """
+
+    def test_three_freezes_across_a_sites_addresses_route_all_of_them(self):
+        names = site_names()
+        rows, changed = fw.record([], events(ARDUCAM[0], 10) + events(ARDUCAM[1], 11),
+                                  CFG, now=11, names=names)
+        assert not changed
+        rows, changed = fw.record(rows, events(ARDUCAM[2], 12), CFG, now=12, names=names)
+        assert changed
+        assert sorted(bp.routed_addresses(rows)) == sorted(ARDUCAM)
+        assert all(r["name"] == "docs.arducam.com" for r in rows)
+
+    def test_addresses_that_never_froze_go_with_the_site(self):
+        names = site_names()
+        rows, changed = fw.record([], events(ARDUCAM[0], 1, 2, 3), CFG, now=3, names=names)
+        assert changed and sorted(bp.routed_addresses(rows)) == sorted(ARDUCAM)
+        quiet = by_domain(rows)[ARDUCAM[2]]
+        assert quiet["source"] == "live" and quiet["events"] == []
+        assert ARDUCAM[0] in quiet["direct"]
+
+    def test_one_page_load_is_enough_when_it_opens_three_connections(self):
+        # thelayoff, 07:18:37: three connections to two addresses in one second.
+        ips = ["172.66.135.121", "172.66.136.186"]
+        names = site_names("www.thelayoff.com", ips)
+        evs = events(ips[0], 37) + events(ips[1], 37, 38)
+        rows, changed = fw.record([], evs, CFG, now=40, names=names)
+        assert changed and sorted(bp.routed_addresses(rows)) == sorted(ips)
+
+    def test_different_sites_are_counted_apart(self):
+        names = dn.NameMap()
+        names.record("a.example.org", ["104.26.6.51"], now=0)
+        names.record("b.example.org", ["104.26.7.51"], now=0)
+        rows, changed = fw.record([], events("104.26.6.51", 1, 2) + events("104.26.7.51", 3),
+                                  CFG, now=3, names=names)
+        assert not changed and bp.routed_addresses(rows) == []
+
+    def test_without_a_name_it_is_still_per_address(self):
+        names = dn.NameMap()                                   # resolver knows nothing
+        rows, changed = fw.record([], events(ARDUCAM[0], 1, 2) + events(ARDUCAM[1], 3),
+                                  CFG, now=3, names=names)
+        assert not changed
+        rows, changed = fw.record(rows, events(ARDUCAM[0], 4), CFG, now=4, names=names)
+        assert changed and bp.routed_addresses(rows) == [ARDUCAM[0]]
+
+    def test_an_address_switched_off_stays_off(self):
+        names = site_names()
+        known = [{"domain": ARDUCAM[2], "enabled": False, "routed": False, "source": "live"}]
+        rows, _ = fw.record(known, events(ARDUCAM[0], 1, 2, 3), CFG, now=3, names=names)
+        assert sorted(bp.routed_addresses(rows)) == sorted(ARDUCAM[:2])
+
+    def test_an_address_routed_on_other_evidence_is_left_alone(self):
+        names = site_names()
+        known = [{"domain": ARDUCAM[2], "enabled": True, "routed": True, "verdict": "blocked"}]
+        rows, _ = fw.record(known, events(ARDUCAM[0], 1, 2, 3), CFG, now=3, names=names)
+        assert by_domain(rows)[ARDUCAM[2]]["verdict"] == "blocked"
+        assert "source" not in by_domain(rows)[ARDUCAM[2]]
+
+    def test_expired_names_bring_no_siblings(self):
+        names = site_names(at=0)
+        late = dn.TTL_SECONDS + 100
+        names.record("docs.arducam.com", [ARDUCAM[0]], now=late)   # only this one is fresh
+        rows, changed = fw.record([], events(ARDUCAM[0], late, late, late), CFG,
+                                  now=late, names=names)
+        assert changed and bp.routed_addresses(rows) == [ARDUCAM[0]]
+
+    def test_a_silent_site_confirmed_through_the_tunnel_goes_whole(self):
+        names = site_names()
+        rows, changed = fw.record([], hs_events(ARDUCAM[0], 1, 2, 3), CFG, now=3, names=names)
+        assert not changed and fw.pending(rows) == [ARDUCAM[0]]
+        rows, changed = fw.confirm(rows, ARDUCAM[0], True, now=10, names=names)
+        assert changed and sorted(bp.routed_addresses(rows)) == sorted(ARDUCAM)
+
+    def test_routed_siblings_expire_like_any_live_entry(self):
+        names = site_names()
+        rows, _ = fw.record([], events(ARDUCAM[0], 1, 2, 3), CFG, now=3, names=names)
+        later = 3 + CFG["ttl_days"] * 86400 + 1
+        rows, changed = fw.expire(rows, CFG, now=later)
+        assert changed and bp.routed_addresses(rows) == []
+
+
+class TestAddressesOf:
+    def test_newest_answer_wins_and_old_ones_expire(self):
+        m = dn.NameMap(ttl=100)
+        m.record("a.example.org", ["104.26.6.51", "104.26.7.51"], now=0)
+        m.record("b.example.org", ["104.26.7.51"], now=10)
+        assert m.addresses_of("a.example.org", now=50) == ["104.26.6.51"]
+        assert m.addresses_of("b.example.org", now=50) == ["104.26.7.51"]
+        assert m.addresses_of("a.example.org", now=200) == []
+        assert m.addresses_of("", now=50) == []

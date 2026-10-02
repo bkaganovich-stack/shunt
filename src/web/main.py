@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.24.5"
+VERSION = "2.24.6"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -22,6 +22,7 @@ import dnspath as _dns
 import geosite as _geo
 import blockprobe as _bp
 import freezewatch as _fw
+import dnsnames as _dnames
 import profiles as _profiles
 
 import uvicorn
@@ -2510,17 +2511,23 @@ async def _freeze_watch_loop() -> None:
                 text = await loop.run_in_executor(None, _ss_outgoing, wan_ip)
                 events = tracker.observe(_fw.parse_ss(text, owned=True), now)
                 if events:
+                    # The resolver's names tell which addresses are one site,
+                    # so the site goes into the tunnel whole (freezewatch.record).
+                    names = await loop.run_in_executor(None, _dnames.NameMap.load)
                     s = load_settings()
-                    s["discovered"], changed = _fw.record(s.get("discovered", []), events, cfg)
+                    s["discovered"], changed = _fw.record(s.get("discovered", []), events, cfg,
+                                                          names=names)
                     save_settings(s)
                     pending = pending or changed
             waiting = _fw.pending(load_settings().get("discovered", []))
             if waiting:
                 socks = _ft._probe_paths(load_settings())[1]
+                names = await loop.run_in_executor(None, _dnames.NameMap.load)
                 for ip in waiting[:5]:
                     ok = await loop.run_in_executor(None, _tunnel_answers, ip, socks)
                     s = load_settings()
-                    s["discovered"], changed = _fw.confirm(s.get("discovered", []), ip, ok)
+                    s["discovered"], changed = _fw.confirm(s.get("discovered", []), ip, ok,
+                                                           names=names)
                     save_settings(s)
                     pending = pending or changed
             if now - last_expire > 3600:
