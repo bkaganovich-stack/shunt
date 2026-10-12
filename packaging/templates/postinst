@@ -9,6 +9,15 @@ UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.servi
        shunt-fptn-egress.service shunt-geoupdate.timer
        shunt-nic-offload.service shunt-offload-watch.service
        shunt-offload-watch.timer fptn-resolv-heal.service"
+# The cascade egresses are instances of one template, one per exit the cascade
+# server has issued a configuration for; an exit with no configuration has
+# nothing to run and stays out of the list.
+EGRESSES=""
+for n in amnezia trusttunnel; do
+    [ -n "$(ls -A "/opt/shunt/config/egress/$n" 2>/dev/null)" ] || continue
+    EGRESSES="$EGRESSES shunt-egress@$n.service"
+done
+UNITS="$UNITS$EGRESSES"
 
 # Units the package must keep out of the way. Both exist for the same reason:
 # Shunt runs the same software itself, differently. hostapd is started by
@@ -230,6 +239,9 @@ case "$1" in
     # directory the switch below still has to move.
     for u in $UNITS; do
         [ -f "/lib/systemd/system/$u" ] && systemctl enable "$u" >/dev/null 2>&1 || true
+    done
+    for u in $EGRESSES; do
+        systemctl enable "$u" >/dev/null 2>&1 || true
     done
 
     # ══ 3. Switch over ═══════════════════════════════════════════════════════

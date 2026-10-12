@@ -1,3 +1,32 @@
+shunt (2.25.0) stable; urgency=medium
+
+  * Two new egresses through the user's own cascade (entry in Riga, exit in
+    Miami): AmneziaWG 2.0 and TrustTunnel. Each runs in a network namespace
+    of its own, the way FPTN does, and shows the host nothing but a SOCKS
+    port on the namespace's veth address: AmneziaWG behind an xray bridge
+    on 192.168.244.6:1083, TrustTunnel on its own listener at
+    192.168.244.10:1084. They are not yet used by routing; this release
+    only makes them permanent, measured services. FPTN is unchanged.
+  * Fail closed: with the tunnel down, a request through either port fails
+    instead of leaving on the ISP address. Measured: AmneziaWG with awg0
+    down and TrustTunnel with Riga unreachable both refuse, and both come
+    back on their own.
+  * shunt-egress@.service, one instance per exit for which the cascade
+    server has issued a configuration (/opt/shunt/config/egress/<name>).
+    It does not start without the clients or a configuration, and backs
+    off like FPTN when it cannot start. AmneziaWG's private key is deleted
+    from the runtime directory as soon as the interface is configured.
+  * The clients ship separately in shunt-egress-bin, like xray in
+    shunt-xray: the TrustTunnel client 1.1.11 as released by AdGuard
+    (signature verified against key 28645AC9...2EC6), amneziawg-go and awg
+    built from upstream tags v3.1.20260828 and v3.1.20260812. awg-quick is
+    deliberately not used: it rewrites the host's routes and resolver.
+  * The TPROXY exclusion for isolated egresses widens from FPTN's /30 to
+    192.168.244.0/28, so a rebuild of the firewall can no longer send the
+    new egresses' tunnel traffic into the primary one.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 12 Oct 2026 13:00:00 +0300
+
 shunt (2.24.7) stable; urgency=medium
 
   * When the freeze detector routes an address, it also ends xray's

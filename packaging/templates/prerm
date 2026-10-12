@@ -8,6 +8,10 @@ UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.servi
        shunt-selfupdate.service shunt-selfupdate.timer"
 case "$1" in
   remove)
+    for u in $(systemctl list-units --all --plain --no-legend 'shunt-egress@*' 2>/dev/null | awk '{print $1}'); do
+        systemctl stop "$u" >/dev/null 2>&1 || true
+        systemctl disable "$u" >/dev/null 2>&1 || true
+    done
     for u in $UNITS; do
         systemctl stop "$u" >/dev/null 2>&1 || true
         systemctl disable "$u" >/dev/null 2>&1 || true

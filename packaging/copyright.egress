@@ -1,0 +1,19 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: shunt-egress-bin
+Comment: Third-party binaries repackaged unmodified for Shunt.
+
+Files: opt/shunt/egress/bin/amneziawg-go
+Copyright: WireGuard LLC, Jason A. Donenfeld, Amnezia
+Source: https://github.com/amnezia-vpn/amneziawg-go (tag v3.1.20260828, b5928efb6ca1)
+License: MIT
+
+Files: opt/shunt/egress/bin/awg
+Copyright: Jason A. Donenfeld, Amnezia
+Source: https://github.com/amnezia-vpn/amneziawg-tools (tag v3.1.20260812, ee0f0a9aa34f)
+License: GPL-2.0-only
+
+Files: opt/shunt/egress/bin/trusttunnel_client opt/shunt/egress/bin/setup_wizard
+Copyright: AdGuard Software Ltd
+Source: https://github.com/TrustTunnel/TrustTunnelClient (release v1.1.11)
+License: Apache-2.0
+Comment: Signed by AdGuard key 28645AC9776EC4C00BCE2AFC0FE641E7235E2EC6.

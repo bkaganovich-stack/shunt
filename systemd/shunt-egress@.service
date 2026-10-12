@@ -1,0 +1,24 @@
+[Unit]
+Description=Shunt — %i egress through the own cascade (isolated netns + SOCKS)
+After=network-online.target shunt.service
+Wants=network-online.target
+# Both are optional: without the clients (shunt-egress-bin) or without a
+# configuration issued by the cascade server there is nothing to run, and
+# Restart=always would loop forever.
+ConditionPathIsDirectory=/opt/shunt/egress/bin
+ConditionDirectoryNotEmpty=/opt/shunt/config/egress/%i
+
+[Service]
+Type=simple
+ExecStartPre=/opt/shunt/scripts/egress-netns.sh %i setup
+ExecStart=/opt/shunt/scripts/egress-netns.sh %i run
+ExecStopPost=/opt/shunt/scripts/egress-netns.sh %i teardown
+Restart=always
+# Same backoff as FPTN: each failed start builds and tears down a veth, and
+# the AdGuard client reconnects on every link change it sees (Sep 25).
+RestartSec=10
+RestartSteps=6
+RestartMaxDelaySec=600
+
+[Install]
+WantedBy=multi-user.target

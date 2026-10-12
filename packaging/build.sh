@@ -40,7 +40,7 @@ for f in "$ROOT"/src/scripts/*; do
 done
 # The FPTN egress script drops privileges and edits a network namespace; it is
 # root-only on the live system and stays that way in the package.
-chmod 750 "$P/opt/shunt/scripts/fptn-egress.sh"
+chmod 750 "$P/opt/shunt/scripts/fptn-egress.sh" "$P/opt/shunt/scripts/egress-netns.sh"
 install -m 644 "$ROOT"/systemd/*.service "$ROOT"/systemd/*.timer "$P/lib/systemd/system/"
 install -m 755 "$ROOT/packaging/shunt-setup" "$P/usr/sbin/"
 # Three scripts that ran for months out of /usr/local/sbin and /usr/sbin, placed

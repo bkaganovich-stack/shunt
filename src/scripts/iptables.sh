@@ -167,12 +167,13 @@ iptables -t mangle -N XRAY_PREROUTING
 iptables -t mangle -A PREROUTING -j XRAY_PREROUTING
 
 # Skip already-marked (xray's own) traffic
-# The FPTN second egress lives in a netns on this subnet. Its exclusion belongs
-# here, not in fptn-egress.sh: this chain is flushed and rebuilt on every
-# shunt restart, so a rule added elsewhere silently disappears and the
-# secondary egress starts being TPROXY-ed into the primary one — a second exit
-# must never be able to disturb the first.
-iptables -t mangle -A XRAY_PREROUTING -s 192.168.244.0/30 -j RETURN
+# The isolated egresses live in netns on 192.168.244.0/28: FPTN on .0/30, the
+# cascade's AmneziaWG on .4/30 and TrustTunnel on .8/30. Their exclusion
+# belongs here, not in their scripts: this chain is flushed and rebuilt on
+# every shunt restart, so a rule added elsewhere silently disappears and the
+# egress starts being TPROXY-ed into the primary one — a second exit must never
+# be able to disturb the first.
+iptables -t mangle -A XRAY_PREROUTING -s 192.168.244.0/28 -j RETURN
 iptables -t mangle -A XRAY_PREROUTING -m mark --mark $XRAY_MARK -j RETURN
 # Skip multicast / broadcast
 iptables -t mangle -A XRAY_PREROUTING -d 224.0.0.0/4   -j RETURN
