@@ -74,7 +74,7 @@ def test_a_dead_new_primary_is_left_to_the_fallback_loop(api):
 @pytest.mark.parametrize("body", [
     {"order": ["adguard", "amnezia"]},                       # incomplete
     {"order": ["adguard", "adguard", "trusttunnel", "fptn"]},  # duplicate
-    {"enabled": {"adguard": False}},                          # not ours to switch here
+    {"enabled": {"nope": True}},                              # no such egress
     {"enabled": {"trusttunnel": True}},                       # no config issued yet
 ])
 def test_bad_requests_change_nothing(api, body):
@@ -158,3 +158,72 @@ def test_probe_reads_the_world_side_of_the_egress(api, monkeypatch):
     assert (d["ip"], d["country"], d["ttfb_ms"], d["mbit"], d["alive"]) == ("45.91.138.73", "US", 681, 32.0, True)
     assert d["handshake_age"] is None
     assert client.get("/api/egresses/nope/probe").status_code == 404
+
+
+def test_adguard_and_fptn_switch_here_too(api):
+    client, state, runs, applied, _ = api
+    r = client.put("/api/egresses", json={"enabled": {"fptn": False}})
+    assert r.status_code == 200 and state["fptn"]["enabled"] is False
+    assert ["systemctl", "disable", "--now", "shunt-fptn-egress.service"] in runs
+    r = client.put("/api/egresses", json={"enabled": {"amnezia": True}})
+    r = client.put("/api/egresses", json={"enabled": {"adguard": False}})
+    assert r.status_code == 200 and state["adguard"]["enabled"] is False
+    assert r.json()["active"] == "amnezia" and applied == ["egress_order"]
+
+
+def test_the_last_tunnel_cannot_be_switched_off(api):
+    client, state, runs, applied, _ = api
+    client.put("/api/egresses", json={"enabled": {"fptn": False}})
+    runs.clear()
+    before = copy.deepcopy(state)
+    r = client.put("/api/egresses", json={"enabled": {"adguard": False}})
+    assert r.status_code == 400 and "напрямую" in r.json()["detail"]
+    assert state == before and runs == []
+
+
+def test_params_are_validated_saved_apart_and_reconnect(api):
+    client, state, runs, *_ = api
+    state["egresses"]["amnezia"]["enabled"] = True
+    body = {"params": {"mtu": 1380, "i1": {"enabled": True, "value": "<b 0xc3><r 8>"}}}
+    r = client.put("/api/egresses/amnezia/params", json=body)
+    assert r.status_code == 200, r.text
+    assert state["egresses"]["amnezia"]["params"] == body["params"]
+    assert ["systemctl", "restart", "shunt-egress@amnezia.service"] in runs
+    assert client.put("/api/egresses/amnezia/params", json={"params": {"mtu": 900}}).status_code == 400
+    assert client.put("/api/egresses/adguard/params", json={"params": {}}).status_code == 400
+    row = next(e for e in client.get("/api/egresses").json()["egresses"] if e["id"] == "amnezia")
+    assert row["params"]["mtu"] == 1380
+
+
+def test_restore_swaps_current_and_previous(api, cfgdir):
+    client, state, runs, *_ = api
+    d = cfgdir / "trusttunnel"; d.mkdir(parents=True)
+    (d / "endpoint.toml").write_text("new\n"); (d / "endpoint.toml.prev").write_text("old\n")
+    r = client.post("/api/egresses/trusttunnel/restore")
+    assert r.status_code == 200
+    assert (d / "endpoint.toml").read_text() == "old\n" and (d / "endpoint.toml.prev").read_text() == "new\n"
+    (d / "endpoint.toml.prev").unlink()
+    assert client.post("/api/egresses/trusttunnel/restore").status_code == 400
+
+
+def test_listing_counts_rules_pinned_to_an_egress(api):
+    client, state, *_ = api
+    state["profile_overrides"] = {"all_except_ru": {"name": "Всё, кроме России", "custom_rules": [
+        {"kind": "domain", "value": "sony.com", "route": "egress:amnezia"},
+        {"kind": "domain", "value": "4pda.to", "route": "egress:amnezia"},
+        {"kind": "domain", "value": "x.org", "route": "tunnel"}]}}
+    row = next(e for e in client.get("/api/egresses").json()["egresses"] if e["id"] == "amnezia")
+    assert row["pinned"] == [{"profile": "all_except_ru", "name": "Всё, кроме России", "count": 2}]
+
+
+def test_config_facts_show_what_the_file_sets_and_nothing_secret(api, cfgdir):
+    client, *_ = api
+    (cfgdir / "amnezia").mkdir(parents=True)
+    (cfgdir / "amnezia" / "awg.conf").write_text(AWG_OK.replace("Jc = 5", "MTU = 1380\nI1 = <b 0xff>\nJc = 5"))
+    (cfgdir / "trusttunnel").mkdir(parents=True)
+    (cfgdir / "trusttunnel" / "endpoint.toml").write_text(TT_OK + 'upstream_protocol = "http2"\nanti_dpi = false\n')
+    d = client.get("/api/egresses")
+    rows = {e["id"]: e for e in d.json()["egresses"]}
+    assert rows["amnezia"]["config_facts"] == {"mtu": 1380, "i1": "<b 0xff>"}
+    assert rows["trusttunnel"]["config_facts"] == {"protocol": "http2", "anti_dpi": False}
+    assert "PrivateKey" not in d.text and "cHJpdmF0" not in d.text and "secret-pw" not in d.text

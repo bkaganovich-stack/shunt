@@ -124,7 +124,8 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
   const discoveries=make('div','discovery-counts');discoveries.innerHTML='<div><strong data-ui="discoveredTotal">—</strong><span>записей найдено</span></div><div><strong data-ui="discoveredRouted">—</strong><span>переведено в туннель</span></div>';discoveredCard.querySelector('h3').after(discoveries);
   ['geo','rules','subscriptions'].forEach(p=>routeMain.append($('#page-'+p)));routeMain.append(discoveredPage);
   const exitStrip=make('div','route-foot');exitStrip.innerHTML='<span><span>Выход для туннеля</span>: <strong data-ui="egressFull">—</strong><br><span class="muted" data-ui="reserve">—</span></span><a class="plain" href="#egress/vpn">Настроить выходы →</a>';routeMain.append(exitStrip);
-  const serverPage=make('section','page');serverPage.id='page-servers';serverPage.innerHTML='<h2>VPN серверы</h2>';
+  const serverPage=make('section','page');serverPage.id='page-servers';serverPage.innerHTML='<h2>VPN серверы</h2><p class="page-desc">Ваши VPN: ключи и конфигурации, проверка подключения и параметры каждого. Включение и порядок — на вкладке «Активный выход».</p>';
+  serverPage.append($('#conn-cards'));
   Array.from($('#page-vpn').children).filter(c=>c.classList.contains('card')&&(c.querySelector('#vpn-servers-list')||c.querySelector('#vpn-add-key'))).forEach(c=>serverPage.append(c));main.append(serverPage);
   // Lists: actual file metadata, never the numbers from the design brief.
   const geoPage=$('#page-geo'),geoDetails=make('details','ui-details');geoDetails.append(make('summary','','Обновление гео-баз'),geoPage.querySelector('.card'));
@@ -174,7 +175,7 @@ const UI_SYMBOLS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"
     if(!ui.authenticated)return;ui.lastStatus=d;
     const e=M.egress(d);text('state',({connected:'Подключено',connecting:'Подключение…',error:'Ошибка',stopped:'Остановлено',unmeasured:'Не измерено',no_key:'Ключ не задан'})[d.state]||'Не измерено');
     $$('[data-ui-dot]').forEach(n=>n.style.background=e.healthy?'var(--green)':d.state==='error'?'var(--red)':'var(--muted)');
-    text('egressName',e.name);text('egressLocation',e.location);text('egressFull',[e.name,e.location].filter(Boolean).join(' · '));text('reserve',e.reserve?'FPTN — резервный выход':d.egress_active==='fptn'?'Используется резервный выход':'Резервный выход не включён');
+    text('egressName',e.name);text('egressLocation',e.location);text('egressFull',[e.name,e.location].filter(Boolean).join(' · '));text('reserve',e.reserve);
     text('profile',PROFILE_LABELS[d.profile]||'Не измерено');text('profileDescription',descriptions[d.profile]||'Не измерено');text('lan',d.gateway_ip||'—');
     if(!ui.profileDirty)$('#ui-profile-select').value=d.profile;
     window.ShuntProfiles?.refresh();

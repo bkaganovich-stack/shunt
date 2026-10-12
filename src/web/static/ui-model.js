@@ -53,7 +53,15 @@
     if(direct+vpn+blocked>total)return null;
     return {total,direct,vpn,blocked,other:total-direct-vpn-blocked,directPercent:total?direct/total*100:0,vpnPercent:total?vpn/total*100:0};
   }
-  function egress(s) {if(!s)return {name:'Не измерено',location:'',healthy:false,reserve:false};const fptn=s.egress_active==='fptn';return {name:fptn?'FPTN':s.egress?.kind==='adguard'?'AdGuard VPN':s.vpn?.protocol||'Не измерено',location:fptn?'':s.egress?.location||s.vpn?.server||'',healthy:s.state==='connected',reserve:!!s.fptn_enabled&&!fptn};}
+  // The egress carrying the house and what stands behind it, in the user's order.
+  function egress(s) {
+    if(!s)return {name:'Не измерено',location:'',healthy:false,reserve:'Резервный выход не включён'};
+    const name=s.egress?.label||s.vpn?.protocol||'Не измерено';
+    const reserves=Array.isArray(s.egress_reserves)?s.egress_reserves:[];
+    const onReserve=!!s.egress_primary&&!!s.egress_active&&s.egress_primary!==s.egress_active;
+    return {name,location:s.egress?.location||(s.egress?'':s.vpn?.server||''),healthy:s.state==='connected',
+      reserve:onReserve?'Основной выход не отвечает — работает резервный':reserves.length?'Резерв: '+reserves.join(', '):'Резервный выход не включён'};
+  }
   function discovery(rows) {if(!Array.isArray(rows))return null;return {total:rows.length,routed:rows.filter(r=>r.routed&&r.enabled!==false).length,unrouted:rows.filter(r=>!r.routed&&r.enabled!==false).length,disabled:rows.filter(r=>r.enabled===false).length};}
   function wan(data) {
     const address=data?.wan?.ip||'';

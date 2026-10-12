@@ -42,14 +42,19 @@ def _resolve4(host: str) -> str:
     raise ValueError("cannot resolve %s" % host)
 
 
-def split_awg(text: str, resolve=_resolve4) -> tuple[str, dict]:
+def split_awg(text: str, resolve=_resolve4, params: dict | None = None) -> tuple[str, dict]:
     """
     Split an awg-quick client config into (setconf text, interface facts).
 
     The facts are what the namespace needs set by hand instead: the tunnel
     address, MTU, DNS server, and the endpoint's address, which must be routed
     via the veth so the tunnel's own packets do not try to enter the tunnel.
+
+    `params` are the user's own settings from the web page (egresses.py), laid
+    over the file: an MTU, and I1 switched on with a value or switched off.
+    The file is left as the server issued it.
     """
+    params = params or {}
     out, facts = [], {"mtu": "1420", "dns": ""}
     section = ""
     for raw in text.splitlines():
@@ -74,7 +79,17 @@ def split_awg(text: str, resolve=_resolve4) -> tuple[str, dict]:
                 facts["endpoint_ip"] = resolve(host)
                 facts["endpoint_port"] = port
                 line = "Endpoint = %s:%s" % (facts["endpoint_ip"], port)
+        if section == "[interface]" and m and m.group(1).lower() == "i1" and "i1" in params:
+            continue                    # replaced (or dropped) below
         out.append(line)
+    if params.get("mtu"):
+        facts["mtu"] = str(params["mtu"])
+    i1 = params.get("i1")
+    if i1 and i1.get("enabled") and i1.get("value"):
+        at = next((n for n, l in enumerate(out) if l.lower() == "[peer]"), len(out))
+        while at > 0 and not out[at - 1].strip():
+            at -= 1
+        out.insert(at, "I1 = " + i1["value"])
     if not facts.get("address"):
         raise ValueError("awg.conf has no IPv4 Address")
     if not facts.get("endpoint_ip"):
@@ -83,7 +98,7 @@ def split_awg(text: str, resolve=_resolve4) -> tuple[str, dict]:
 
 
 def tt_client(wizard: str, socks: str, user: str | None = None, password: str | None = None,
-              protocol: str = "http3", resolve=_resolve4) -> str:
+              protocol: str = "http3", resolve=_resolve4, anti_dpi: bool | None = None) -> str:
     """
     Rewrite the setup wizard's client config for SOCKS-only use in a namespace.
 
@@ -107,6 +122,8 @@ def tt_client(wizard: str, socks: str, user: str | None = None, password: str | 
     s = re.sub(r'(?m)^killswitch_enabled\s*=.*$', "killswitch_enabled = false", s)
     s = re.sub(r'(?m)^has_ipv6\s*=.*$', "has_ipv6 = false", s)
     s = re.sub(r'(?m)^upstream_protocol\s*=.*$', 'upstream_protocol = "%s"' % protocol, s)
+    if anti_dpi is not None:
+        s = re.sub(r'(?m)^anti_dpi\s*=.*$', "anti_dpi = %s" % ("true" if anti_dpi else "false"), s)
     # Everything from the listener section on is replaced: the wizard writes a
     # TUN listener, and a client holding both would also grab the route.
     s = re.sub(r"(?ms)^\[listener\].*\Z", "", s).rstrip() + "\n"
@@ -119,21 +136,36 @@ def tt_client(wizard: str, socks: str, user: str | None = None, password: str | 
     return s
 
 
+def _params(path: str | None, ident: str) -> dict:
+    """The user's parameters for one egress, from settings.json; none if unreadable."""
+    if not path:
+        return {}
+    try:
+        import json
+        s = json.load(open(path))
+        return dict(((s.get("egresses") or {}).get(ident) or {}).get("params") or {})
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
 def main(argv: list[str]) -> int:
     if len(argv) >= 4 and argv[1] == "awg":
-        setconf, facts = split_awg(open(argv[2]).read())
+        setconf, facts = split_awg(open(argv[2]).read(),
+                                   params=_params(argv[4] if len(argv) > 4 else None, "amnezia"))
         with open(argv[3], "w") as f:
             f.write(setconf)
         for k in ("address", "mtu", "dns", "endpoint_ip", "endpoint_port"):
             print("%s=%s" % (k.upper(), facts.get(k, "")))
         return 0
     if len(argv) >= 6 and argv[1] == "tt":
-        out = tt_client(open(argv[2]).read(), argv[4], protocol=argv[5])
+        p = _params(argv[6] if len(argv) > 6 else None, "trusttunnel")
+        out = tt_client(open(argv[2]).read(), argv[4], protocol=p.get("protocol") or argv[5],
+                        anti_dpi=p.get("anti_dpi"))
         with open(argv[3], "w") as f:
             f.write(out)
         return 0
-    print("usage: egress_config.py awg <awg.conf> <setconf-out>\n"
-          "       egress_config.py tt <wizard.toml> <out.toml> <socks-addr> <http2|http3>",
+    print("usage: egress_config.py awg <awg.conf> <setconf-out> [settings.json]\n"
+          "       egress_config.py tt <wizard.toml> <out.toml> <socks-addr> <http2|http3> [settings.json]",
           file=sys.stderr)
     return 2
 

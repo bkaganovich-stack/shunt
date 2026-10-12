@@ -1,3 +1,29 @@
+shunt (2.29.0) stable; urgency=medium
+
+  * The egress pages are split by question. "VPN серверы" holds the
+    connections themselves -- AdGuard VPN, AmneziaWG, TrustTunnel and FPTN as
+    cards of one anatomy: a check through the egress (exit address, network,
+    response, speed, AmneziaWG's last handshake), access (account, token or
+    configuration, with "restore previous"), and the settings of that kind:
+    AdGuard's location, protocol and post-quantum handshake; the FPTN server;
+    AmneziaWG's MTU and I1; TrustTunnel's protocol and anti-DPI. "Активный
+    выход" holds only the order, a switch for every egress and the failover
+    switch, with the number of profile rules pinned to each egress.
+  * Hand-set parameters (MTU, I1, protocol, anti-DPI) live apart from the
+    configuration the cascade server issues and are laid over it at every
+    start, so re-uploading a fresh configuration no longer loses them. The
+    page shows the file's own value next to the override.
+  * AdGuard and FPTN are switched on and off in the same list as the
+    cascade. The last tunnel cannot be switched off: the whole house would
+    otherwise go out directly without anyone having asked for that.
+  * The previous configuration or FPTN token can be restored from the page;
+    the two are swapped, so the step can be undone.
+  * The overview's egress line names whichever egress carries the house and
+    lists the reserves in order, instead of knowing only AdGuard and FPTN.
+  * Everything new is translated for the English interface.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 12 Oct 2026 23:30:00 +0300
+
 shunt (2.28.0) stable; urgency=medium
 
   * A profile rule can now name an egress: "sony.com -> through AmneziaWG"

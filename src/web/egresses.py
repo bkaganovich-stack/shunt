@@ -132,3 +132,70 @@ def decide(settings: dict, alive, fails: int, threshold: int = 3,
             stay = reserve == current and not settings.get("fallback_saved_profile")
             return reserve, fails, ("stay" if stay else "switch")
     return current, fails, "direct"
+
+
+# ── Per-egress parameters, kept apart from the server-issued configuration ──
+# A config re-issued by the cascade server must not silently drop what the user
+# tuned by hand (MTU, I1), so those live in settings and are applied over the
+# file each time the egress starts (egress_config.py), never written into it.
+_I1_RE = None
+
+
+def clean_params(ident: str, data: dict) -> dict:
+    """Validate parameters for one egress; raises ValueError in the user's words."""
+    import re
+    global _I1_RE
+    if not isinstance(data, dict):
+        raise ValueError("Параметры должны быть объектом")
+    if ident == "amnezia":
+        out = {}
+        mtu = data.get("mtu")
+        if mtu not in (None, ""):
+            try:
+                mtu = int(mtu)
+            except (TypeError, ValueError):
+                raise ValueError("MTU — целое число") from None
+            if not 1280 <= mtu <= 1500:
+                raise ValueError("MTU должен быть от 1280 до 1500")
+            out["mtu"] = mtu
+        i1 = data.get("i1")
+        if i1 is not None:
+            if not isinstance(i1, dict) or not isinstance(i1.get("enabled"), bool):
+                raise ValueError("I1: укажите, включён ли он")
+            value = str(i1.get("value") or "").strip()
+            _I1_RE = _I1_RE or re.compile(r"^(<(b 0x[0-9a-fA-F]+|r \d{1,4}|rc \d{1,4}|rd \d{1,4}|c|t)>)+$")
+            if value and (len(value) > 4000 or not _I1_RE.match(value.replace("> <", "><"))):
+                raise ValueError("I1 не похож на сигнатуру AmneziaWG: ожидаются теги вида <b 0x…><r 8>")
+            if i1["enabled"] and not value:
+                raise ValueError("Чтобы включить I1, задайте его значение")
+            out["i1"] = {"enabled": i1["enabled"], "value": value}
+        return out
+    if ident == "trusttunnel":
+        out = {}
+        if data.get("protocol") is not None:
+            if data["protocol"] not in ("http2", "http3"):
+                raise ValueError("Протокол: http2 или http3")
+            out["protocol"] = data["protocol"]
+        if data.get("anti_dpi") is not None:
+            if not isinstance(data["anti_dpi"], bool):
+                raise ValueError("anti-DPI: да или нет")
+            out["anti_dpi"] = data["anti_dpi"]
+        return out
+    raise ValueError("У этого выхода нет отдельных параметров")
+
+
+def params(settings: dict, ident: str) -> dict:
+    return dict((settings.get("egresses") or {}).get(ident, {}).get("params") or {})
+
+
+def pinned_rules(settings: dict, ident: str) -> list[dict]:
+    """Profile rules that name this egress, per profile: what switching it off affects."""
+    route = "egress:" + ident
+    out = []
+    sources = [(k, v) for k, v in (settings.get("profile_overrides") or {}).items()] + \
+              [(k, (v or {}).get("config") or {}) for k, v in (settings.get("custom_profiles") or {}).items()]
+    for pid, cfg in sources:
+        n = sum(1 for r in (cfg.get("custom_rules") or []) if r.get("route") == route)
+        if n:
+            out.append({"profile": pid, "name": cfg.get("name") or pid, "count": n})
+    return out

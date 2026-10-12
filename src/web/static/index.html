@@ -675,119 +675,24 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
     <!-- ── VPN SERVERS ──────────────────────────────────────────────────── -->
     <div id="page-vpn" class="page">
       <h2>VPN серверы</h2>
-      <p class="page-desc">Выход в интернет и управление VPN-серверами. Активный выход используется для заблокированного трафика.</p>
+      <p class="page-desc">Через какие выходы идёт трафик и в каком порядке они подменяют друг друга. Подключения и их настройки — на вкладке «VPN серверы».</p>
 
-      <!-- Egress ladder: every tunnel, in the order the fallback walks -->
-      <div class="card" id="egresses-card" style="border-color:rgba(52,211,153,0.4)">
-        <div class="card-title">🧭 Выходы и порядок резервирования</div>
-        <p class="text-muted" style="font-size:12px;margin:0 0 10px">
-          Трафик идёт через первый включённый выход. Если он не отвечает около трёх минут,
-          его подменяет следующий живой по списку; когда первый оживает — трафик возвращается к нему.
-          «Напрямую» — только если не отвечает ни один.
-        </p>
-        <div id="egresses-list"><div class="text-muted" style="font-size:13px">Загрузка…</div></div>
-        <div id="egresses-foot" class="text-muted" style="font-size:12px;margin-top:8px"></div>
+      <!-- The ladder: which egresses may carry the house, and in what order. -->
+      <div class="card eg-ladder" id="egresses-card">
+        <div class="card-title">Порядок выходов</div>
+        <p class="eg-lead">Трафик идёт через первый включённый выход. Если он не отвечает около трёх минут, его подменяет следующий живой по списку; когда первый оживает, трафик возвращается к нему. Напрямую — только если не отвечает ни один.</p>
+        <div id="egresses-list" class="eg-list" aria-live="polite"><div class="eg-empty">Загрузка…</div></div>
+        <div class="override-row eg-foot" id="eg-foot" hidden>
+          <div class="override-label">Автопереход между выходами <span class="hint" tabindex="0" data-tip="Выключен — при сбое основного выхода трафик сам не переключится на резервный.">?</span></div>
+          <label class="toggle"><input type="checkbox" id="eg-auto-fallback" onchange="setLadderAutoFallback(this.checked)"><span class="slider"></span></label>
+        </div>
       </div>
 
-      <!-- Egress selection (unified: AdGuard VPN vs server key) -->
-      <div class="card" style="border-color:rgba(108,142,245,0.4)">
-        <div class="card-title">🛰️ Выход в интернет (egress)</div>
-        <div class="override-row" style="border:none;margin:0;padding:6px 0 12px 0">
-          <div class="override-label">Через AdGuard VPN <span class="hint" tabindex="0" data-tip="Заблокированный трафик пойдёт через туннель AdGuard. Эта настройка перекрывает выбранный ниже сервер.">?</span></div>
-          <label class="toggle"><input type="checkbox" id="egress-adguard" onchange="renderEgressHint()"><span class="slider"></span></label>
-        </div>
-        <div class="info-row">
-          <span class="info-key">Активный выход сейчас</span>
-          <span id="egress-active" class="info-val monospace text-green">—</span>
-        </div>
-        <div id="egress-ag-detail" style="display:none">
-          <div class="info-row">
-            <span class="info-key">AdGuard: подключение</span>
-            <span id="egress-ag-status" class="info-val monospace">—</span>
-          </div>
-          <div class="info-row">
-            <span class="info-key">AdGuard: лицензия</span>
-            <span id="egress-ag-license" class="info-val monospace">—</span>
-          </div>
-          <div class="override-row" style="padding:8px 0">
-            <div class="override-label">Локация AdGuard</div>
-            <select id="egress-ag-location" style="min-width:210px">
-              <option value="">— оставить текущую —</option>
-              <option value="United States">США (быстрейший)</option>
-              <option value="New York">США — Нью-Йорк</option>
-              <option value="Silicon Valley">США — Кремниевая долина</option>
-              <option value="Los Angeles">США — Лос-Анджелес</option>
-              <option value="Dallas">США — Даллас</option>
-              <option value="Miami">США — Майами</option>
-              <option value="Netherlands">Нидерланды</option>
-              <option value="Germany">Германия</option>
-              <option value="Estonia">Эстония</option>
-              <option value="Atlanta">США — Атланта</option>
-            </select>
-          </div>
-          <div class="btn-row" style="margin-top:2px">
-            <button class="btn btn-secondary btn-sm" onclick="measurePings()">Замерить пинги</button>
-            <span id="egress-ping-status" class="text-muted" style="font-size:12px"></span>
-          </div>
-          <div id="egress-pings" style="display:none;max-height:260px;overflow-y:auto;border:1px solid rgba(128,128,128,.25);border-radius:8px;padding:6px;margin-bottom:10px"></div>
-          <div class="override-row" style="padding:8px 0">
-            <div class="override-label">Постквантовая криптография <span class="hint" tabindex="0" data-tip="Защита от «записать сейчас — расшифровать потом»: перехваченный сегодня трафик могут расшифровать позже, когда квантовые компьютеры станут достаточно мощными. Переключение переподключит туннель.">?</span></div>
-            <label class="toggle"><input type="checkbox" id="egress-ag-pq"><span class="slider"></span></label>
-          </div>
-          <div class="text-muted" style="font-size:12px">Вход в аккаунт AdGuard и продление — на шлюзе: <span class="monospace">sudo runuser -u agvpn -- env HOME=/var/lib/agvpn adguardvpn-cli login</span></div>
-        </div>
-        <div class="btn-row" style="margin-top:6px">
-          <button class="btn btn-primary" onclick="saveEgress()">Применить выход</button>
-          <span id="egress-result" class="text-muted" style="font-size:13px"></span>
-        </div>
-      </div>
+      <!-- Connections: one card per VPN, moved to the servers tab by ui.js. -->
+      <div id="conn-cards" class="conn-grid"><div class="card conn-loading">Загрузка подключений…</div></div>
 
       <div class="card">
-        <div class="card-title">⚙️ Настройки выхода</div>
-
-        <div class="override-row" style="border:none;padding:6px 0">
-          <div class="override-label">Протокол AdGuard <span class="hint" tabindex="0" data-tip="QUIC быстрее, но идёт по UDP: если UDP фильтруется или IPv6 объявлен, но не работает, переподключение может зависать. HTTP/2 идёт по TCP — выберите его, если туннель перестал восстанавливаться сам.">?</span></div>
-          <select id="ag-protocol" style="min-width:150px" onchange="saveAgProtocol()">
-            <option value="">— не менять —</option>
-            <option value="http2">HTTP/2 (надёжнее)</option>
-            <option value="quic">QUIC (быстрее)</option>
-            <option value="auto">Авто</option>
-          </select>
-        </div>
-
-        <div class="override-row" style="padding:10px 0">
-          <div class="override-label">Резервный выход FPTN <span class="hint" tabindex="0" data-tip="Отдельный провайдер и протокол. Его место в очереди резервирования — в блоке «Выходы и порядок резервирования» выше.">?</span></div>
-          <label class="toggle"><input type="checkbox" id="fptn-enabled" onchange="saveFptn({enabled:this.checked})"><span class="slider"></span></label>
-        </div>
-
-        <div id="fptn-detail" style="display:none">
-          <div class="info-row">
-            <span class="info-key">Служба FPTN</span>
-            <span id="fptn-service" class="info-val monospace">—</span>
-          </div>
-          <div class="override-row" style="padding:8px 0">
-            <div class="override-label">Сервер FPTN <span class="hint" tabindex="0" data-tip="Не каждый сервер принимает подключения в любой момент. Если выбранный не отвечает, попробуйте другой в той же стране.">?</span></div>
-            <select id="fptn-server" style="min-width:230px"></select>
-          </div>
-          <div class="btn-row">
-            <button class="btn btn-sm btn-primary" onclick="applyFptnServer()">Применить сервер</button>
-            <span id="fptn-result" class="text-muted" style="font-size:12px"></span>
-          </div>
-        </div>
-
-        <div class="override-row" style="padding:10px 0 6px">
-          <div class="override-label">Токен FPTN <span class="hint" tabindex="0" data-tip="Токен выдаёт бот FPTN в Telegram; он начинается с «fptn:» или «fptnb:». Сохранение заменяет старый токен (он остаётся на шлюзе как token.prev) и переподключает FPTN.">?</span></div>
-          <span id="fptn-token-info" class="text-muted" style="font-size:12px">—</span>
-        </div>
-        <textarea id="fptn-token" rows="2" style="min-height:0;width:100%" placeholder="fptn:… — вставьте новый токен" autocomplete="off" spellcheck="false"></textarea>
-        <div class="btn-row">
-          <button class="btn btn-sm btn-secondary" onclick="saveFptnToken()">Сохранить токен</button>
-          <span id="fptn-token-result" class="text-muted" style="font-size:12px"></span>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Серверы (ключи Shadowsocks / VLESS / …)</div>
+        <div class="card-title">Другие серверы (ключи Shadowsocks / VLESS / …)</div>
         <div id="vpn-servers-list">
           <div class="text-muted" style="font-size:13px;padding:8px 0">Загрузка…</div>
         </div>
@@ -2020,12 +1925,12 @@ function legacyShowPage(name, linkEl) {
 
   if (name === 'logs') { loadLogs(); if (currentLogTab === 'connections') loadConnections(); }
   if (name === 'geo') loadGeoInfo();
-  if (name === 'servers') loadVpnServers();
+  if (name === 'servers') { loadConnections(); loadVpnServers(); }
   if (name === 'discovered') loadDiscovered();
   if (name === 'settings') { loadAbout(); loadSnapshots(); loadTopology(); loadNetIfaces(); }
   if (name === 'rules' && !window.shuntUI?.rulesDirty) loadRules();
   if (name === 'devices') loadDevices();
-  if (name === 'vpn') { loadVpnServers(); loadFptn(); loadEgresses(); }
+  if (name === 'vpn') loadLadder();
   if (name === 'dns') { loadDnsSettings(); loadDnsStatus(); }
   if (name === 'path') startPathPolling(); else stopPathPolling();
   if (name === 'inbound') loadInbound();
@@ -3591,39 +3496,15 @@ const POLICY_CSS = {
 };
 
 async function loadVpnServers() {
-  const [r, ag] = await Promise.all([
-    apiJ('GET', '/api/vpn-servers'),
-    apiJ('GET', '/api/adguard'),
-  ]);
-  const agOn = !!(ag && ag.enabled);
-  // ── Egress card ──
-  const cb = document.getElementById('egress-adguard');
-  if (cb) cb.checked = agOn;
-  const det = document.getElementById('egress-ag-detail');
-  if (det) det.style.display = agOn ? 'block' : 'none';
-  const agst = document.getElementById('egress-ag-status');
-  if (agst && ag) {
-    agst.textContent = ag.connected ? 'подключён' + (ag.location ? ' (' + ag.location + ')' : '') : 'не подключён';
-    agst.className = 'info-val monospace ' + (ag.connected ? 'text-green' : 'text-red');
-  }
-  const pq = document.getElementById('egress-ag-pq');
-  if (pq && ag) pq.checked = !!ag.post_quantum;
-  if (agOn) { loadAgLicense(); loadAgLocations(ag.location); }
-  const proto = document.getElementById('ag-protocol');
-  if (proto && ag && ag.protocol && proto.querySelector('option[value="' + ag.protocol + '"]'))
-    proto.value = ag.protocol;
-  // ── Server list ──
+  const [r, eg] = await Promise.all([apiJ('GET', '/api/vpn-servers'), apiJ('GET', '/api/egresses')]);
+  // Key-based servers carry traffic only when no egress in the ladder is on.
+  const covered = !!(eg && eg.active);
   if (!r) return;
   const el = document.getElementById('vpn-servers-list');
   const servers = r.servers || [];
-  const active = servers.find(s => s.is_active);
-  const actEl = document.getElementById('egress-active');
-  if (actEl && !window._egressActiveLabel) actEl.textContent = agOn
-    ? ('AdGuard VPN' + (ag.location ? ' · ' + ag.location : ''))
-    : (active ? active.name : 'сервер не выбран');
   if (!el) return;
-  const banner = agOn
-    ? '<div class="guide-note" style="margin-bottom:10px">🛰️ Сейчас активен выход <b>AdGuard VPN</b> — серверы ниже перекрыты. Выключите AdGuard в блоке выше, чтобы использовать сервер.</div>'
+  const banner = covered
+    ? '<div class="guide-note" style="margin-bottom:10px">Трафик сейчас идёт через выход из списка на вкладке «Активный выход» — эти серверы используются, только если там не включён ни один выход.</div>'
     : '';
   if (!servers.length) {
     el.innerHTML = banner + '<div class="text-muted" style="padding:8px 0;font-size:13px">Нет серверов. Добавьте первый VPN-ключ ниже.</div>';
@@ -3632,12 +3513,12 @@ async function loadVpnServers() {
   el.innerHTML = banner + servers.map(s => {
     const statusClass = s.last_status === 'ok' ? 'ok' : s.last_status === 'error' ? 'error' : 'unknown';
     const activeBadge = s.is_active
-      ? (agOn ? '<span class="badge badge-gray" style="font-size:11px">перекрыт AdGuard</span>'
-              : '<span class="badge badge-green" style="font-size:11px">Активный</span>')
+      ? (covered ? '<span class="badge badge-gray" style="font-size:11px">не используется</span>'
+                 : '<span class="badge badge-green" style="font-size:11px">Активный</span>')
       : '';
     const lat = s.latency_ms != null ? `${s.latency_ms} ms` : '—';
     const checked = s.last_checked ? new Date(s.last_checked).toLocaleTimeString('ru-RU') : 'никогда';
-    return `<div class="vpn-server-card ${s.is_active && !agOn ? 'active-server' : ''} ${!s.enabled ? 'disabled-server' : ''}">
+    return `<div class="vpn-server-card ${s.is_active && !covered ? 'active-server' : ''} ${!s.enabled ? 'disabled-server' : ''}">
       <div class="vpn-server-header">
         <div class="vpn-status-dot ${statusClass}"></div>
         <div class="vpn-server-name">${escHtml(s.name)} ${activeBadge}</div>
@@ -4450,12 +4331,6 @@ async function saveProxy() {
 }
 
 // ─── Egress (AdGuard VPN) — on the VPN page ───────────────────────────────────
-function renderEgressHint() {
-  const on = document.getElementById('egress-adguard').checked;
-  const det = document.getElementById('egress-ag-detail');
-  if (det) det.style.display = on ? 'block' : 'none';
-}
-
 function toggleAllSections() {
   window._navShowAll = !window._navShowAll;
   document.getElementById('nav-showall-label').textContent =
@@ -4467,98 +4342,6 @@ function toggleAllSections() {
 // The full list comes from the CLI itself (83 locations on Sep 25). The page
 // used to carry nine hand-picked ones, and "Atlanta" -- the one that turned out
 // fast -- was not among them. The static options stay as the fallback.
-let _agLocationsLoaded = false;
-async function loadAgLocations(current) {
-  const sel = document.getElementById('egress-ag-location');
-  if (!sel) return;
-  const keep = sel.options[0];
-  keep.textContent = current ? '— оставить текущую (' + current + ') —' : '— оставить текущую —';
-  if (_agLocationsLoaded) return;
-  const r = await apiJ('GET', '/api/adguard/locations');
-  if (!r || !r.ok || !(r.locations || []).length) return;
-  _agLocationsLoaded = true;
-  let names = null;
-  try { names = new Intl.DisplayNames(['ru'], { type: 'region' }); } catch (e) {}
-  const byCountry = {};
-  r.locations.forEach(l => (byCountry[l.country] = byCountry[l.country] || { iso: l.iso, list: [] }).list.push(l));
-  const label = c => { try { return names ? names.of(byCountry[c].iso) : c; } catch (e) { return c; } };
-  const chosen = sel.value;
-  sel.innerHTML = '';
-  sel.appendChild(keep);
-  Object.keys(byCountry).sort((a, b) => label(a).localeCompare(label(b), 'ru')).forEach(c => {
-    const g = document.createElement('optgroup');
-    g.label = label(c);
-    const list = byCountry[c].list.sort((a, b) => a.ping - b.ping);
-    if (list.length > 1) {
-      const o = document.createElement('option');
-      o.value = c; o.textContent = label(c) + ' — быстрейший';
-      g.appendChild(o);
-    }
-    list.forEach(l => {
-      const o = document.createElement('option');
-      o.value = l.city; o.textContent = l.city + ' · ' + l.ping + ' мс';
-      g.appendChild(o);
-    });
-    sel.appendChild(g);
-  });
-  if (chosen && [...sel.options].some(o => o.value === chosen)) sel.value = chosen;
-}
-
-async function measurePings() {
-  const st = document.getElementById('egress-ping-status');
-  const box = document.getElementById('egress-pings');
-  st.textContent = 'Замеряю… (до 45 секунд)'; st.className = 'text-muted';
-  const r = await apiJ('GET', '/api/adguard/locations');
-  if (!r?.ok) {
-    st.textContent = '✕ ' + escHtml(r?.error || 'не удалось получить список');
-    st.className = 'text-red'; return;
-  }
-  const cur = (r.current || '').toLowerCase();
-  const rows = (r.locations || []).map(l => {
-    const isCur = cur && (l.city.toLowerCase() === cur || l.country.toLowerCase() === cur);
-    const ms = l.ping;
-    const cls = ms < 80 ? 'text-green' : (ms < 180 ? '' : 'text-red');
-    return `<div class="info-row" style="cursor:pointer;${isCur ? 'font-weight:600' : ''}"
-                 onclick="pickLocation('${escHtml(l.city)}')" title="Выбрать эту локацию">
-              <span class="info-key">${isCur ? '▸ ' : ''}${escHtml(l.country)} — ${escHtml(l.city)}</span>
-              <span class="info-val monospace ${cls}">${ms} ms</span>
-            </div>`;
-  }).join('');
-  box.innerHTML = rows || '<div class="text-muted">пусто</div>';
-  box.style.display = '';
-  st.textContent = `${r.count} локаций, отсортированы по пингу — нажмите на строку, чтобы выбрать`;
-  st.className = 'text-muted';
-}
-
-function pickLocation(city) {
-  const sel = document.getElementById('egress-ag-location');
-  if (!sel) return;
-  if (![...sel.options].some(o => o.value === city)) {
-    const o = document.createElement('option'); o.value = city; o.textContent = city; sel.appendChild(o);
-  }
-  sel.value = city;
-  toast('Локация выбрана: ' + city + ' — нажмите «Применить выход»');
-}
-
-async function saveEgress() {
-  const res = document.getElementById('egress-result');
-  res.textContent = 'Применение… (регенерация xray, возможно переподключение туннеля)'; res.className = 'text-muted';
-  const body = {
-    enabled: document.getElementById('egress-adguard').checked,
-    location: document.getElementById('egress-ag-location').value || null,
-    post_quantum: document.getElementById('egress-ag-pq').checked,
-  };
-  const r = await apiJ('PUT', '/api/adguard', body);
-  if (r?.ok) {
-    res.textContent = '✓ Применено'; res.className = 'text-green';
-    toast('Выход обновлён'); setTimeout(loadVpnServers, 3500);
-  } else {
-    res.textContent = '✕ ' + escHtml(r?.error || 'Ошибка'); res.className = 'text-red';
-    toast(r?.error || 'Ошибка', false);
-  }
-  setTimeout(() => { if (res) res.textContent = ''; }, 8000);
-}
-
 async function testAdblock() {
   const inp = document.getElementById('adblock-test-input');
   const out = document.getElementById('adblock-test-result');
@@ -4902,255 +4685,448 @@ async function rebootGateway() {
   await apiJ('POST', '/api/system/reboot', { confirm: true });
 }
 
-// ─── Выходы: порядок резервирования ─────────────────────────────────────────
-// Каждый выход — строка в порядке, в котором автопереход их перебирает.
-// Конфигурации каскада загружаются сюда, но обратно никогда не показываются:
-// в них закрытый ключ или пароль.
-let _egresses = null;
-const _egressProbe = {};
 
-async function loadEgresses() {
+// ─── Выходы ──────────────────────────────────────────────────────────────────
+// «Активный выход» — только порядок и включение выходов. «VPN серверы» — сами
+// подключения: доступ, проверка и параметры. Ключи, токены и конфигурации
+// уходят на шлюз и на страницу никогда не возвращаются.
+const EG_KIND = {
+  adguard: 'Подписка AdGuard VPN',
+  amnezia: 'AmneziaWG 2.0 · свой каскад',
+  trusttunnel: 'TrustTunnel · свой каскад',
+  fptn: 'Подписка FPTN',
+};
+const EG_ICON = {
+  up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M18 13l-6 6-6-6"/></svg>',
+};
+let _eg = null;                      // last /api/egresses
+const _conn = { probe: {}, editing: {}, ag: null, fp: null, locs: null };
+
+function egDate(ts) { return ts ? new Date(ts * 1000).toLocaleDateString('ru-RU') : ''; }
+// The one place an egress's condition is put into words, for both tabs.
+function egState(e) {
+  if (!e.configured) return { text: 'не настроен', cls: 'warn', badge: 'badge-yellow' };
+  if (!e.enabled) return { text: 'выключен', cls: '', badge: 'badge-gray' };
+  if (e.alive) return { text: 'работает', cls: 'ok', badge: 'badge-green' };
+  if (e.service === 'activating') return { text: 'не подключается, повтор позже', short: 'не подключается', cls: 'bad', badge: 'badge-red' };
+  return { text: 'не отвечает', cls: 'bad', badge: 'badge-red' };
+}
+function egRow(id) { return (_eg && _eg.egresses || []).find(e => e.id === id); }
+function egAskIfCarrying(id, what) {
+  const e = egRow(id);
+  if (!e || !e.active) return true;
+  return confirm(t('Через «' + e.label + '» сейчас идёт трафик дома. ' + what +
+                   ' — связь прервётся на несколько секунд. Продолжить?'));
+}
+
+// ── Активный выход ───────────────────────────────────────────────────────────
+async function loadLadder() {
   const d = await apiJ('GET', '/api/egresses');
   if (!d) return;
-  _egresses = d;
-  const act = (d.egresses || []).find(e => e.active);
-  window._egressActiveLabel = act ? act.label : null;
-  const actEl = document.getElementById('egress-active');
-  if (actEl && act) actEl.textContent = act.label + (d.in_fallback ? ' — сейчас всё идёт напрямую' : '');
-  renderEgresses();
+  _eg = d;
+  renderLadder();
+  // Shown only once its real state is known: an unchecked switch while the
+  // list loads would say the fallback is off when it is not.
+  const af = document.getElementById('eg-auto-fallback');
+  if (af) af.checked = !!d.auto_fallback;
+  const foot = document.getElementById('eg-foot');
+  if (foot) foot.hidden = false;
 }
 
-function _egressBadges(e) {
-  const b = [];
-  if (!e.configured) b.push('<span class="badge badge-gray">нет конфигурации</span>');
-  else if (!e.enabled) b.push('<span class="badge badge-gray">выключен</span>');
-  else if (e.primary) b.push('<span class="badge badge-green">основной</span>');
-  else b.push('<span class="badge badge-gray">резерв</span>');
-  if (e.active) b.push('<span class="badge badge-green">трафик идёт здесь</span>');
-  return b.join(' ');
-}
-
-function _egressState(e) {
-  if (!e.enabled) return '<span class="text-muted">—</span>';
-  if (e.alive) return '<span class="text-green">отвечает</span>';
-  if (e.service === 'activating') return '<span class="text-red">не подключается, повтор позже</span>';
-  return '<span class="text-red">не отвечает</span>';
-}
-
-function _egressProbeLine(id) {
-  const p = _egressProbe[id];
-  if (!p) return '';
-  if (p.busy) return '<div class="text-muted" style="font-size:12px">замеряю…</div>';
-  if (!p.ip) return '<div class="text-red" style="font-size:12px">через этот выход ответа нет</div>';
-  const parts = [p.ip + (p.country ? ' · ' + p.country + (p.city ? ', ' + p.city : '') : '')];
-  if (p.org) parts.push(p.org);
-  if (p.ttfb_ms != null) parts.push('отклик ' + (p.ttfb_ms / 1000).toFixed(2) + ' с');
-  if (p.mbit != null) parts.push(p.mbit + ' Мбит/с');
-  if (p.handshake_age != null) parts.push('рукопожатие ' + p.handshake_age + ' с назад');
-  return '<div style="font-size:12px" class="monospace">' + parts.map(escHtml).join(' · ') + '</div>';
-}
-
-function renderEgresses() {
+function renderLadder() {
   const el = document.getElementById('egresses-list');
-  if (!el || !_egresses) return;
-  const rows = _egresses.egresses || [];
+  if (!el || !_eg) return;
+  const rows = _eg.egresses || [];
   el.innerHTML = rows.map((e, i) => {
-    const up = i > 0 ? `<button class="btn btn-secondary btn-sm" title="Выше" onclick="moveEgress('${e.id}',-1)">↑</button>` : '';
-    const down = i < rows.length - 1 ? `<button class="btn btn-secondary btn-sm" title="Ниже" onclick="moveEgress('${e.id}',1)">↓</button>` : '';
-    const top = i > 0 && e.enabled ? `<button class="btn btn-secondary btn-sm" onclick="moveEgress('${e.id}',-99)">Сделать основным</button>` : '';
-    const toggle = e.cascade
-      ? `<label class="toggle" title="${e.configured ? 'Включить или выключить' : 'Сначала загрузите конфигурацию'}"><input type="checkbox" ${e.enabled ? 'checked' : ''} ${e.configured ? '' : 'disabled'} onchange="toggleCascadeEgress('${e.id}', this.checked)"><span class="slider"></span></label>`
-      : '<span class="text-muted" style="font-size:11px">вкл. в блоке ниже</span>';
-    const cfg = e.cascade ? `
-      <details style="margin-top:6px"><summary class="text-muted" style="font-size:12px;cursor:pointer">Конфигурация от сервера каскада${e.config_updated ? ' — обновлена ' + new Date(e.config_updated * 1000).toLocaleDateString('ru-RU') : ' — не загружена'}</summary>
-        <textarea id="egcfg-${e.id}" rows="4" style="width:100%;margin-top:6px" autocomplete="off" spellcheck="false"
-          placeholder="${e.id === 'amnezia' ? '[Interface] … — файл .conf клиента AmneziaWG целиком' : 'hostname = … — выгрузка trusttunnel_endpoint -c <пользователь> -f toml'}"></textarea>
-        <div class="btn-row">
-          <button class="btn btn-sm btn-secondary" onclick="saveEgressConfig('${e.id}')">Сохранить</button>
-          <label class="btn btn-sm btn-secondary" for="egfile-${e.id}">Из файла</label>
-          <input type="file" id="egfile-${e.id}" style="display:none" accept=".conf,.toml,.txt" onchange="egressConfigFile('${e.id}', this)">
-          <span id="egcfg-res-${e.id}" class="text-muted" style="font-size:12px">прежняя сохранится рядом; содержимое сюда не возвращается</span>
-        </div>
-      </details>` : '';
-    return `<div style="border-top:1px solid rgba(128,128,128,.2);padding:8px 0">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <b style="min-width:18px">${i + 1}.</b>
-        <span style="min-width:190px">${escHtml(e.label)}</span>
-        ${_egressBadges(e)}
-        <span style="font-size:12px">${_egressState(e)}</span>
-        <span style="flex:1"></span>
-        ${toggle} ${up} ${down} ${top}
-        <button class="btn btn-secondary btn-sm" ${e.enabled ? '' : 'disabled'} onclick="probeEgress('${e.id}')">Проверить</button>
+    const st = egState(e);
+    // One badge at most, so a row never wraps; "carrying the house" is said in
+    // the status line, in green, next to the green position number.
+    const tag = e.primary ? `<span class="badge ${e.active ? 'badge-green' : 'badge-yellow'}">основной</span>` : '';
+    const pinned = (e.pinned || []).reduce((a, p) => a + p.count, 0);
+    const meta = [`<span class="${st.cls}">${escHtml(st.text)}</span>`];
+    if (e.active) meta.push('<span class="ok">трафик идёт здесь</span>');
+    if (!e.configured) meta.push('<a href="#egress/servers">настройте на вкладке «VPN серверы»</a>');
+    if (pinned) meta.push(`<span title="${escHtml((e.pinned || []).map(p => t(p.name) + ': ' + p.count).join('; '))}">привязано правил: ${pinned}</span>`);
+    return `<div class="eg-row${e.active ? ' is-active' : ''}${e.enabled ? '' : ' is-off'}">
+      <div class="eg-pos">${i + 1}</div>
+      <div>
+        <div class="eg-name"><span class="eg-label">${escHtml(e.label)}</span>${tag}</div>
+        <div class="eg-meta">${meta.join(' · ')}</div>
       </div>
-      ${_egressProbeLine(e.id)}
-      ${cfg}
+      <div class="eg-actions">
+        <button class="eg-move" ${i === 0 ? 'disabled' : ''} onclick="moveEgress('${e.id}',-1)" aria-label="Выше" title="Выше">${EG_ICON.up}</button>
+        <button class="eg-move" ${i === rows.length - 1 ? 'disabled' : ''} onclick="moveEgress('${e.id}',1)" aria-label="Ниже" title="Ниже">${EG_ICON.down}</button>
+        <label class="toggle" title="${e.configured ? 'Включить или выключить' : 'Сначала настройте на вкладке «VPN серверы»'}">
+          <input type="checkbox" ${e.enabled ? 'checked' : ''} ${e.configured ? '' : 'disabled'} onchange="toggleEgress('${e.id}', this)"><span class="slider"></span></label>
+      </div>
     </div>`;
-  }).join('');
-  const foot = document.getElementById('egresses-foot');
-  if (foot) foot.textContent = _egresses.auto_fallback
-    ? 'Автопереход включён.' : 'Автопереход выключен: при сбое основного трафик сам не переключится.';
+  }).join('') || '<div class="eg-empty">Выходов нет</div>';
 }
 
 async function moveEgress(id, delta) {
-  if (!_egresses) return;
-  const order = _egresses.egresses.map(e => e.id);
-  const i = order.indexOf(id);
-  const j = delta === -99 ? 0 : Math.max(0, Math.min(order.length - 1, i + delta));
+  if (!_eg) return;
+  const order = _eg.egresses.map(e => e.id);
+  const i = order.indexOf(id), j = i + delta;
+  if (j < 0 || j >= order.length) return;
   order.splice(i, 1); order.splice(j, 0, id);
+  // Becoming first means taking the house at once if it is alive.
+  const newFirst = _eg.egresses.find(e => e.id === order.find(x => egRow(x).enabled));
+  if (newFirst && !newFirst.active && newFirst.alive && newFirst.id !== (_eg.egresses.find(e => e.primary) || {}).id
+      && !confirm(t('«' + newFirst.label + '» станет основным, и трафик дома сразу переключится на него. Продолжить?'))) return;
   const r = await api('PUT', '/api/egresses', { order });
   const d = r ? await r.json().catch(() => ({})) : {};
-  if (!r || !r.ok) { toast(d.detail || 'Не удалось изменить порядок', false); return; }
-  toast(d.applied ? 'Порядок сохранён, трафик переключён' : 'Порядок сохранён');
-  loadEgresses(); refreshStatus();
+  if (!r || !r.ok) { toast(d.detail || t('Не удалось изменить порядок'), false); return; }
+  toast(t(d.applied ? 'Порядок сохранён, трафик переключён' : 'Порядок сохранён'));
+  loadLadder(); refreshStatus();
 }
 
-async function toggleCascadeEgress(id, on) {
+async function toggleEgress(id, input) {
+  const on = input.checked, e = egRow(id);
+  if (!on && e) {
+    const pinned = (e.pinned || []).reduce((a, p) => a + p.count, 0);
+    const parts = [];
+    if (e.active) parts.push('Через «' + e.label + '» сейчас идёт трафик дома — он переключится на следующий выход по списку.');
+    if (pinned) parts.push('Привязанные к нему правила (' + pinned + ') пойдут через основной выход.');
+    if (parts.length && !confirm(t(parts.join(' ') + ' Выключить?'))) { input.checked = true; return; }
+  }
+  input.disabled = true;
   const r = await api('PUT', '/api/egresses', { enabled: { [id]: on } });
   const d = r ? await r.json().catch(() => ({})) : {};
-  if (!r || !r.ok) toast(d.detail || 'Не удалось', false);
-  else toast(on ? 'Выход включён' : 'Выход выключен');
-  setTimeout(loadEgresses, on ? 6000 : 500);
+  input.disabled = false;
+  if (!r || !r.ok) { input.checked = !on; toast(d.detail || t('Не удалось'), false); return; }
+  toast(t(on ? 'Выход включён' : 'Выход выключен'));
+  setTimeout(loadLadder, on ? 6000 : 400);
+  refreshStatus();
 }
 
-async function probeEgress(id) {
-  _egressProbe[id] = { busy: true }; renderEgresses();
+async function setLadderAutoFallback(on) {
+  await setAutoFallback(on);
+  loadLadder();
+}
+
+// ── VPN серверы ──────────────────────────────────────────────────────────────
+async function loadConnections() {
+  const [eg, ag, fp] = await Promise.all([apiJ('GET', '/api/egresses'), apiJ('GET', '/api/adguard'), apiJ('GET', '/api/fptn')]);
+  if (!eg) return;
+  _eg = eg; _conn.ag = ag; _conn.fp = fp;
+  renderConnections();
+  connAgLicense();
+  connAgLocations();
+}
+
+function connInfo(id, key, label) {
+  return `<div class="info-row"><span class="info-key">${label}</span><span class="info-val monospace" id="conn-${key}-${id}">—</span></div>`;
+}
+
+function connCard(e) {
+  const st = egState(e), id = e.id;
+  const probe = `<div class="conn-block">
+      <div class="conn-block-title">Подключение</div>
+      <div id="conn-probe-rows-${id}" hidden>${connInfo(id, 'ip', 'Адрес выхода')}${connInfo(id, 'org', 'Сеть')}${connInfo(id, 'ttfb', 'Отклик')}${connInfo(id, 'speed', 'Скорость')}${id === 'amnezia' ? connInfo(id, 'hs', 'Последнее рукопожатие') : ''}</div>
+      <p class="conn-hint" id="conn-probe-intro-${id}">${e.configured ? 'Адрес выхода, сеть, отклик и скорость — замер идёт через этот выход, даже если он в резерве.' : 'Сначала добавьте доступ ниже.'}</p>
+      <div class="btn-row"><button class="btn btn-secondary btn-sm" id="conn-probe-btn-${id}" onclick="connProbe('${id}')" ${e.configured ? '' : 'disabled'}>Проверить</button>
+        <span class="conn-note" id="conn-probe-note-${id}"></span></div>
+    </div>`;
+  return `<div class="card conn-card" id="conn-${id}">
+    <div class="conn-head">
+      <div><div class="conn-name">${escHtml(e.label.replace(/ \(свой каскад\)$/, ''))}</div><span class="conn-kind">${escHtml(EG_KIND[id] || '')}</span></div>
+      <span class="badge ${st.badge}">${escHtml(st.short || st.text)}</span>
+    </div>
+    ${probe}
+    ${connAccess(e)}
+    ${connParams(e)}
+  </div>`;
+}
+
+function connAccess(e) {
+  const id = e.id;
+  if (id === 'adguard') return `<div class="conn-block">
+      <div class="conn-block-title">Доступ</div>
+      <div class="info-row"><span class="info-key">Учётная запись</span><span class="info-val monospace text-muted" id="conn-ag-license">загрузка…</span></div>
+      <p class="conn-hint">Вход и продление выполняются на шлюзе командой <code>sudo runuser -u agvpn -- env HOME=/var/lib/agvpn adguardvpn-cli login</code></p>
+    </div>`;
+  const isFptn = id === 'fptn';
+  const fp = _conn.fp || {};
+  const updated = isFptn ? fp.token_updated : e.config_updated;
+  const what = isFptn ? 'Токен' : 'Конфигурация';
+  const when = isFptn ? 'получен' : 'загружена', none = isFptn ? 'не задан' : 'не загружена';
+  const placeholder = isFptn ? 'fptn:… или fptnb:… — токен от бота FPTN в Telegram'
+    : id === 'amnezia' ? '[Interface] … — файл .conf клиента AmneziaWG целиком'
+    : 'hostname = … — выгрузка сервера TrustTunnel в формате toml';
+  const hint = isFptn ? 'Токен выдаёт бот FPTN в Telegram. После сохранения FPTN переподключится.'
+    : id === 'amnezia' ? 'Конфигурация клиента так, как её выдаёт сервер каскада. Перед сохранением она проверяется: негодная не заменит рабочую.'
+    : 'Выгрузка сервера: <code>trusttunnel_endpoint vpn.toml hosts.toml -c &lt;user&gt; -f toml</code>. Перед сохранением она проверяется.';
+  const open = !!_conn.editing[id];
+  return `<div class="conn-block">
+      <div class="conn-block-title">Доступ</div>
+      <div class="info-row"><span class="info-key">${what}</span><span class="info-val">${updated ? when + ' <span class="monospace">' + egDate(updated) + '</span>' : '<span class="text-yellow">' + none + '</span>'}</span></div>
+      <div class="btn-row" ${open ? 'hidden' : ''} id="conn-access-btns-${id}">
+        <button class="btn btn-secondary btn-sm" onclick="connEdit('${id}', true)">${updated ? 'Заменить' : 'Добавить'}</button>
+        ${e.prev_available ? `<button class="btn btn-secondary btn-sm" onclick="connRestore('${id}')">Вернуть предыдущ${isFptn ? 'ий' : 'ую'}</button>` : ''}
+      </div>
+      <div class="conn-editor" id="conn-editor-${id}" ${open ? '' : 'hidden'}>
+        <textarea id="conn-text-${id}" autocomplete="off" spellcheck="false" placeholder="${escHtml(placeholder)}"></textarea>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" onclick="connSaveAccess('${id}')">Сохранить</button>
+          ${isFptn ? '' : `<label class="btn btn-secondary btn-sm" for="conn-file-${id}">Из файла</label><input type="file" id="conn-file-${id}" accept=".conf,.toml,.txt" onchange="connFile('${id}', this)">`}
+          <button class="btn btn-secondary btn-sm" onclick="connEdit('${id}', false)">Отмена</button>
+          <span class="conn-note" id="conn-access-note-${id}"></span>
+        </div>
+        <p class="conn-hint">${hint} Прежняя версия сохраняется рядом; содержимое на страницу не возвращается.</p>
+      </div>
+    </div>`;
+}
+
+function connParams(e) {
+  const id = e.id, p = e.params || {}, f = e.config_facts || {};
+  let rows = '';
+  if (id === 'adguard') {
+    const ag = _conn.ag || {};
+    rows = `<div class="override-row"><div class="override-label">Локация<span class="conn-sub">Сейчас: <span id="conn-ag-current">${escHtml(ag.exit_location || ag.location || '—')}</span></span></div>
+        <select id="conn-ag-location"><option value="">Без изменений</option></select></div>
+      <div class="btn-row" style="margin-top:0"><button class="btn btn-secondary btn-sm" onclick="connAgPings()">Замерить пинги</button><span class="conn-note" id="conn-ag-pings-note"></span></div>
+      <div class="conn-pings" id="conn-ag-pings" hidden></div>
+      <div class="override-row"><div class="override-label">Протокол<span class="conn-sub">QUIC быстрее, HTTP/2 надёжнее при фильтрации UDP</span></div>
+        <select id="conn-ag-protocol">${[['auto', 'Авто'], ['quic', 'QUIC'], ['http2', 'HTTP/2']].map(([v, l]) => `<option value="${v}" ${ag.protocol === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="override-row"><div class="override-label">Постквантовая криптография<span class="conn-sub">Защита от «записать сейчас — расшифровать потом»</span></div>
+        <label class="toggle"><input type="checkbox" id="conn-ag-pq" ${ag.post_quantum ? 'checked' : ''}><span class="slider"></span></label></div>`;
+  } else if (id === 'fptn') {
+    const fp = _conn.fp || {}, groups = fp.servers || {};
+    const opts = [['premium', 'Премиальные'], ['regular', 'Обычные'], ['restricted', 'С ограниченным доступом']]
+      .filter(([k]) => (groups[k] || []).length)
+      .map(([k, label]) => `<optgroup label="${label}">${groups[k].map(n => `<option value="${escHtml(n)}" ${n === fp.server ? 'selected' : ''}>${escHtml(n)}</option>`).join('')}</optgroup>`).join('');
+    rows = `<div class="override-row"><div class="override-label">Сервер<span class="conn-sub">Список берётся из токена</span></div>
+        <select id="conn-fp-server">${opts || '<option value="">Нет списка — загрузите токен</option>'}</select></div>`;
+  } else if (id === 'amnezia') {
+    const i1on = p.i1 ? p.i1.enabled : !!f.i1;
+    const i1val = (p.i1 && p.i1.value) || f.i1 || '';
+    rows = `<div class="override-row"><div class="override-label">MTU<span class="conn-sub">Пусто — как в конфигурации сервера${f.mtu ? ' (' + f.mtu + ')' : ''}</span></div>
+        <input type="text" inputmode="numeric" id="conn-awg-mtu" value="${p.mtu || ''}" placeholder="${f.mtu || 1420}"></div>
+      <div class="override-row"><div class="override-label">Сигнатурный пакет I1<span class="conn-sub">Маскирует начало соединения под другой протокол</span></div>
+        <label class="toggle"><input type="checkbox" id="conn-awg-i1-on" ${i1on ? 'checked' : ''} onchange="document.getElementById('conn-awg-i1-box').hidden=!this.checked"><span class="slider"></span></label></div>
+      <div class="conn-i1" id="conn-awg-i1-box" ${i1on ? '' : 'hidden'}><textarea id="conn-awg-i1" spellcheck="false" placeholder="<b 0x…><r 8>">${escHtml(i1val)}</textarea></div>`;
+  } else if (id === 'trusttunnel') {
+    const proto = p.protocol || 'http3';
+    const anti = p.anti_dpi !== undefined ? p.anti_dpi : !!f.anti_dpi;
+    rows = `<div class="override-row"><div class="override-label">Протокол<span class="conn-sub">HTTP/3 быстрее на загрузку, HTTP/2 — на отдачу</span></div>
+        <select id="conn-tt-proto">${[['http3', 'HTTP/3 (QUIC)'], ['http2', 'HTTP/2']].map(([v, l]) => `<option value="${v}" ${proto === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="override-row"><div class="override-label">Защита от DPI<span class="conn-sub">Дополнительная маскировка соединения</span></div>
+        <label class="toggle"><input type="checkbox" id="conn-tt-anti" ${anti ? 'checked' : ''}><span class="slider"></span></label></div>`;
+  }
+  return `<div class="conn-block">
+      <div class="conn-block-title">Параметры</div>
+      ${rows}
+      <div class="btn-row"><button class="btn btn-primary btn-sm" onclick="connSaveParams('${id}')" ${e.configured || id === 'adguard' ? '' : 'disabled'}>Сохранить параметры</button><span class="conn-note" id="conn-params-note-${id}"></span></div>
+    </div>`;
+}
+
+function renderConnections() {
+  const root = document.getElementById('conn-cards');
+  if (!root || !_eg) return;
+  root.innerHTML = (_eg.egresses || []).map(connCard).join('');
+  Object.entries(_conn.probe).forEach(([id, d]) => connShowProbe(id, d));
+}
+
+function connSet(id, key, text, cls) {
+  const el = document.getElementById('conn-' + key + '-' + id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'info-val monospace' + (cls ? ' ' + cls : '');
+}
+function connNote(key, id, text, cls) {
+  const el = document.getElementById('conn-' + key + '-note-' + id);
+  if (el) { el.textContent = t(text); el.className = 'conn-note' + (cls ? ' ' + cls : ''); }
+}
+
+function connShowProbe(id, d) {
+  const rows = document.getElementById('conn-probe-rows-' + id), intro = document.getElementById('conn-probe-intro-' + id);
+  if (rows) rows.hidden = !(d && d.ip);
+  if (intro) intro.hidden = !!(d && d.ip);
+  if (!d || !d.ip) {
+    ['ip', 'org', 'ttfb', 'speed', 'hs'].forEach(k => connSet(id, k, '—'));
+    connNote('probe', id, 'Через этот выход ответа нет', 'bad');
+    return;
+  }
+  connSet(id, 'ip', d.ip + (d.country ? ' · ' + d.country + (d.city ? ', ' + d.city : '') : ''));
+  connSet(id, 'org', d.org || '—');
+  connSet(id, 'ttfb', d.ttfb_ms != null ? (d.ttfb_ms / 1000).toFixed(2) + ' с' : '—');
+  connSet(id, 'speed', d.mbit != null ? d.mbit + ' Мбит/с' : '—');
+  connSet(id, 'hs', d.handshake_age != null ? d.handshake_age + ' с назад' : '—');
+  connNote('probe', id, 'Проверено в ' + new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }), 'ok');
+}
+
+async function connProbe(id) {
+  const btn = document.getElementById('conn-probe-btn-' + id);
+  if (btn) btn.disabled = true;
+  connNote('probe', id, 'Замеряю, до 30 секунд…');
   const r = await api('GET', '/api/egresses/' + id + '/probe');
   const d = r ? await r.json().catch(() => ({})) : {};
-  _egressProbe[id] = r && r.ok ? d : { ip: null };
-  renderEgresses();
+  if (btn) btn.disabled = false;
+  if (!r || !r.ok) { connNote('probe', id, d.detail || 'Не удалось', 'bad'); return; }
+  _conn.probe[id] = d;
+  connShowProbe(id, d);
 }
 
-async function saveEgressConfig(id) {
-  const ta = document.getElementById('egcfg-' + id);
-  const res = document.getElementById('egcfg-res-' + id);
-  const text = (ta && ta.value || '').trim();
-  if (!text) return;
-  if (res) res.textContent = 'проверяю…';
-  const r = await api('POST', '/api/egresses/' + id + '/config', { text });
-  const d = r ? await r.json().catch(() => ({})) : {};
-  if (r && r.ok && d.ok) {
-    ta.value = '';
-    toast(d.restarted ? 'Конфигурация сохранена, выход переподключается' : 'Конфигурация сохранена');
-    setTimeout(loadEgresses, d.restarted ? 8000 : 300);
-  } else if (res) res.textContent = d.detail || 'не удалось';
+function connEdit(id, open) {
+  _conn.editing[id] = open;
+  const ed = document.getElementById('conn-editor-' + id), btns = document.getElementById('conn-access-btns-' + id);
+  if (ed) ed.hidden = !open;
+  if (btns) btns.hidden = open;
+  const ta = document.getElementById('conn-text-' + id);
+  if (ta) { if (!open) ta.value = ''; else ta.focus(); }
+  connNote('access', id, '');
 }
 
-function egressConfigFile(id, input) {
+function connFile(id, input) {
   const f = input.files && input.files[0];
   if (!f) return;
-  f.text().then(t => { const ta = document.getElementById('egcfg-' + id); if (ta) ta.value = t; input.value = ''; });
+  f.text().then(text => { const ta = document.getElementById('conn-text-' + id); if (ta) ta.value = text; input.value = ''; });
 }
 
-async function loadFptn() {
-  const d = await apiJ('GET', '/api/fptn');
-  if (!d) return;
-  const cb = document.getElementById('fptn-enabled');
-  if (cb) cb.checked = !!d.enabled;
-  const det = document.getElementById('fptn-detail');
-  if (det) det.style.display = d.enabled ? '' : 'none';
-  const svc = document.getElementById('fptn-service');
-  if (svc) {
-    const up = d.service === 'active' && d.alive;
-    svc.textContent = up
-      ? (d.active ? 'работает — трафик идёт через неё' : 'работает, в резерве')
-      : d.service === 'active' ? 'подключается…'
-      : d.service === 'activating' ? 'сервер не отвечает, повтор позже'
-      : (d.service || 'остановлена');
-    svc.className = 'info-val monospace ' + (up ? 'text-green' : d.service === 'inactive' ? 'text-muted' : 'text-red');
+async function connSaveAccess(id) {
+  const ta = document.getElementById('conn-text-' + id);
+  const text = (ta && ta.value || '').trim();
+  if (!text) { connNote('access', id, 'Вставьте содержимое', 'bad'); return; }
+  if (!egAskIfCarrying(id, 'После сохранения он переподключится')) return;
+  connNote('access', id, 'Проверяю и сохраняю…');
+  const r = id === 'fptn' ? await api('POST', '/api/fptn/token', { token: text })
+                          : await api('POST', '/api/egresses/' + id + '/config', { text });
+  const d = r ? await r.json().catch(() => ({})) : {};
+  if (!r || !r.ok || !d.ok) { connNote('access', id, d.detail || 'Не удалось', 'bad'); return; }
+  _conn.editing[id] = false;
+  toast(t(d.restarted ? 'Сохранено, выход переподключается' : 'Сохранено'));
+  setTimeout(loadConnections, d.restarted ? 7000 : 300);
+}
+
+async function connRestore(id) {
+  if (!confirm(t('Вернуть предыдущую версию? Текущая останется рядом, их можно снова поменять местами.'))) return;
+  if (!egAskIfCarrying(id, 'После возврата он переподключится')) return;
+  const r = await api('POST', '/api/egresses/' + id + '/restore');
+  const d = r ? await r.json().catch(() => ({})) : {};
+  if (!r || !r.ok) { toast(d.detail || t('Не удалось'), false); return; }
+  toast(t(d.restarted ? 'Предыдущая версия возвращена, выход переподключается' : 'Предыдущая версия возвращена'));
+  setTimeout(loadConnections, d.restarted ? 7000 : 300);
+}
+
+async function connSaveParams(id) {
+  let req;
+  if (id === 'amnezia') {
+    const mtu = document.getElementById('conn-awg-mtu').value.trim();
+    req = ['PUT', '/api/egresses/amnezia/params', { params: { mtu: mtu || null,
+      i1: { enabled: document.getElementById('conn-awg-i1-on').checked, value: document.getElementById('conn-awg-i1').value.trim() } } }];
+  } else if (id === 'trusttunnel') {
+    req = ['PUT', '/api/egresses/trusttunnel/params', { params: {
+      protocol: document.getElementById('conn-tt-proto').value, anti_dpi: document.getElementById('conn-tt-anti').checked } }];
+  } else if (id === 'fptn') {
+    const v = document.getElementById('conn-fp-server').value;
+    if (!v) { connNote('params', id, 'Выберите сервер', 'bad'); return; }
+    req = ['POST', '/api/fptn', { server: v }];
+  } else if (id === 'adguard') {
+    return connSaveAdguard();
   }
-  const tok = document.getElementById('fptn-token-info');
-  if (tok) tok.textContent = d.token_updated
-    ? 'обновлён ' + new Date(d.token_updated * 1000).toLocaleDateString('ru-RU')
-    : 'не задан';
-  const sel = document.getElementById('fptn-server');
-  if (sel && d.servers) {
-    sel.innerHTML = '';
-    // The list comes from the token itself; the built-in one is only a fallback.
-    const groups = [['premium', 'Премиальные'], ['regular', 'Обычные'], ['restricted', 'С ограниченным доступом']];
-    let found = false;
-    groups.forEach(([key, label]) => {
-      const list = d.servers[key] || [];
-      if (!list.length) return;
-      const g = document.createElement('optgroup');
-      g.label = label;
-      list.forEach(n => {
-        const o = document.createElement('option');
-        o.value = n;
-        o.textContent = n;
-        if (n === d.server) { o.selected = true; found = true; }
-        g.appendChild(o);
-      });
-      sel.appendChild(g);
-    });
-    if (d.server && !found) {
-      // A name the token no longer has: the client would pick any server instead.
-      const o = document.createElement('option');
-      o.value = ''; o.selected = true;
-      o.textContent = d.server + ' — нет в токене, выберите другой';
-      sel.insertBefore(o, sel.firstChild);
-    }
-    sel.title = d.servers_source === 'token' ? 'Список серверов из токена' : 'Токен не прочитан — встроенный список, может быть устаревшим';
+  if (!egAskIfCarrying(id, 'Он переподключится с новыми параметрами')) return;
+  connNote('params', id, 'Сохраняю…');
+  const r = await api(...req);
+  const d = r ? await r.json().catch(() => ({})) : {};
+  if (!r || !r.ok || d.ok === false) { connNote('params', id, d.detail || 'Не удалось', 'bad'); return; }
+  connNote('params', id, 'Сохранено', 'ok');
+  toast(t('Параметры сохранены'));
+  setTimeout(loadConnections, 7000);
+}
+
+async function connSaveAdguard() {
+  const ag = _conn.ag || {};
+  const loc = document.getElementById('conn-ag-location').value || null;
+  const pq = document.getElementById('conn-ag-pq').checked;
+  const proto = document.getElementById('conn-ag-protocol').value;
+  const locChanged = !!loc, pqChanged = pq !== !!ag.post_quantum, protoChanged = proto !== ag.protocol;
+  if (!locChanged && !pqChanged && !protoChanged) { connNote('params', 'adguard', 'Нечего сохранять'); return; }
+  if (!egAskIfCarrying('adguard', 'Он переподключится с новыми параметрами')) return;
+  connNote('params', 'adguard', 'Сохраняю, AdGuard переподключается…');
+  if (locChanged || pqChanged) {
+    const r = await apiJ('PUT', '/api/adguard', { enabled: !!ag.enabled, location: loc, post_quantum: pq });
+    if (!r || !r.ok) { connNote('params', 'adguard', (r && r.error) || 'Не удалось', 'bad'); return; }
   }
+  if (protoChanged) {
+    const r = await apiJ('POST', '/api/adguard/protocol', { protocol: proto });
+    if (!r || !r.ok) { connNote('params', 'adguard', 'Не удалось сменить протокол', 'bad'); return; }
+  }
+  connNote('params', 'adguard', 'Сохранено', 'ok');
+  toast(t('Параметры AdGuard сохранены'));
+  setTimeout(loadConnections, 8000);
 }
 
-async function saveFptn(payload) {
-  const r = await apiJ('POST', '/api/fptn', payload);
-  if (!r || !r.ok) { toast('Не удалось сохранить', false); return; }
-  toast(payload.enabled === false ? 'Резервный выход выключен'
-      : payload.enabled === true ? 'Резервный выход включён' : 'Сохранено');
-  loadFptn();
-}
-
-async function loadAgLicense() {
-  const el = document.getElementById('egress-ag-license');
+async function connAgLicense() {
+  const el = document.getElementById('conn-ag-license');
   if (!el) return;
   const d = await apiJ('GET', '/api/adguard/license');
-  if (!d || !d.ok) { el.textContent = 'не удалось узнать'; el.className = 'info-val monospace text-muted'; return; }
-  if (!d.logged_in) { el.textContent = 'вход не выполнен'; el.className = 'info-val monospace text-red'; return; }
-  let days = null;
-  if (d.valid_until) days = Math.floor((new Date(d.valid_until + 'T00:00:00Z') - Date.now()) / 86400000);
+  if (!d || !d.ok) { el.textContent = t('не удалось узнать'); el.className = 'info-val monospace text-muted'; return; }
+  if (!d.logged_in) { el.textContent = t('вход не выполнен'); el.className = 'info-val monospace text-red'; return; }
+  const days = d.valid_until ? Math.floor((new Date(d.valid_until + 'T00:00:00Z') - Date.now()) / 86400000) : null;
   const parts = [d.plan || '?'];
-  if (d.valid_until) parts.push('до ' + new Date(d.valid_until + 'T00:00:00Z').toLocaleDateString('ru-RU'));
-  if (d.devices) parts.push(d.devices + ' устр.');
+  if (d.valid_until) parts.push(t('до') + ' ' + new Date(d.valid_until + 'T00:00:00Z').toLocaleDateString('ru-RU'));
+  if (d.devices) parts.push(d.devices + ' ' + t('устр.'));
   el.textContent = parts.join(' · ');
   el.title = d.account || '';
-  el.className = 'info-val monospace ' + (days !== null && days < 0 ? 'text-red'
-    : days !== null && days < 14 ? 'text-yellow' : d.plan === 'PREMIUM' ? 'text-green' : '');
+  el.className = 'info-val monospace ' + (days !== null && days < 0 ? 'text-red' : days !== null && days < 14 ? 'text-yellow' : 'text-green');
 }
 
-async function saveFptnToken() {
-  const ta = document.getElementById('fptn-token');
-  const res = document.getElementById('fptn-token-result');
-  const token = (ta && ta.value || '').trim();
-  if (!token) return;
-  if (res) res.textContent = 'сохраняю…';
-  const r = await api('POST', '/api/fptn/token', { token });
-  const d = r ? await r.json().catch(() => ({})) : null;
-  if (r && r.ok && d.ok) {
-    ta.value = '';
-    if (res) res.textContent = d.restarted ? 'сохранён, FPTN переподключается' : 'сохранён';
-    setTimeout(loadFptn, 15000);
-    loadFptn();
-  } else if (res) {
-    res.textContent = (d && d.detail) || 'не удалось';
+// The location list is fetched once per page load; the client measures each
+// location's ping to build it, so it takes a few seconds.
+async function connAgLocations() {
+  const sel = document.getElementById('conn-ag-location');
+  if (!sel) return;
+  if (!_conn.locs) {
+    sel.disabled = true;
+    sel.options[0].textContent = t('Загрузка списка…');
+    const r = await apiJ('GET', '/api/adguard/locations');
+    _conn.locs = (r && r.ok && r.locations) || [];
   }
+  const s2 = document.getElementById('conn-ag-location');
+  if (!s2) return;
+  s2.disabled = false;
+  s2.options[0].textContent = t('Без изменений');
+  let names = null;
+  try { names = new Intl.DisplayNames([I18N.lang === 'en' ? 'en' : 'ru'], { type: 'region' }); } catch (e) {}
+  const byCountry = {};
+  _conn.locs.forEach(l => (byCountry[l.country] = byCountry[l.country] || { iso: l.iso, list: [] }).list.push(l));
+  const label = c => { try { return names ? names.of(byCountry[c].iso) : c; } catch (e) { return c; } };
+  Object.keys(byCountry).sort((a, b) => label(a).localeCompare(label(b), 'ru')).forEach(c => {
+    const g = document.createElement('optgroup');
+    g.label = label(c);
+    const list = byCountry[c].list.sort((a, b) => a.ping - b.ping);
+    if (list.length > 1) { const o = document.createElement('option'); o.value = c; o.textContent = label(c) + ' — ' + t('быстрейшая'); g.appendChild(o); }
+    list.forEach(l => { const o = document.createElement('option'); o.value = l.city; o.textContent = l.city + ' · ' + l.ping + ' ' + t('мс'); g.appendChild(o); });
+    s2.appendChild(g);
+  });
 }
 
-async function applyFptnServer() {
-  const sel = document.getElementById('fptn-server');
-  const res = document.getElementById('fptn-result');
-  if (!sel || !sel.value) return;
-  if (res) res.textContent = 'применяю, ~20 секунд…';
-  const r = await apiJ('POST', '/api/fptn', { server: sel.value });
-  if (res) res.textContent = (r && r.ok) ? 'сервер применён: ' + sel.value : 'не удалось';
-  setTimeout(loadFptn, 15000);
+async function connAgPings() {
+  const box = document.getElementById('conn-ag-pings');
+  const note = document.getElementById('conn-ag-pings-note');
+  if (note) { note.textContent = t('Замеряю, до 45 секунд…'); note.className = 'conn-note'; }
+  const r = await apiJ('GET', '/api/adguard/locations');
+  if (!r || !r.ok) { if (note) { note.textContent = t('Не удалось получить список'); note.className = 'conn-note bad'; } return; }
+  _conn.locs = r.locations || [];
+  const cur = (r.current || '').toLowerCase();
+  box.innerHTML = _conn.locs.map(l => {
+    const isCur = cur && (l.city.toLowerCase() === cur || l.country.toLowerCase() === cur);
+    const cls = l.ping < 80 ? 'text-green' : l.ping < 180 ? '' : 'text-red';
+    return `<div class="info-row" onclick="connAgPick('${escHtml(l.city)}')" title="Выбрать">
+      <span class="info-key">${isCur ? '▸ ' : ''}${escHtml(l.country)} — ${escHtml(l.city)}</span>
+      <span class="info-val monospace ${cls}">${l.ping} мс</span></div>`;
+  }).join('') || '<div class="eg-empty">Пусто</div>';
+  box.hidden = false;
+  if (note) { note.textContent = t('Нажмите на строку, чтобы выбрать локацию'); note.className = 'conn-note'; }
 }
 
-async function saveAgProtocol() {
-  const sel = document.getElementById('ag-protocol');
-  if (!sel || !sel.value) return;
-  const r = await apiJ('POST', '/api/adguard/protocol', { protocol: sel.value });
-  toast((r && r.ok) ? 'Протокол AdGuard: ' + sel.value + ' (сервис перезапущен)' : 'Не удалось', !!(r && r.ok));
+function connAgPick(city) {
+  const sel = document.getElementById('conn-ag-location');
+  if (!sel) return;
+  if (![...sel.options].some(o => o.value === city)) { const o = document.createElement('option'); o.value = city; o.textContent = city; sel.appendChild(o); }
+  sel.value = city;
+  connNote('params', 'adguard', 'Выбрана локация ' + city + ' — нажмите «Сохранить параметры»');
 }
 
 async function setAutoFallback(on) {

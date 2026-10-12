@@ -1069,9 +1069,170 @@
     "Таблица общих правил": "Global rules table",
     "Порядок списков": "List order",
     "Порядок сервисов": "Service order",
-    "Порядок точных исключений": "Exact exception order"
+    "Порядок точных исключений": "Exact exception order",
+    "Через какие выходы идёт трафик и в каком порядке они подменяют друг друга. Подключения и их настройки — на вкладке «VPN серверы».": "Which egresses carry traffic and in what order they stand in for each other. Connections and their settings are on the “VPN servers” tab.",
+    "Порядок выходов": "Egress order",
+    "Трафик идёт через первый включённый выход. Если он не отвечает около трёх минут, его подменяет следующий живой по списку; когда первый оживает, трафик возвращается к нему. Напрямую — только если не отвечает ни один.": "Traffic goes through the first enabled egress. If it does not answer for about three minutes, the next live one in the list takes over; when the first comes back, traffic returns to it. Direct only if none answers.",
+    "Автопереход между выходами": "Automatic failover between egresses",
+    "Выключен — при сбое основного выхода трафик сам не переключится на резервный.": "Off — if the primary egress fails, traffic will not switch to a reserve by itself.",
+    "Загрузка подключений…": "Loading connections…",
+    "Ваши VPN: ключи и конфигурации, проверка подключения и параметры каждого. Включение и порядок — на вкладке «Активный выход».": "Your VPNs: keys and configurations, connection checks and each one's settings. Switching on and order are on the “Active egress” tab.",
+    "Другие серверы (ключи Shadowsocks / VLESS / …)": "Other servers (Shadowsocks / VLESS / … keys)",
+    "Трафик сейчас идёт через выход из списка на вкладке «Активный выход» — эти серверы используются, только если там не включён ни один выход.": "Traffic currently goes through an egress from the “Active egress” tab — these servers are used only when no egress is enabled there.",
+    "не используется": "not used",
+    "основной": "primary",
+    "работает": "working",
+    "трафик идёт здесь": "traffic goes here",
+    "не настроен": "not set up",
+    "не отвечает": "not answering",
+    "не подключается, повтор позже": "cannot connect, retrying later",
+    "не подключается": "cannot connect",
+    "настройте на вкладке «VPN серверы»": "set it up on the “VPN servers” tab",
+    "Выходов нет": "No egresses",
+    "Включить или выключить": "Switch on or off",
+    "Сначала настройте на вкладке «VPN серверы»": "Set it up on the “VPN servers” tab first",
+    "AmneziaWG (свой каскад)": "AmneziaWG (own cascade)",
+    "TrustTunnel (свой каскад)": "TrustTunnel (own cascade)",
+    "Подписка AdGuard VPN": "AdGuard VPN subscription",
+    "AmneziaWG 2.0 · свой каскад": "AmneziaWG 2.0 · own cascade",
+    "TrustTunnel · свой каскад": "TrustTunnel · own cascade",
+    "Подписка FPTN": "FPTN subscription",
+    "Подключение": "Connection",
+    "Адрес выхода": "Exit address",
+    "Отклик": "Response",
+    "Последнее рукопожатие": "Last handshake",
+    "Адрес выхода, сеть, отклик и скорость — замер идёт через этот выход, даже если он в резерве.": "Exit address, network, response and speed — measured through this egress, even while it is a reserve.",
+    "Сначала добавьте доступ ниже.": "Add access below first.",
+    "Доступ": "Access",
+    "Учётная запись": "Account",
+    "Вход и продление выполняются на шлюзе командой": "Sign-in and renewal are done on the gateway with",
+    "Токен": "Token",
+    "Конфигурация": "Configuration",
+    "получен": "received",
+    "загружена": "uploaded",
+    "не задан": "not set",
+    "не загружена": "not uploaded",
+    "Заменить": "Replace",
+    "Вернуть предыдущий": "Restore previous",
+    "Вернуть предыдущую": "Restore previous",
+    "Из файла": "From file",
+    "Конфигурация клиента так, как её выдаёт сервер каскада. Перед сохранением она проверяется: негодная не заменит рабочую. Прежняя версия сохраняется рядом; содержимое на страницу не возвращается.": "The client configuration exactly as the cascade server issues it. It is checked before saving: an unusable one never replaces a working one. The previous version is kept beside it; the content never comes back to the page.",
+    "Выгрузка сервера:": "Server export:",
+    ". Перед сохранением она проверяется. Прежняя версия сохраняется рядом; содержимое на страницу не возвращается.": ". It is checked before saving. The previous version is kept beside it; the content never comes back to the page.",
+    "Токен выдаёт бот FPTN в Telegram. После сохранения FPTN переподключится. Прежняя версия сохраняется рядом; содержимое на страницу не возвращается.": "The token comes from the FPTN bot in Telegram. FPTN reconnects after saving. The previous version is kept beside it; the content never comes back to the page.",
+    "fptn:… или fptnb:… — токен от бота FPTN в Telegram": "fptn:… or fptnb:… — the token from the FPTN bot in Telegram",
+    "[Interface] … — файл .conf клиента AmneziaWG целиком": "[Interface] … — the whole AmneziaWG client .conf file",
+    "hostname = … — выгрузка сервера TrustTunnel в формате toml": "hostname = … — the TrustTunnel server export in toml",
+    "Параметры": "Settings",
+    "Локация": "Location",
+    "Сейчас:": "Now:",
+    "Без изменений": "Unchanged",
+    "Загрузка списка…": "Loading list…",
+    "QUIC быстрее, HTTP/2 надёжнее при фильтрации UDP": "QUIC is faster, HTTP/2 copes better when UDP is filtered",
+    "Защита от «записать сейчас — расшифровать потом»": "Protection against “record now, decrypt later”",
+    "Сервер": "Server",
+    "Список берётся из токена": "The list comes from the token",
+    "Нет списка — загрузите токен": "No list — upload a token",
+    "MTU": "MTU",
+    "Сигнатурный пакет I1": "I1 signature packet",
+    "Маскирует начало соединения под другой протокол": "Disguises the start of the connection as another protocol",
+    "HTTP/3 быстрее на загрузку, HTTP/2 — на отдачу": "HTTP/3 is faster for downloads, HTTP/2 for uploads",
+    "Защита от DPI": "DPI protection",
+    "Дополнительная маскировка соединения": "Extra disguise for the connection",
+    "Сохранить параметры": "Save settings",
+    "Замеряю, до 30 секунд…": "Measuring, up to 30 seconds…",
+    "Через этот выход ответа нет": "No answer through this egress",
+    "Вставьте содержимое": "Paste the content",
+    "Проверяю и сохраняю…": "Checking and saving…",
+    "Сохранено, выход переподключается": "Saved, the egress is reconnecting",
+    "Вернуть предыдущую версию? Текущая останется рядом, их можно снова поменять местами.": "Restore the previous version? The current one stays beside it; they can be swapped back.",
+    "Предыдущая версия возвращена, выход переподключается": "Previous version restored, the egress is reconnecting",
+    "Предыдущая версия возвращена": "Previous version restored",
+    "Выберите сервер": "Choose a server",
+    "Сохраняю…": "Saving…",
+    "Параметры сохранены": "Settings saved",
+    "Нечего сохранять": "Nothing to save",
+    "Сохраняю, AdGuard переподключается…": "Saving, AdGuard is reconnecting…",
+    "Не удалось сменить протокол": "Could not change the protocol",
+    "Параметры AdGuard сохранены": "AdGuard settings saved",
+    "не удалось узнать": "could not be read",
+    "вход не выполнен": "not signed in",
+    "до": "until",
+    "устр.": "devices",
+    "быстрейшая": "fastest",
+    "мс": "ms",
+    "Замеряю, до 45 секунд…": "Measuring, up to 45 seconds…",
+    "Не удалось получить список": "Could not get the list",
+    "Нажмите на строку, чтобы выбрать локацию": "Click a row to choose the location",
+    "Пусто": "Empty",
+    "Выбрать": "Choose",
+    "Не удалось изменить порядок": "Could not change the order",
+    "Порядок сохранён, трафик переключён": "Order saved, traffic switched",
+    "Порядок сохранён": "Order saved",
+    "Выход включён": "Egress on",
+    "Выход выключен": "Egress off"
   },
   "patterns": [
+    [
+      "^Привязанные к нему правила \\((\\d+)\\) пойдут через основной выход\\. Выключить\\?$",
+      "The $1 rules pinned to it will use the primary egress. Switch it off?"
+    ],
+    [
+      "^Через «(.+)» сейчас идёт трафик дома — он переключится на следующий выход по списку\\. Выключить\\?$",
+      "The house's traffic is going through “$1” now — it will switch to the next egress in the list. Switch it off?"
+    ],
+    [
+      "^Через «(.+)» сейчас идёт трафик дома — он переключится на следующий выход по списку\\. Привязанные к нему правила \\((\\d+)\\) пойдут через основной выход\\. Выключить\\?$",
+      "The house's traffic is going through “$1” now — it will switch to the next egress in the list. The $2 rules pinned to it will use the primary egress. Switch it off?"
+    ],
+    [
+      "^Через «(.+)» сейчас идёт трафик дома\\. Он переподключится с новыми параметрами — связь прервётся на несколько секунд\\. Продолжить\\?$",
+      "The house's traffic is going through “$1” now. It reconnects with the new settings — the connection drops for a few seconds. Continue?"
+    ],
+    [
+      "^Через «(.+)» сейчас идёт трафик дома\\. После возврата он переподключится — связь прервётся на несколько секунд\\. Продолжить\\?$",
+      "The house's traffic is going through “$1” now. It reconnects after the restore — the connection drops for a few seconds. Continue?"
+    ],
+    [
+      "^Через «(.+)» сейчас идёт трафик дома\\. После сохранения он переподключится — связь прервётся на несколько секунд\\. Продолжить\\?$",
+      "The house's traffic is going through “$1” now. It reconnects after saving — the connection drops for a few seconds. Continue?"
+    ],
+    [
+      "^«(.+)» станет основным, и трафик дома сразу переключится на него\\. Продолжить\\?$",
+      "“$1” becomes the primary and the house's traffic switches to it at once. Continue?"
+    ],
+    [
+      "^Выбрана локация (.+) — нажмите «Сохранить параметры»$",
+      "Location $1 chosen — press “Save settings”"
+    ],
+    [
+      "^([\\d.]+) Мбит/с$",
+      "$1 Mbit/s"
+    ],
+    [
+      "^(\\d+) с назад$",
+      "$1 s ago"
+    ],
+    [
+      "^([\\d.]+) с$",
+      "$1 s"
+    ],
+    [
+      "^Проверено в (.+)$",
+      "Checked at $1"
+    ],
+    [
+      "^Пусто — как в конфигурации сервера$",
+      "Empty — as in the server's configuration"
+    ],
+    [
+      "^Пусто — как в конфигурации сервера \\((\\d+)\\)$",
+      "Empty — as in the server's configuration ($1)"
+    ],
+    [
+      "^привязано правил: (\\d+)$",
+      "pinned rules: $1"
+    ],
     [
       "^Смена WAN-адреса: (.+)\\. Зарегистрировано за 24 ч: (\\d+)\\. DHCP-сервер: (.+)\\. Возможен разрыв внешних соединений\\. Причина смены адреса не установлена\\.$",
       "WAN address change: $1. Recorded in 24 h: $2. DHCP server: $3. External connections may be interrupted. The cause is unknown."

@@ -17,8 +17,11 @@ test('connection shares do not hide blocked or unclassified traffic',()=>{
  assert.equal(ui.trafficShares({total:3,direct:5,vpn:0,blocked:0}),null);
 });
 test('selected FPTN is not mislabelled as the configured AdGuard exit',()=>{
- const s={egress_active:'fptn',state:'connected',egress:{kind:'adguard',location:'United States'},fptn_enabled:true};
- assert.deepEqual(ui.egress(s),{name:'FPTN',location:'',healthy:true,reserve:false});
+ const s={egress_active:'fptn',egress_primary:'adguard',state:'connected',egress:{kind:'fptn',label:'FPTN',location:null},egress_reserves:['AmneziaWG (свой каскад)','FPTN']};
+ assert.deepEqual(ui.egress(s),{name:'FPTN',location:'',healthy:true,reserve:'Основной выход не отвечает — работает резервный'});
+ const p={egress_active:'adguard',egress_primary:'adguard',state:'connected',egress:{kind:'adguard',label:'AdGuard VPN',location:'Atlanta'},egress_reserves:['AmneziaWG (свой каскад)','TrustTunnel (свой каскад)']};
+ assert.deepEqual(ui.egress(p),{name:'AdGuard VPN',location:'Atlanta',healthy:true,reserve:'Резерв: AmneziaWG (свой каскад), TrustTunnel (свой каскад)'});
+ assert.equal(ui.egress({...p,egress_reserves:[]}).reserve,'Резервный выход не включён');
  assert.equal(ui.egress({...s,state:'unmeasured'}).healthy,false);
  assert.equal(ui.egress(null).healthy,false);
 });

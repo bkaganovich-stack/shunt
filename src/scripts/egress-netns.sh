@@ -64,7 +64,8 @@ setup() {
 run_amnezia() {
     local facts pids
     umask 077
-    facts=$(python3 /opt/shunt/scripts/egress_config.py awg "$CFG/awg.conf" "$RUN/setconf.conf") || exit 1
+    facts=$(python3 /opt/shunt/scripts/egress_config.py awg "$CFG/awg.conf" "$RUN/setconf.conf" \
+        /opt/shunt/config/settings.json) || exit 1
     eval "$facts"   # ADDRESS MTU DNS ENDPOINT_IP ENDPOINT_PORT
     ip netns exec "$NS" env WG_PROCESS_FOREGROUND=1 "$BIN/amneziawg-go" awg0 &
     pids=$!
@@ -101,7 +102,7 @@ run_trusttunnel() {
     "$BIN/setup_wizard" --mode non-interactive --endpoint_config "$CFG/endpoint.toml" \
         --settings "$RUN/wizard.toml" >/dev/null 2>&1 || exit 1
     python3 /opt/shunt/scripts/egress_config.py tt "$RUN/wizard.toml" "$RUN/client.toml" \
-        127.0.0.1:1085 "$proto" || exit 1
+        127.0.0.1:1085 "$proto" /opt/shunt/config/settings.json || exit 1
     rm -f "$RUN/wizard.toml"
     ip netns exec "$NS" "$BIN/trusttunnel_client" --config "$RUN/client.toml" &
     pids=$!

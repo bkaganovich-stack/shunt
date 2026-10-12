@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.28.0"
+VERSION = "2.29.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -2758,6 +2758,8 @@ async def get_status(u: str = Depends(auth_dep)):
     return {"state": state, "egress": egress,
             "auto_fallback": bool(s.get("auto_fallback")),
             "egress_active": _eg.active(s),
+            "egress_primary": (_eg.candidates(s) or [None])[0],
+            "egress_reserves": [_eg.CATALOG[e]["label"] for e in _eg.candidates(s)[1:]],
             "fptn_enabled": bool((s.get("fptn") or {}).get("enabled")),
             "in_fallback": bool(s.get("fallback_saved_profile")),
             "fallback_saved_profile": s.get("fallback_saved_profile"),
@@ -3143,7 +3145,7 @@ async def set_auto_fallback(req: AutoFallbackReq, u: str = Depends(auth_dep)):
 async def _quick_alive(host: str, port: int) -> bool:
     try:
         p = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-o", "/dev/null", "-m", "4", "-w", "%{http_code}",
+            "curl", "-s", "-o", "/dev/null", "-m", "3", "-w", "%{http_code}",
             "--socks5", "%s:%s" % (host, port), "http://cp.cloudflare.com/generate_204",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         out, _ = await p.communicate()
@@ -3155,6 +3157,39 @@ async def _quick_alive(host: str, port: int) -> bool:
 def _unit_state(unit: str) -> str:
     r = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True)
     return r.stdout.strip() or "unknown"
+
+
+def _egress_prev_path(ident: str) -> Optional[Path]:
+    """The previous credentials kept beside the current ones, if any."""
+    if ident == "fptn":
+        p = FPTN_TOKEN.with_name("token.prev")
+    elif ident in _EGRESS_CONFIG_FILE:
+        p = _eg.EGRESS_DIR / ident / (_EGRESS_CONFIG_FILE[ident] + ".prev")
+    else:
+        return None
+    return p if p.exists() else None
+
+
+def _egress_config_facts(ident: str) -> dict:
+    """
+    What the server-issued file itself sets, so the page can show a user
+    override against it. Only these fields are read; keys and passwords in the
+    same file never leave this function.
+    """
+    name = _EGRESS_CONFIG_FILE.get(ident)
+    if not name:
+        return {}
+    try:
+        text = (_eg.EGRESS_DIR / ident / name).read_text()
+    except OSError:
+        return {}
+    def field(key: str) -> Optional[str]:
+        m = re.search(r"(?mi)^\s*%s\s*=\s*(.+?)\s*$" % key, text)
+        return m.group(1).strip().strip('"') if m else None
+    if ident == "amnezia":
+        mtu = field("MTU")
+        return {"mtu": int(mtu) if mtu and mtu.isdigit() else None, "i1": field("I1")}
+    return {"protocol": field("upstream_protocol"), "anti_dpi": (field("anti_dpi") or "").lower() == "true"}
 
 
 def _egress_config_mtime(ident: str) -> Optional[int]:
@@ -3182,7 +3217,10 @@ async def get_egresses(u: str = Depends(auth_dep)):
                      "alive": ok, "service": _unit_state(c["unit"]) if "unit" in c else
                      _unit_state("adguardvpn.service"),
                      "socks": "%s:%s" % _eg.socks(s, e),
-                     "config_updated": _egress_config_mtime(e)})
+                     "config_updated": _egress_config_mtime(e),
+                     "prev_available": _egress_prev_path(e) is not None,
+                     "params": _eg.params(s, e), "pinned": _eg.pinned_rules(s, e),
+                     "config_facts": _egress_config_facts(e)})
     return {"egresses": rows, "active": active, "auto_fallback": bool(s.get("auto_fallback")),
             "in_fallback": bool(s.get("fallback_saved_profile"))}
 
@@ -3310,6 +3348,57 @@ async def set_egress_config(ident: str, req: EgressConfigReq, u: str = Depends(a
     return {"ok": True, "restarted": restarted}
 
 
+class EgressParamsReq(BaseModel):
+    params: dict
+
+
+@app.put("/api/egresses/{ident}/params")
+async def set_egress_params(ident: str, req: EgressParamsReq, u: str = Depends(auth_dep)):
+    """
+    The user's own settings for a cascade egress (MTU, I1; protocol, anti-DPI),
+    kept apart from the server-issued file and applied over it at every start.
+    The egress reconnects; if it carries the house, the house waits a moment.
+    """
+    if ident not in _eg.CASCADE:
+        raise HTTPException(400, "У этого выхода нет таких параметров")
+    try:
+        clean = _eg.clean_params(ident, req.params)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    s = load_settings()
+    s.setdefault("egresses", {}).setdefault(ident, {})["params"] = clean
+    save_settings(s)
+    restarted = False
+    if _eg.enabled(s, ident):
+        subprocess.run(["systemctl", "restart", _eg.CATALOG[ident]["unit"]], capture_output=True)
+        restarted = True
+    return {"ok": True, "params": clean, "restarted": restarted,
+            "was_active": _eg.active(s) == ident}
+
+
+@app.post("/api/egresses/{ident}/restore")
+async def restore_egress_credentials(ident: str, u: str = Depends(auth_dep)):
+    """Swap the current credentials with the previous ones kept beside them."""
+    prev = _egress_prev_path(ident)
+    if prev is None:
+        raise HTTPException(400, "Предыдущей версии нет")
+    cur = FPTN_TOKEN if ident == "fptn" else _eg.EGRESS_DIR / ident / _EGRESS_CONFIG_FILE[ident]
+    tmp = cur.with_name(cur.name + ".swap")
+    os.replace(prev, tmp)
+    if cur.exists():
+        os.replace(cur, prev)
+    os.replace(tmp, cur)
+    for f in (cur, prev):
+        if f.exists():
+            os.chmod(f, 0o600)
+    s = load_settings()
+    restarted = False
+    if _eg.enabled(s, ident):
+        subprocess.run(["systemctl", "restart", _eg.CATALOG[ident]["unit"]], capture_output=True)
+        restarted = True
+    return {"ok": True, "restarted": restarted}
+
+
 class EgressesReq(BaseModel):
     order: Optional[list[str]] = None
     enabled: Optional[dict[str, bool]] = None
@@ -3318,9 +3407,9 @@ class EgressesReq(BaseModel):
 @app.put("/api/egresses")
 async def set_egresses(req: EgressesReq, u: str = Depends(auth_dep)):
     """
-    The fallback order, and the own cascade's egresses on or off. AdGuard and
-    FPTN keep their own switches on their own pages: turning them on or off
-    means starting their clients, which those pages already do properly.
+    The fallback order, and every egress on or off. Configuration -- keys,
+    locations, parameters -- lives on the servers page; this is only which
+    egresses may carry the house and in what order.
     """
     s = load_settings()
     old_s = copy.deepcopy(s)
@@ -3329,14 +3418,29 @@ async def set_egresses(req: EgressesReq, u: str = Depends(auth_dep)):
             raise HTTPException(400, "Порядок должен перечислять каждый выход ровно один раз")
         s["egress_order"] = list(req.order)
     for e, on in (req.enabled or {}).items():
-        if e not in _eg.CASCADE:
-            raise HTTPException(400, "Здесь включаются только выходы своего каскада")
+        if e not in _eg.CATALOG:
+            raise HTTPException(400, "Нет такого выхода")
         if on and not _eg.configured(e):
-            raise HTTPException(400, "Для этого выхода сервер каскада ещё не выпустил конфигурацию")
-        s.setdefault("egresses", {}).setdefault(e, {})["enabled"] = bool(on)
-        unit = _eg.CATALOG[e]["unit"]
-        subprocess.run(["systemctl", "enable" if on else "disable", "--now", unit],
-                       capture_output=True)
+            raise HTTPException(400, "Для этого выхода ещё нет конфигурации — загрузите её на вкладке «VPN серверы»")
+        if e == "adguard":
+            s.setdefault("adguard", dict(DEFAULT_SETTINGS["adguard"]))["enabled"] = bool(on)
+        elif e == "fptn":
+            fp = s.setdefault("fptn", {})
+            fp["enabled"] = bool(on)
+            fp.setdefault("socks_host", "192.168.244.2")
+            fp.setdefault("socks_port", 1082)
+        else:
+            s.setdefault("egresses", {}).setdefault(e, {})["enabled"] = bool(on)
+    # Switching off the last tunnel would send the whole house out directly
+    # without anyone having asked for that -- the one outcome this list exists
+    # to prevent. A key-based server still counts as a way out.
+    if req.enabled and not _eg.candidates(s) and not (s.get("active_vpn_id") or s.get("vpn_key")):
+        raise HTTPException(400, "Нельзя выключить последний выход: весь трафик пошёл бы напрямую")
+    for e, on in (req.enabled or {}).items():
+        unit = _eg.CATALOG[e].get("unit")
+        if unit:
+            subprocess.run(["systemctl", "enable" if on else "disable", "--now", unit],
+                           capture_output=True)
     # A new primary takes over at once if it is alive; a dead one is left to
     # the fallback loop, which will not move the house onto it.
     primary = (_eg.candidates(s) or [None])[0]

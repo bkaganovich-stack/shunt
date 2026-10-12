@@ -187,3 +187,30 @@ class TestTrustTunnelLoopback:
         script = (ROOT / "src/scripts/egress-netns.sh").read_text()
         assert script.count('"auth": "noauth"') == 2
         assert "127.0.0.1:1085" in script
+
+
+class TestUserParams:
+    """MTU and I1 set on the page are laid over the server's file, never into it."""
+
+    def test_mtu_override(self):
+        _, facts = ec.split_awg(AWG, resolve=no_dns, params={"mtu": 1280})
+        assert facts["mtu"] == "1280"
+
+    def test_i1_on_adds_it_before_the_peer(self):
+        setconf, _ = ec.split_awg(AWG, resolve=no_dns, params={"i1": {"enabled": True, "value": "<b 0xc3><r 8>"}})
+        iface = setconf.split("[Peer]")[0]
+        assert "I1 = <b 0xc3><r 8>" in iface and iface.count("I1 =") == 1
+
+    def test_i1_off_drops_the_files_own(self):
+        cfg = AWG.replace("H4 = ", "I1 = <b 0xff>\nH4 = ")
+        setconf, _ = ec.split_awg(cfg, resolve=no_dns, params={"i1": {"enabled": False, "value": "<b 0xc3>"}})
+        assert "I1" not in setconf
+
+    def test_no_params_leaves_the_file_as_issued(self):
+        cfg = AWG.replace("H4 = ", "I1 = <b 0xff>\nH4 = ")
+        setconf, facts = ec.split_awg(cfg, resolve=no_dns)
+        assert "I1 = <b 0xff>" in setconf and facts["mtu"] == "1380"
+
+    def test_trusttunnel_anti_dpi(self):
+        s = ec.tt_client(WIZARD, "127.0.0.1:1085", resolve=no_dns, anti_dpi=True)
+        assert "anti_dpi = true" in s
