@@ -42,7 +42,7 @@ def valid_route(route):
     # and a rule pinned to a key that is later removed is moved to the tunnel.
     return route in ("direct", "tunnel") or (
         isinstance(route, str) and route.startswith("egress:") and (
-            route[7:] in egresses.CATALOG or re.fullmatch(r"key-[0-9a-f-]{1,36}", route[7:]) is not None))
+            route[7:] in egresses.CATALOG or re.fullmatch(r"key-[A-Za-z0-9-]{1,40}", route[7:]) is not None))
 
 def validate_hostname(value):
     if not isinstance(value, str):

@@ -190,6 +190,10 @@ def _migrate_settings(s: dict) -> dict:
         servers.sort(key=lambda x: x.get("id") != active_id)
         seen = set()
         for x in servers:
+            # The id ends up in the page's markup; anything but letters,
+            # digits and dashes is replaced (nothing can be pinned to it yet).
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,36}", str(x["id"])):
+                x["id"] = _uuid_mod.uuid4().hex[:8]
             port = x.get("socks_port")
             if not isinstance(port, int) or port in seen or port not in _eg.KEY_PORTS:
                 x["socks_port"] = next(p for p in _eg.KEY_PORTS if p not in seen)

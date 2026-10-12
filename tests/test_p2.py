@@ -812,3 +812,10 @@ class TestMeasuredState:
         monkeypatch.setattr(m.subprocess, "run",
                             lambda *a, **k: type("R", (), {"stdout": "active"})())
         assert m._adguard_status()["connected"] is False
+
+
+def test_a_key_id_unsafe_for_markup_is_replaced():
+    s = m._migrate_settings({"vpn_servers": [{"id": "x');alert(1)//", "key": "ss://Y2hhY2hhMjA6czFAMS4xLjEuMToyMjI="},
+                                             {"id": "aaaa1111", "key": "ss://Y2hhY2hhMjA6czJAMi4yLjIuMjoyMjI="}]})
+    ids = [k["id"] for k in s["vpn_servers"]]
+    assert ids[1] == "aaaa1111" and re.fullmatch(r"[0-9a-f]{8}", ids[0])
