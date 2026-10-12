@@ -13,6 +13,13 @@ namespace behind a bridge on its veth address (fptn-egress.sh,
 egress-netns.sh). That uniformity is deliberate -- probes, xray and the
 watchdog all speak to "the tunnel" the same way, whichever one it is.
 
+Key-based servers (ss://, vless://, vmess://, trojan://) are egresses too, one
+per key, with ids "key-<id>". Until 2.30 they were a separate list that only
+carried traffic when no egress was on; now they sit in the same ladder. xray
+itself is their client, so main.py gives each key a SOCKS inbound on loopback
+(KEY_PORTS) that leads straight to that key's outbound -- and from here on a
+key looks like any other egress.
+
 Pure functions only; probing and applying live in main.py.
 """
 from __future__ import annotations
@@ -35,12 +42,60 @@ CATALOG = {
 DEFAULT_ORDER = ["adguard", "amnezia", "trusttunnel", "fptn"]
 CASCADE = ("amnezia", "trusttunnel")
 
+# ── Key-based servers ────────────────────────────────────────────────────────
+KEY_PREFIX = "key-"
+KEY_HOST = "127.0.0.1"
+KEY_PORTS = range(11001, 12000)     # clear of 1080-1085 and every other listener
+_SCHEMES = {"ss": "Shadowsocks", "vless": "VLESS", "vmess": "VMess", "trojan": "Trojan"}
+
+
+def is_key(ident: str) -> bool:
+    return isinstance(ident, str) and ident.startswith(KEY_PREFIX)
+
+
+def key_protocol(key: str) -> str | None:
+    """The protocol a key names by its scheme; None for anything else."""
+    scheme = (key or "").strip().split("://", 1)[0].lower()
+    return _SCHEMES.get(scheme) if "://" in (key or "") else None
+
+
+def key_servers(settings: dict) -> list[dict]:
+    return [k for k in (settings.get("vpn_servers") or []) if isinstance(k, dict) and k.get("id")]
+
+
+def key_server(settings: dict, ident: str) -> dict | None:
+    if not is_key(ident):
+        return None
+    sid = ident[len(KEY_PREFIX):]
+    return next((k for k in key_servers(settings) if k["id"] == sid), None)
+
+
+def free_key_port(settings: dict) -> int:
+    used = {k.get("socks_port") for k in key_servers(settings)}
+    return next(p for p in KEY_PORTS if p not in used)
+
+
+def catalog(settings: dict) -> dict:
+    """Every egress there is: the fixed ones and one per key."""
+    out = dict(CATALOG)
+    for k in key_servers(settings):
+        out[KEY_PREFIX + k["id"]] = {"label": k.get("name") or key_protocol(k.get("key", "")) or "Ключ",
+                                     "host": KEY_HOST, "port": k.get("socks_port"),
+                                     "protocol": key_protocol(k.get("key", "")), "key": True}
+    return out
+
+
+def label(settings: dict, ident: str) -> str:
+    c = catalog(settings).get(ident)
+    return c["label"] if c else ident
+
 
 def order(settings: dict) -> list[str]:
     """The saved order, made whole: unknown ids dropped, missing ones appended."""
-    saved = [e for e in (settings.get("egress_order") or []) if e in CATALOG]
+    known = catalog(settings)
+    saved = [e for e in (settings.get("egress_order") or []) if e in known]
     saved = list(dict.fromkeys(saved))
-    return saved + [e for e in DEFAULT_ORDER if e not in saved]
+    return saved + [e for e in list(DEFAULT_ORDER) + [e for e in known if is_key(e)] if e not in saved]
 
 
 def configured(ident: str, base: Path = EGRESS_DIR) -> bool:
@@ -62,6 +117,9 @@ def enabled(settings: dict, ident: str, is_configured=None) -> bool:
         return bool((settings.get("adguard") or {}).get("enabled"))
     if ident == "fptn":
         return bool((settings.get("fptn") or {}).get("enabled"))
+    if is_key(ident):
+        k = key_server(settings, ident)
+        return bool(k and k.get("enabled", True) and k.get("socks_port"))
     return bool((settings.get("egresses") or {}).get(ident, {}).get("enabled")) \
         and is_configured(ident)
 
@@ -73,6 +131,9 @@ def candidates(settings: dict, is_configured=None) -> list[str]:
 
 def socks(settings: dict, ident: str) -> tuple[str, int]:
     """Where the egress listens. AdGuard and FPTN keep their own settings."""
+    if is_key(ident):
+        k = key_server(settings, ident) or {}
+        return KEY_HOST, int(k.get("socks_port") or 0)
     own = settings.get(ident) if ident in ("adguard", "fptn") else None
     c = CATALOG[ident]
     if isinstance(own, dict):
@@ -81,6 +142,8 @@ def socks(settings: dict, ident: str) -> tuple[str, int]:
 
 
 def outbound(settings: dict, ident: str) -> dict:
+    """A SOCKS outbound to the egress. Keys are not reached this way: main.py
+    builds their outbound from the key itself (parse_key)."""
     host, port = socks(settings, ident)
     return {"protocol": "socks", "tag": "proxy",
             "settings": {"servers": [{"address": host, "port": port}]}}
@@ -188,13 +251,27 @@ def params(settings: dict, ident: str) -> dict:
     return dict((settings.get("egresses") or {}).get(ident, {}).get("params") or {})
 
 
+def _rule_sources(settings: dict) -> list[tuple[str, dict]]:
+    return [(k, v) for k, v in (settings.get("profile_overrides") or {}).items()] + \
+           [(k, (v or {}).get("config") or {}) for k, v in (settings.get("custom_profiles") or {}).items()]
+
+
+def unpin(settings: dict, ident: str) -> int:
+    """Send rules pinned to an egress that is going away through the tunnel instead."""
+    route, n = "egress:" + ident, 0
+    for _, cfg in _rule_sources(settings):
+        for r in cfg.get("custom_rules") or []:
+            if r.get("route") == route:
+                r["route"] = "tunnel"
+                n += 1
+    return n
+
+
 def pinned_rules(settings: dict, ident: str) -> list[dict]:
     """Profile rules that name this egress, per profile: what switching it off affects."""
     route = "egress:" + ident
     out = []
-    sources = [(k, v) for k, v in (settings.get("profile_overrides") or {}).items()] + \
-              [(k, (v or {}).get("config") or {}) for k, v in (settings.get("custom_profiles") or {}).items()]
-    for pid, cfg in sources:
+    for pid, cfg in _rule_sources(settings):
         n = sum(1 for r in (cfg.get("custom_rules") or []) if r.get("route") == route)
         if n:
             out.append({"profile": pid, "name": cfg.get("name") or pid, "count": n})

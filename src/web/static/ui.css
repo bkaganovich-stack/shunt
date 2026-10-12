@@ -100,6 +100,15 @@
 .conn-i1 textarea{min-height:58px}
 .conn-pings{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:2px 12px;margin-top:10px}
 .conn-pings .info-row{cursor:pointer}
+.conn-page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+.page>.conn-page-head>.page-desc{margin:0;max-width:720px}
+.conn-page-head .btn{flex:none}
+.conn-add .conn-block>.override-row:first-child{border-top:0;margin-top:0}
+.conn-add-key{margin-top:16px;padding:10px 0;border-top:1px solid var(--border)}
+.conn-add-key>.override-label{display:block;margin-bottom:8px}
+.conn-add-key textarea{min-height:76px;font-family:'SF Mono',ui-monospace,monospace;font-size:12.5px}
+.conn-foot{display:flex;justify-content:flex-end;padding-top:12px;margin-top:14px;border-top:1px solid var(--border)}
+@media(max-width:700px){.conn-page-head{flex-direction:column;gap:12px}}
 @media(max-width:700px){.conn-block .override-row{flex-wrap:wrap}.conn-block .override-row>select,.conn-block .override-row>input{width:100%;max-width:none}}
 /* Hidden hints must not widen narrow cards; opened mobile hints stay in view. */
 .hint::after{display:none}

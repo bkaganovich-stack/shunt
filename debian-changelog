@@ -1,3 +1,32 @@
+shunt (2.30.0) stable; urgency=medium
+
+  * Key-based servers (Shadowsocks, VLESS, VMess, Trojan) are egresses in
+    the one ladder. Until now they were a separate list that carried traffic
+    only when no egress was switched on, with its own "active" server, its
+    own switch and its own failover loop that judged a server by a TCP
+    connect to its port. Each key is now an egress like AdGuard or the
+    cascade: a card on "VPN серверы" (check through the key, server, replace
+    or restore the key, name, delete) and a row on "Активный выход" with its
+    place in the order and its switch. Rules can be pinned to a key.
+  * xray is a key's client, so each key gets a SOCKS port on loopback
+    (11001 and up) that leads to that key alone. Probes, the watchdog and
+    pinned rules reach a key the way they reach every other egress, and a
+    reserve key can be measured before it is relied on. Probes through these
+    ports stay out of the connection log.
+  * "Добавить подключение" on "VPN серверы": the type follows the pasted
+    key, a Shadowsocks client file becomes an ss:// key. A new key is added
+    switched on, last in the order. The key never goes back to the page.
+  * Deleting a key moves the profile rules pinned to it to the tunnel and
+    says so first; the last way out cannot be deleted.
+  * Existing keys migrate: the one that was active comes first among them,
+    so a house that ran on keys keeps its primary. The deprecated vpn_key
+    copy is dropped once migrated. The legacy /api/vpn-servers and
+    /api/vpn-key endpoints and the old failover loop are removed.
+  * Fixed: the observatory probed every egress-* outbound; it now probes
+    only the pinned ones.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 12 Oct 2026 20:34:17 +0300
+
 shunt (2.29.0) stable; urgency=medium
 
   * The egress pages are split by question. "VPN серверы" holds the

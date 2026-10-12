@@ -227,3 +227,121 @@ def test_config_facts_show_what_the_file_sets_and_nothing_secret(api, cfgdir):
     assert rows["amnezia"]["config_facts"] == {"mtu": 1380, "i1": "<b 0xff>"}
     assert rows["trusttunnel"]["config_facts"] == {"protocol": "http2", "anti_dpi": False}
     assert "PrivateKey" not in d.text and "cHJpdmF0" not in d.text and "secret-pw" not in d.text
+
+
+# ── Key-based egresses (2.30) ────────────────────────────────────────────────
+SS = "ss://Y2hhY2hhMjA6czFAMS4xLjEuMToyMjI=#Frankfurt"
+SS2 = "ss://Y2hhY2hhMjA6czJAMi4yLjIuMjoyMjI="
+
+
+def _add(client, key=SS, name=""):
+    r = client.post("/api/egresses/keys", json={"key": key, "name": name})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+def test_a_key_is_added_as_a_reserve_with_its_own_port(api):
+    client, state, runs, applied, alive = api
+    ident = _add(client)
+    assert ident.startswith("key-") and applied == ["egress_key_add"]
+    k = state["vpn_servers"][0]
+    assert k["name"] == "Frankfurt" and k["enabled"] and k["socks_port"] == 11001
+    assert state["egress_order"][-1] == ident
+    row = {e["id"]: e for e in client.get("/api/egresses").json()["egresses"]}[ident]
+    assert row["kind"] == "key" and row["label"] == "Frankfurt" and row["enabled"]
+    assert row["key"] == {"protocol": "Shadowsocks", "server": "1.1.1.1", "port": 222}
+    assert not row["primary"] and not row["active"]
+    assert SS not in str(client.get("/api/egresses").json())     # the key never goes back
+
+
+@pytest.mark.parametrize("key, why", [
+    ("", "ss://"), ("wireguard://abc", "ss://"), ("ss://%%%", "не разбирается")])
+def test_bad_keys_are_refused(api, key, why):
+    client, state, *_ = api
+    r = client.post("/api/egresses/keys", json={"key": key})
+    assert r.status_code == 400 and why in r.json()["detail"]
+    assert not state.get("vpn_servers")
+
+
+def test_the_same_key_twice_is_refused(api):
+    client, *_ = api
+    _add(client)
+    r = client.post("/api/egresses/keys", json={"key": SS})
+    assert r.status_code == 400 and "уже" in r.json()["detail"]
+
+
+def test_keys_take_part_in_order_and_switches(api):
+    client, state, runs, applied, alive = api
+    ident = _add(client)
+    alive["127.0.0.1:11001"] = True
+    order = [ident, "adguard", "amnezia", "trusttunnel", "fptn"]
+    r = client.put("/api/egresses", json={"order": order})
+    assert r.status_code == 200 and r.json()["active"] == ident
+    r = client.put("/api/egresses", json={"enabled": {ident: False}})
+    assert r.status_code == 200 and state["vpn_servers"][0]["enabled"] is False
+    assert r.json()["active"] == "adguard"
+    assert not [a for a in runs if ident in " ".join(a)]          # no unit to start
+
+
+def test_rename_keeps_the_house_running_but_a_new_key_restarts(api):
+    client, state, runs, applied, _ = api
+    ident = _add(client); applied.clear()
+    r = client.put("/api/egresses/%s/key" % ident, json={"name": "  Дом  "})
+    assert r.json() == {"ok": True, "restarted": False, "label": "Дом"} and applied == []
+    r = client.put("/api/egresses/%s/key" % ident, json={"key": SS2})
+    assert r.json()["restarted"] and applied == ["egress_key_change"]
+    assert state["vpn_servers"][0]["key"] == SS2 and state["vpn_servers"][0]["prev_key"] == SS
+    assert client.get("/api/egresses").json()["egresses"][-1]["prev_available"]
+    r = client.post("/api/egresses/%s/restore" % ident)
+    assert r.status_code == 200 and state["vpn_servers"][0]["key"] == SS
+
+
+def test_deleting_a_key_moves_its_pinned_rules_to_the_tunnel(api):
+    client, state, runs, applied, _ = api
+    ident = _add(client)
+    state["profile_overrides"] = {"all_except_ru": {"custom_rules": [
+        {"kind": "domain", "value": "a.example", "route": "egress:" + ident},
+        {"kind": "domain", "value": "b.example", "route": "direct"}]}}
+    r = client.delete("/api/egresses/" + ident)
+    assert r.status_code == 200 and r.json()["unpinned"] == 1
+    assert state["vpn_servers"] == [] and ident not in state["egress_order"]
+    assert [x["route"] for x in state["profile_overrides"]["all_except_ru"]["custom_rules"]] == ["tunnel", "direct"]
+
+
+def test_the_last_way_out_cannot_be_deleted(api):
+    client, state, *_ = api
+    ident = _add(client)
+    state["adguard"]["enabled"] = False
+    state["fptn"]["enabled"] = False
+    r = client.delete("/api/egresses/" + ident)
+    assert r.status_code == 400 and state["vpn_servers"]
+
+
+def test_only_keys_can_be_deleted(api):
+    client, *_ = api
+    assert client.delete("/api/egresses/adguard").status_code == 404
+
+
+def test_probes_through_a_key_port_stay_out_of_the_connection_log():
+    line = "2026/10/12 18:00:00.1 from 127.0.0.1:50000 accepted tcp:www.google.com:443 [in-key-aaaa1111 -> egress-key-aaaa1111]"
+    assert m.parse_access_log_line(line) is None
+    line = "2026/10/12 18:00:00.1 from 192.168.100.45:50000 accepted tcp:1.2.3.4:443 [tproxy-in -> proxy]"
+    assert m.parse_access_log_line(line)["outbound"] == "proxy"
+
+
+def test_status_names_a_key_egress_by_its_server_never_its_key(api, monkeypatch):
+    client, state, *_ = api
+    for name, val in (("get_speeds", {}), ("get_xray_state", "running"), ("_get_lan_ip", "192.168.100.1"),
+                      ("get_system_info", {}), ("_recent_wan_change", None), ("_active_attention", [])):
+        monkeypatch.setattr(m, name, lambda *a, _v=val, **k: _v)
+    d = client.get("/api/status").json()
+    assert d["egress"]["label"] == "AdGuard VPN" and d["vpn"] is None
+    ident = _add(client)
+    state["adguard"]["enabled"] = False
+    state["fptn"]["enabled"] = False
+    r = client.get("/api/status")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["egress"] == {"kind": "key", "id": ident, "label": "Frankfurt", "location": "Shadowsocks · 1.1.1.1"}
+    assert d["vpn"]["server"] == "1.1.1.1" and d["vpn_server_count"] == 1
+    assert "czE" not in r.text                                   # no part of the key

@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.29.0"
+VERSION = "2.30.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -64,10 +64,12 @@ DEFAULT_SETTINGS: dict = {
     "version":      "1.6.0",
     "auth":         {"username": "admin",
                      "password_hash": hashlib.sha256(b"admin").hexdigest()},
-    # VPN: single key kept for migration compatibility; canonical list in vpn_servers
-    "vpn_key":      None,       # DEPRECATED — use vpn_servers
-    "vpn_servers":  [],         # list of VPNServer dicts
-    "active_vpn_id": None,      # id of active server
+    # Key-based servers (ss/vless/vmess/trojan), each an egress "key-<id>" in
+    # the ladder (egresses.py). vpn_key and active_vpn_id are read only by the
+    # migration below.
+    "vpn_key":      None,       # DEPRECATED — migrated into vpn_servers
+    "vpn_servers":  [],         # [{id, name, key, enabled, socks_port, prev_key?}]
+    "active_vpn_id": None,      # DEPRECATED — the ladder decides
     "profile":      "all_except_ru",
     "geo_updated":  None,
     "force_aaplimg_vpn": True,
@@ -164,7 +166,6 @@ DEFAULT_SETTINGS: dict = {
 _alert_last_sent: dict[str, float] = {}   # event_type → timestamp
 _alert_log:       list[dict]        = []  # recent alert events
 _login_fail_count: dict[str, int]   = {}  # ip → consecutive failures
-_failover_last:    float            = 0.0 # timestamp of last failover
 
 # ── Settings helpers ───────────────────────────────────────────────────────────
 def _migrate_settings(s: dict) -> dict:
@@ -178,6 +179,24 @@ def _migrate_settings(s: dict) -> dict:
             "last_status": "unknown", "latency_ms": None, "last_checked": None,
         }]
         s["active_vpn_id"] = srv_id
+    # 2.30: keys are egresses in the ladder. The vpn_key copy is dropped once
+    # migrated -- kept, it brought deleted servers back on the next load. The
+    # server that was active goes first among the keys, so a house that ran
+    # on keys alone keeps the same primary; each key gets its loopback port.
+    if s.get("vpn_servers"):
+        s["vpn_key"] = None
+        servers = [x for x in s["vpn_servers"] if isinstance(x, dict) and x.get("id")]
+        active_id = s.get("active_vpn_id")
+        servers.sort(key=lambda x: x.get("id") != active_id)
+        seen = set()
+        for x in servers:
+            port = x.get("socks_port")
+            if not isinstance(port, int) or port in seen or port not in _eg.KEY_PORTS:
+                x["socks_port"] = next(p for p in _eg.KEY_PORTS if p not in seen)
+            seen.add(x["socks_port"])
+            x.setdefault("enabled", True)
+        s["vpn_servers"] = servers
+    s["active_vpn_id"] = None
 
     # v1.4 → v1.5: device_names → devices
     if s.get("device_names") and not s.get("devices"):
@@ -683,32 +702,47 @@ def _get_active_vpn_outbound(settings: dict) -> tuple[list, bool, Optional[str]]
     # that can only leave through its tunnel, so a dead tunnel means failed
     # connections rather than a silent direct leak. AdGuard's own traffic to its
     # servers is bypassed at L3 (agvpn uid rule in iptables.sh).
+    #
+    # A key-based egress is the exception: xray is its client, so the key's
+    # own outbound carries the house directly rather than through the key's
+    # loopback SOCKS inbound (which exists for probes and pinned rules).
     ident = _eg.active(settings)
-    if ident:
-        return [_eg.outbound(settings, ident)], True, None
-    servers = settings.get("vpn_servers", [])
-    active_id = settings.get("active_vpn_id")
-    active = None
-    if active_id:
-        active = next((s for s in servers if s.get("id") == active_id and s.get("enabled")), None)
-    if not active and servers:
-        active = next((s for s in sorted(servers, key=lambda x: x.get("priority", 99))
-                       if s.get("enabled")), None)
-    if active:
+    if not ident:
+        return [], False, None
+    if _eg.is_key(ident):
         try:
-            ob, info = parse_key(active["key"])
+            ob, info = parse_key(_eg.key_server(settings, ident)["key"])
             return [ob], True, info.get("server")
         except Exception:
+            # Keys are checked when added; should one still not parse, the
+            # house fails closed on its dead loopback port, never direct.
             pass
-    # Fallback: legacy vpn_key
-    vpn_key = settings.get("vpn_key")
-    if vpn_key:
+    return [_eg.outbound(settings, ident)], True, None
+
+
+def _key_extras(settings: dict) -> tuple[list, list, list]:
+    """
+    Inbounds, outbounds and rules that make each key-based server an egress
+    like any other: a SOCKS port on loopback that leads to that key alone.
+    Probes, the watchdog and pinned rules then reach a key the way they reach
+    AdGuard or the cascade. Every key gets one, enabled or not, so a reserve
+    can be measured before it is relied on.
+    """
+    inbounds, outbounds, rules = [], [], []
+    for k in _eg.key_servers(settings):
+        port = k.get("socks_port")
+        if not port:
+            continue
         try:
-            ob, info = parse_key(vpn_key)
-            return [ob], True, info.get("server")
+            ob, _ = parse_key(k.get("key", ""))
         except Exception:
-            pass
-    return [], False, None
+            continue
+        ident = _eg.KEY_PREFIX + k["id"]
+        inbounds.append({"tag": "in-" + ident, "listen": _eg.KEY_HOST, "port": port,
+                         "protocol": "socks", "settings": {"auth": "noauth", "udp": True}})
+        outbounds.append(dict(ob, tag="egress-" + ident))
+        rules.append({"type": "field", "inboundTag": ["in-" + ident], "outboundTag": "egress-" + ident})
+    return inbounds, outbounds, rules
 
 # ── Realtime conferencing ─────────────────────────────────────────────────────
 # Video calls are the one kind of traffic a tunnel reliably makes worse. Measured
@@ -918,7 +952,8 @@ def _pinned_extras(settings: dict, rules: list[dict]) -> tuple[list, list, Optio
     pinned = sorted({r["balancerTag"][4:] for r in rules if str(r.get("balancerTag", "")).startswith("pin-")})
     if not pinned:
         return [], [], None
-    outbounds = [dict(_eg.outbound(settings, e), tag="egress-" + e) for e in pinned]
+    # A key's egress-<id> outbound is always there (_key_extras).
+    outbounds = [dict(_eg.outbound(settings, e), tag="egress-" + e) for e in pinned if not _eg.is_key(e)]
     balancers = [{"tag": "pin-" + e, "selector": ["egress-" + e], "fallbackTag": "proxy",
                   "strategy": {"type": "random"}} for e in pinned]
     # Probed every 20 s through each pinned egress -- the same target the
@@ -927,7 +962,7 @@ def _pinned_extras(settings: dict, rules: list[dict]) -> tuple[list, list, Optio
     # xray restart (an unprobed egress counts as dead) and how long it keeps
     # trying a dead one: at 1 m that measured 26 s to fall back and ~2 min to
     # return on the gateway, 20 s cuts both to under half a minute.
-    observatory = {"subjectSelector": ["egress-"], "probeURL": "https://www.google.com/generate_204",
+    observatory = {"subjectSelector": ["egress-" + e for e in pinned], "probeURL": "https://www.google.com/generate_204",
                    "probeInterval": "20s", "enableConcurrency": True}
     return outbounds, balancers, observatory
 
@@ -1037,7 +1072,9 @@ def build_xray_config(settings: dict) -> dict:
     rules = [{k: v for k, v in r.items() if not k.startswith("_")}
              for r in _compiled_rules(settings, final, proxy_server_ip)]
     pin_outbounds, balancers, observatory = _pinned_extras(settings, rules)
-    outbounds = outbounds + pin_outbounds
+    key_inbounds, key_outbounds, key_rules = _key_extras(settings)
+    outbounds = outbounds + key_outbounds + pin_outbounds
+    rules = key_rules + rules
 
     return {
         "log": {"loglevel": "warning",
@@ -1071,7 +1108,7 @@ def build_xray_config(settings: dict) -> dict:
                          "destOverride": ["http", "tls", "quic"],
                          "routeOnly": True},
             "streamSettings": {"sockopt": {"tproxy": "tproxy", "mark": 255}},
-        }],
+        }] + key_inbounds,
         "outbounds": outbounds,
         "routing": {"domainStrategy": "IPIfNonMatch", "rules": rules,
                     **({"balancers": balancers} if balancers else {})},
@@ -1436,71 +1473,6 @@ def fire_alert(event: str, detail: str = "") -> None:
                 "detail": f"{event}: {exc}",
             })
     threading.Thread(target=_send, daemon=True).start()
-
-# ── VPN Health Check ───────────────────────────────────────────────────────────
-def _vpn_server_health(srv: dict) -> tuple[bool, Optional[int]]:
-    """TCP connect to VPN server:port. Returns (reachable, latency_ms)."""
-    try:
-        _, info = parse_key(srv["key"])
-        host = info["server"]; port = info["port"]
-        start = time.time()
-        sock = socket.create_connection((host, port), timeout=5)
-        sock.close()
-        return True, int((time.time() - start) * 1000)
-    except Exception:
-        return False, None
-
-async def _failover_loop() -> None:
-    """Background task: check active VPN, failover if down."""
-    global _failover_last
-    await _idle(30)  # initial delay
-    while True:
-        try:
-            s = load_settings()
-            servers = s.get("vpn_servers", [])
-            if not servers:
-                await _idle(60); continue
-            active_id = s.get("active_vpn_id")
-            active = next((x for x in servers if x.get("id") == active_id), None)
-            if not active:
-                await _idle(60); continue
-
-            ok, lat = await asyncio.get_event_loop().run_in_executor(
-                None, _vpn_server_health, active)
-
-            # Update health status
-            s2 = load_settings()
-            for srv in s2.get("vpn_servers", []):
-                if srv.get("id") == active_id:
-                    srv["last_status"] = "ok" if ok else "error"
-                    srv["latency_ms"]  = lat
-                    srv["last_checked"] = datetime.now(timezone.utc).isoformat()
-            save_settings(s2)
-
-            if not ok:
-                fire_alert("vpn_down", f"Server {active.get('name','?')} unreachable")
-                now = time.time()
-                if now - _failover_last > 300:   # max one failover per 5 min
-                    # Find next available enabled server
-                    candidates = [x for x in sorted(servers, key=lambda x: x.get("priority", 99))
-                                  if x.get("enabled") and x.get("id") != active_id]
-                    for cand in candidates:
-                        cok, _ = await asyncio.get_event_loop().run_in_executor(
-                            None, _vpn_server_health, cand)
-                        if cok:
-                            _failover_last = now
-                            s3 = load_settings()
-                            s3["active_vpn_id"] = cand["id"]
-                            save_settings(s3)
-                            apply_config(s3, "failover")
-                            fire_alert("failover_executed",
-                                       f"Switched to {cand.get('name','?')}")
-                            break
-                    else:
-                        fire_alert("all_vpn_unavailable", "No reachable VPN server found")
-        except Exception:
-            pass
-        await _idle(120)  # check every 2 minutes
 
 # ── Disk Health Check ──────────────────────────────────────────────────────────
 async def _disk_monitor_loop() -> None:
@@ -1971,7 +1943,7 @@ def route_test(target: str, settings: dict, profile_id: Optional[str] = None, so
         source = "custom_rule" if reason.startswith(("custom:", "profile:custom:")) else "block_probe" if reason == "probe:discovered" else "geosite_database" if reason.startswith("geosite:") else "geoip_database" if reason.startswith("geoip:") or reason == "shared-edge" else "global_profile_fallback"
         pinned = str(rule.get("balancerTag", ""))[4:]
         note = ("Через выход «%s»; если он не отвечает — через активный выход"
-                % _eg.CATALOG[pinned]["label"]) if pinned in _eg.CATALOG else \
+                % _eg.label(settings, pinned)) if pinned in _eg.catalog(settings) else \
                "В списке заблокированных адресов" if reason == "geoip:ru-blocked" else ""
         r = result(rule.get("outboundTag") or final, reason, note, rule_source=source)
         if pinned:
@@ -2314,8 +2286,7 @@ def get_xray_state() -> str:
     # AdGuard VPN can be the egress instead of a key-based server; without
     # counting it the dashboard reports "no key" while every packet is in fact
     # being tunnelled, which reads as if the gateway were wide open.
-    has_egress = bool(s.get("active_vpn_id") or s.get("vpn_key")
-                      or _eg.candidates(s))
+    has_egress = bool(_eg.candidates(s))
     if not has_egress:
         return "no_key"
     # One consultation of the measurement, whichever egress is configured.
@@ -2334,6 +2305,10 @@ def parse_access_log_line(line: str) -> Optional[dict]:
         r"(\w+):(.+):(\d+)\s+\[([^\]]+)\]", line)
     if not acc_m: return None
     src, proto, dst, dport, route_info = acc_m.groups()
+    # A key egress's loopback port carries only probes of that key -- the
+    # gateway measuring itself, not a device of the house.
+    if route_info.startswith("in-key-"):
+        return None
     parts = route_info.split(" -> ")
     outbound = parts[-1].strip() if len(parts) > 1 else route_info.strip()
     return {"ts": ts, "src": src, "proto": proto.upper(),
@@ -2622,7 +2597,6 @@ async def startup_event():
     _install_stop_hook()
     _wire_features()
     _db.init_db()
-    asyncio.create_task(_failover_loop())
     asyncio.create_task(_disk_monitor_loop())
     asyncio.create_task(_xray_fd_watchdog())
     asyncio.create_task(_scheduler_loop())
@@ -2633,7 +2607,6 @@ async def startup_event():
 
 # ── Pydantic Models ────────────────────────────────────────────────────────────
 class LoginReq(BaseModel):        username: str; password: str
-class KeyReq(BaseModel):          key: str
 class ProfileReq(BaseModel):      profile: str
 class PwReq(BaseModel):           current: str; new_pw: str
 class AaplimgReq(BaseModel):      enabled: bool
@@ -2654,12 +2627,6 @@ class CustomRulesReq(BaseModel):
     always_vpn:    list
 class DeviceNameReq(BaseModel):   name: str
 class DevicePolicyReq(BaseModel): policy: str
-class VPNServerAddReq(BaseModel): key: str; name: str = ""; priority: int = 99
-class VPNServerUpdateReq(BaseModel):
-    name:     Optional[str]  = None
-    enabled:  Optional[bool] = None
-    priority: Optional[int]  = None
-class VPNActivateReq(BaseModel):  server_id: str
 class DNSSettingsReq(BaseModel):
     upstream:      list[str]
     upstream_ru:   list[str]    = []
@@ -2730,36 +2697,24 @@ async def get_status(u: str = Depends(auth_dep)):
     s = load_settings(); speeds = get_speeds(); state = get_xray_state()
     gw = _get_lan_ip() or "?"
     vpn_meta = None
-    # Build VPN meta from active server
-    active_id = s.get("active_vpn_id")
-    servers   = s.get("vpn_servers", [])
-    active    = next((x for x in servers if x.get("id") == active_id), None)
-    if active:
-        try:
-            _, vpn_meta = parse_key(active["key"])
-            vpn_meta["masked_key"] = mask_key(active["key"])
-            vpn_meta["server_id"]  = active["id"]
-            vpn_meta["last_status"] = active.get("last_status", "unknown")
-            vpn_meta["latency_ms"]  = active.get("latency_ms")
-        except Exception:
-            vpn_meta = {"name": active.get("name","?"), "protocol":"?", "server":"?",
-                        "port": 0, "last_status": "error"}
-    elif s.get("vpn_key"):   # legacy
-        try:
-            _, vpn_meta = parse_key(s["vpn_key"])
-            vpn_meta["masked_key"] = mask_key(s["vpn_key"])
-        except Exception:
-            vpn_meta = {"name": "Invalid key", "protocol":"?","server":"?","port":0}
     egress = None
     ident = _eg.active(s)
     if ident:
-        egress = {"kind": ident, "label": _eg.CATALOG[ident]["label"],
-                  "location": (s.get("adguard") or {}).get("location") if ident == "adguard" else None}
+        location = (s.get("adguard") or {}).get("location") if ident == "adguard" else None
+        if _eg.is_key(ident):
+            # The key's server, for the status line; the key itself never leaves.
+            try:
+                _, vpn_meta = parse_key(_eg.key_server(s, ident)["key"])
+                location = "%s · %s" % (vpn_meta["protocol"], vpn_meta["server"])
+            except Exception:
+                vpn_meta = None
+        egress = {"kind": "key" if _eg.is_key(ident) else ident, "id": ident,
+                  "label": _eg.label(s, ident), "location": location}
     return {"state": state, "egress": egress,
             "auto_fallback": bool(s.get("auto_fallback")),
             "egress_active": _eg.active(s),
             "egress_primary": (_eg.candidates(s) or [None])[0],
-            "egress_reserves": [_eg.CATALOG[e]["label"] for e in _eg.candidates(s)[1:]],
+            "egress_reserves": [_eg.label(s, e) for e in _eg.candidates(s)[1:]],
             "fptn_enabled": bool((s.get("fptn") or {}).get("enabled")),
             "in_fallback": bool(s.get("fallback_saved_profile")),
             "fallback_saved_profile": s.get("fallback_saved_profile"),
@@ -2771,7 +2726,7 @@ async def get_status(u: str = Depends(auth_dep)):
             "realtime_direct": _profiles.effective(s)["realtime_direct"],
             "wan_change": _recent_wan_change(),
             "attention": _active_attention()[:4],
-            "vpn_server_count": len(servers)}
+            "vpn_server_count": len(_eg.key_servers(s))}
 
 def _recent_wan_change(within_hours: int = 24) -> dict | None:
     """
@@ -2879,7 +2834,7 @@ async def _egress_fallback_loop() -> None:
                     await loop.run_in_executor(
                         None, lambda: apply_config(s, "egress_" + action + "_" + ident,
                                                    _pre_settings=old_s))
-                    label = _eg.CATALOG[ident]["label"]
+                    label = _eg.label(s, ident)
                     fire_alert("failover_executed",
                                ("Основной выход снова работает: " if action == "restore"
                                 else "Основной выход не отвечает — переключено на ") + label)
@@ -3208,19 +3163,26 @@ async def get_egresses(u: str = Depends(auth_dep)):
     cands = _eg.candidates(s)
     active = _eg.active(s)
     alive = await asyncio.gather(*[_quick_alive(*_eg.socks(s, e)) for e in order])
+    cat = _eg.catalog(s)
+    xray = _unit_state("shunt")
     rows = []
     for e, ok in zip(order, alive):
-        c = _eg.CATALOG[e]
-        rows.append({"id": e, "label": c["label"], "cascade": e in _eg.CASCADE,
-                     "configured": _eg.configured(e), "enabled": _eg.enabled(s, e),
-                     "primary": bool(cands) and cands[0] == e, "active": e == active,
-                     "alive": ok, "service": _unit_state(c["unit"]) if "unit" in c else
-                     _unit_state("adguardvpn.service"),
-                     "socks": "%s:%s" % _eg.socks(s, e),
-                     "config_updated": _egress_config_mtime(e),
-                     "prev_available": _egress_prev_path(e) is not None,
-                     "params": _eg.params(s, e), "pinned": _eg.pinned_rules(s, e),
-                     "config_facts": _egress_config_facts(e)})
+        c = cat[e]
+        row = {"id": e, "label": c["label"], "cascade": e in _eg.CASCADE, "kind": "key" if c.get("key") else e,
+               "configured": _eg.configured(e), "enabled": _eg.enabled(s, e),
+               "primary": bool(cands) and cands[0] == e, "active": e == active,
+               "alive": ok, "service": _unit_state(c["unit"]) if "unit" in c else
+               xray if c.get("key") else _unit_state("adguardvpn.service"),
+               "socks": "%s:%s" % _eg.socks(s, e),
+               "config_updated": _egress_config_mtime(e),
+               "prev_available": _egress_prev_path(e) is not None,
+               "params": _eg.params(s, e), "pinned": _eg.pinned_rules(s, e),
+               "config_facts": _egress_config_facts(e)}
+        if c.get("key"):
+            k = _eg.key_server(s, e)
+            row.update(prev_available=bool(k.get("prev_key")), config_updated=k.get("updated"),
+                       key=_key_facts(k))
+        rows.append(row)
     return {"egresses": rows, "active": active, "auto_fallback": bool(s.get("auto_fallback")),
             "in_fallback": bool(s.get("fallback_saved_profile"))}
 
@@ -3246,7 +3208,7 @@ async def probe_egress(ident: str, u: str = Depends(auth_dep)):
     download. Through its own SOCKS port, so a reserve can be measured while
     another egress carries the house.
     """
-    if ident not in _eg.CATALOG:
+    if ident not in _eg.catalog(load_settings()):
         raise HTTPException(404, "Нет такого выхода")
     lock = _EGRESS_PROBE_LOCK.setdefault(ident, asyncio.Lock())
     if lock.locked():
@@ -3379,6 +3341,16 @@ async def set_egress_params(ident: str, req: EgressParamsReq, u: str = Depends(a
 @app.post("/api/egresses/{ident}/restore")
 async def restore_egress_credentials(ident: str, u: str = Depends(auth_dep)):
     """Swap the current credentials with the previous ones kept beside them."""
+    if _eg.is_key(ident):
+        s = load_settings(); old_s = copy.deepcopy(s)
+        k = _eg.key_server(s, ident)
+        if not k or not k.get("prev_key"):
+            raise HTTPException(400, "Предыдущей версии нет")
+        k["key"], k["prev_key"] = k["prev_key"], k["key"]
+        k["updated"] = int(time.time())
+        save_settings(s)
+        ok, err = apply_config(s, "egress_key_restore", _pre_settings=old_s)
+        return {"ok": ok, "error": err or None, "restarted": True}
     prev = _egress_prev_path(ident)
     if prev is None:
         raise HTTPException(400, "Предыдущей версии нет")
@@ -3414,11 +3386,12 @@ async def set_egresses(req: EgressesReq, u: str = Depends(auth_dep)):
     s = load_settings()
     old_s = copy.deepcopy(s)
     if req.order is not None:
-        if sorted(req.order) != sorted(_eg.CATALOG):
+        if sorted(req.order) != sorted(_eg.catalog(s)):
             raise HTTPException(400, "Порядок должен перечислять каждый выход ровно один раз")
         s["egress_order"] = list(req.order)
+    known = _eg.catalog(s)
     for e, on in (req.enabled or {}).items():
-        if e not in _eg.CATALOG:
+        if e not in known:
             raise HTTPException(400, "Нет такого выхода")
         if on and not _eg.configured(e):
             raise HTTPException(400, "Для этого выхода ещё нет конфигурации — загрузите её на вкладке «VPN серверы»")
@@ -3429,15 +3402,17 @@ async def set_egresses(req: EgressesReq, u: str = Depends(auth_dep)):
             fp["enabled"] = bool(on)
             fp.setdefault("socks_host", "192.168.244.2")
             fp.setdefault("socks_port", 1082)
+        elif _eg.is_key(e):
+            _eg.key_server(s, e)["enabled"] = bool(on)
         else:
             s.setdefault("egresses", {}).setdefault(e, {})["enabled"] = bool(on)
     # Switching off the last tunnel would send the whole house out directly
     # without anyone having asked for that -- the one outcome this list exists
-    # to prevent. A key-based server still counts as a way out.
-    if req.enabled and not _eg.candidates(s) and not (s.get("active_vpn_id") or s.get("vpn_key")):
+    # to prevent.
+    if req.enabled and not _eg.candidates(s):
         raise HTTPException(400, "Нельзя выключить последний выход: весь трафик пошёл бы напрямую")
     for e, on in (req.enabled or {}).items():
-        unit = _eg.CATALOG[e].get("unit")
+        unit = known[e].get("unit")
         if unit:
             subprocess.run(["systemctl", "enable" if on else "disable", "--now", unit],
                            capture_output=True)
@@ -3655,146 +3630,115 @@ async def sysinfo_stream(u: str = Depends(auth_dep)):
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
-# ── VPN Servers ────────────────────────────────────────────────────────────────
-@app.get("/api/vpn-servers")
-async def get_vpn_servers(u: str = Depends(auth_dep)):
-    s = load_settings()
-    servers = s.get("vpn_servers", [])
-    # Return masked list
-    masked = []
-    for srv in servers:
-        try:
-            _, info = parse_key(srv["key"])
-            masked.append({
-                "id":           srv["id"],
-                "name":         srv.get("name", info.get("name","?")),
-                "protocol":     info["protocol"],
-                "server":       info["server"],
-                "port":         info["port"],
-                "enabled":      srv.get("enabled", True),
-                "priority":     srv.get("priority", 99),
-                "last_status":  srv.get("last_status", "unknown"),
-                "latency_ms":   srv.get("latency_ms"),
-                "last_checked": srv.get("last_checked"),
-                "is_active":    srv["id"] == s.get("active_vpn_id"),
-            })
-        except Exception:
-            masked.append({
-                "id": srv.get("id","?"), "name": srv.get("name","?"),
-                "protocol":"?", "server":"?", "port":0,
-                "enabled": srv.get("enabled", True),
-                "priority": srv.get("priority", 99),
-                "last_status": "parse_error",
-                "latency_ms": None, "last_checked": None,
-                "is_active": srv.get("id") == s.get("active_vpn_id"),
-            })
-    return {"servers": masked, "active_id": s.get("active_vpn_id")}
-
-@app.post("/api/vpn-servers")
-async def add_vpn_server(req: VPNServerAddReq, u: str = Depends(auth_dep)):
+# ── Key-based egresses ────────────────────────────────────────────────────────
+# A key (ss://, vless://, vmess://, trojan://) is an egress like the others:
+# added here, switched on and ordered in the ladder (PUT /api/egresses). The
+# key itself never goes back to the page -- it carries the password.
+def _key_facts(k: dict) -> dict:
     try:
-        _, info = parse_key(req.key)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    s = load_settings(); old_s = dict(s)
-    srv_id = str(_uuid_mod.uuid4())
-    name = req.name.strip() or info.get("name", f"Server {len(s['vpn_servers'])+1}")
-    new_srv = {"id": srv_id, "name": name, "key": req.key.strip(),
-               "enabled": True, "priority": req.priority,
-               "last_status": "unknown", "latency_ms": None, "last_checked": None}
-    s["vpn_servers"].append(new_srv)
-    if not s.get("active_vpn_id"):
-        s["active_vpn_id"] = srv_id
+        _, info = parse_key(k.get("key", ""))
+        return {"protocol": info["protocol"], "server": info["server"], "port": info["port"]}
+    except Exception:
+        return {"protocol": _eg.key_protocol(k.get("key", "")) or "?", "server": None, "port": None,
+                "error": "Ключ не разбирается"}
+
+
+def _clean_key(key: str) -> str:
+    key = (key or "").strip()
+    if not _eg.key_protocol(key):
+        raise HTTPException(400, "Нужен ключ ss://, vless://, vmess:// или trojan://")
+    if len(key) > 8000:
+        raise HTTPException(400, "Слишком длинный ключ")
+    try:
+        parse_key(key)
+    except Exception:
+        raise HTTPException(400, "Ключ не разбирается: проверьте, что он скопирован целиком")
+    return key
+
+
+def _clean_key_name(name: Optional[str], key: str) -> str:
+    name = re.sub(r"\s+", " ", (name or "").strip())[:48]
+    if name:
+        return name
+    try:
+        return (parse_key(key)[1].get("name") or "").strip()[:48] or _eg.key_protocol(key)
+    except Exception:
+        return _eg.key_protocol(key) or "Ключ"
+
+
+class KeyEgressReq(BaseModel):
+    key: Optional[str] = None
+    name: Optional[str] = None
+
+
+@app.post("/api/egresses/keys")
+async def add_key_egress(req: KeyEgressReq, u: str = Depends(auth_dep)):
+    """
+    Add a key as a new egress, switched on, last in the order: a reserve
+    until moved up -- or the primary, when it is the only way out there is.
+    xray restarts to open the key's port, so the house blinks for a second.
+    """
+    key = _clean_key(req.key)
+    s = load_settings(); old_s = copy.deepcopy(s)
+    if any(k.get("key") == key for k in _eg.key_servers(s)):
+        raise HTTPException(400, "Этот ключ уже добавлен")
+    if len(_eg.key_servers(s)) >= 50:
+        raise HTTPException(400, "Ключей слишком много")
+    sid = _uuid_mod.uuid4().hex[:8]
+    s.setdefault("vpn_servers", []).append({
+        "id": sid, "name": _clean_key_name(req.name, key), "key": key, "enabled": True,
+        "socks_port": _eg.free_key_port(s), "updated": int(time.time())})
+    s["egress_order"] = _eg.order(s)
     save_settings(s)
-    ok, err = apply_config(s, "vpn_server_add", _pre_settings=old_s)
-    return {"ok": ok, "error": err or None, "server_id": srv_id}
+    ok, err = apply_config(s, "egress_key_add", _pre_settings=old_s)
+    return {"ok": ok, "error": err or None, "id": _eg.KEY_PREFIX + sid, "active": _eg.active(s)}
 
-@app.patch("/api/vpn-servers/{server_id}")
-async def update_vpn_server(server_id: str, req: VPNServerUpdateReq, u: str = Depends(auth_dep)):
-    s = load_settings(); old_s = dict(s)
-    srv = next((x for x in s.get("vpn_servers", []) if x.get("id") == server_id), None)
-    if not srv: raise HTTPException(404, "Server not found")
-    if req.name     is not None: srv["name"]     = req.name.strip()[:64]
-    if req.enabled  is not None: srv["enabled"]  = req.enabled
-    if req.priority is not None: srv["priority"] = max(1, min(99, req.priority))
+
+@app.put("/api/egresses/{ident}/key")
+async def update_key_egress(ident: str, req: KeyEgressReq, u: str = Depends(auth_dep)):
+    """Rename a key egress, or replace its key (the previous one is kept)."""
+    s = load_settings(); old_s = copy.deepcopy(s)
+    k = _eg.key_server(s, ident)
+    if not k:
+        raise HTTPException(404, "Нет такого выхода")
+    restart = False
+    if req.key is not None and req.key.strip() != k.get("key"):
+        key = _clean_key(req.key)
+        if any(o.get("key") == key for o in _eg.key_servers(s) if o is not k):
+            raise HTTPException(400, "Этот ключ уже добавлен")
+        k["prev_key"], k["key"], k["updated"] = k.get("key"), key, int(time.time())
+        restart = True
+    if req.name is not None:
+        k["name"] = _clean_key_name(req.name, k["key"])
     save_settings(s)
-    ok, err = apply_config(s, "vpn_server_update", _pre_settings=old_s)
-    return {"ok": ok, "error": err or None}
+    if not restart:
+        return {"ok": True, "restarted": False, "label": k["name"]}
+    ok, err = apply_config(s, "egress_key_change", _pre_settings=old_s)
+    return {"ok": ok, "error": err or None, "restarted": True, "label": k["name"]}
 
-@app.delete("/api/vpn-servers/{server_id}")
-async def delete_vpn_server(server_id: str, u: str = Depends(auth_dep)):
-    s = load_settings(); old_s = dict(s)
-    before = len(s.get("vpn_servers", []))
-    removed = next((x for x in s.get("vpn_servers", []) if x.get("id") == server_id), None)
-    s["vpn_servers"] = [x for x in s.get("vpn_servers", []) if x.get("id") != server_id]
-    if len(s["vpn_servers"]) == before:
-        raise HTTPException(404, "Server not found")
-    # The deprecated vpn_key is re-materialised into vpn_servers by _migrate_settings on
-    # the next load, which resurrected just-deleted servers under a fresh id. Drop it too.
-    if (removed and s.get("vpn_key") == removed.get("key")) or not s["vpn_servers"]:
-        s["vpn_key"] = None
-    if s.get("active_vpn_id") == server_id:
-        remaining = [x for x in s["vpn_servers"] if x.get("enabled")]
-        s["active_vpn_id"] = remaining[0]["id"] if remaining else None
+
+@app.delete("/api/egresses/{ident}")
+async def delete_key_egress(ident: str, u: str = Depends(auth_dep)):
+    """
+    Remove a key egress. Rules pinned to it go through the tunnel instead,
+    and the last way out cannot be removed -- the house would go direct.
+    """
+    s = load_settings(); old_s = copy.deepcopy(s)
+    k = _eg.key_server(s, ident)
+    if not k:
+        raise HTTPException(404, "Удалить можно только выход по ключу")
+    was_active = _eg.active(s) == ident
+    s["vpn_servers"] = [x for x in _eg.key_servers(s) if x is not k]
+    if not _eg.candidates(s) and _eg.candidates(old_s):
+        raise HTTPException(400, "Нельзя удалить последний выход: весь трафик пошёл бы напрямую")
+    unpinned = _eg.unpin(s, ident)
+    s["egress_order"] = [e for e in (s.get("egress_order") or []) if e != ident]
+    if s.get("egress_active") == ident:
+        s["egress_active"] = None
     save_settings(s)
-    ok, err = apply_config(s, "vpn_server_delete", _pre_settings=old_s)
-    return {"ok": ok, "error": err or None}
-
-@app.post("/api/vpn-servers/{server_id}/activate")
-async def activate_vpn_server(server_id: str, u: str = Depends(auth_dep)):
-    s = load_settings(); old_s = dict(s)
-    if not any(x.get("id") == server_id for x in s.get("vpn_servers", [])):
-        raise HTTPException(404, "Server not found")
-    s["active_vpn_id"] = server_id
-    save_settings(s)
-    ok, err = apply_config(s, "vpn_server_activate", _pre_settings=old_s)
-    return {"ok": ok, "error": err or None}
-
-@app.post("/api/vpn-servers/{server_id}/check")
-async def check_vpn_server(server_id: str, u: str = Depends(auth_dep)):
-    s = load_settings()
-    srv = next((x for x in s.get("vpn_servers", []) if x.get("id") == server_id), None)
-    if not srv: raise HTTPException(404, "Server not found")
-    loop = asyncio.get_event_loop()
-    ok, lat = await loop.run_in_executor(None, _vpn_server_health, srv)
-    # Update status
-    s2 = load_settings()
-    for x in s2.get("vpn_servers", []):
-        if x.get("id") == server_id:
-            x["last_status"] = "ok" if ok else "error"
-            x["latency_ms"]  = lat
-            x["last_checked"] = datetime.now(timezone.utc).isoformat()
-    save_settings(s2)
-    return {"ok": True, "reachable": ok, "latency_ms": lat}
-
-# Legacy single-key endpoints (kept for backward compat)
-@app.post("/api/vpn-key")
-async def set_key(req: KeyReq, u: str = Depends(auth_dep)):
-    try: _, meta = parse_key(req.key)
-    except ValueError as e: raise HTTPException(400, str(e))
-    s = load_settings(); old_s = dict(s)
-    # Add as new server or update first server
-    servers = s.get("vpn_servers", [])
-    if servers:
-        servers[0]["key"] = req.key.strip()
-        if not s.get("active_vpn_id"): s["active_vpn_id"] = servers[0]["id"]
-    else:
-        srv_id = str(_uuid_mod.uuid4())
-        s["vpn_servers"] = [{"id": srv_id, "name": meta.get("name","Server 1"),
-                              "key": req.key.strip(), "enabled": True, "priority": 1,
-                              "last_status":"unknown","latency_ms":None,"last_checked":None}]
-        s["active_vpn_id"] = srv_id
-    s["vpn_key"] = req.key.strip()  # keep for compat
-    save_settings(s)
-    ok, err = apply_config(s, "vpn_key_change", _pre_settings=old_s)
-    return {"ok": ok, "error": err or None, "vpn": meta}
-
-@app.delete("/api/vpn-key")
-async def del_key(u: str = Depends(auth_dep)):
-    s = load_settings(); old_s = dict(s)
-    s["vpn_key"] = None; s["vpn_servers"] = []; s["active_vpn_id"] = None
-    save_settings(s); apply_config(s, "vpn_key_delete", _pre_settings=old_s)
-    return {"ok": True}
+    ok, err = apply_config(s, "egress_key_delete", _pre_settings=old_s)
+    return {"ok": ok, "error": err or None, "unpinned": unpinned, "was_active": was_active,
+            "active": _eg.active(s)}
 
 # ── Profile ────────────────────────────────────────────────────────────────────
 @app.post("/api/profile")

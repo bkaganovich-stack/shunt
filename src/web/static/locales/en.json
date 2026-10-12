@@ -1170,9 +1170,60 @@
     "Порядок сохранён, трафик переключён": "Order saved, traffic switched",
     "Порядок сохранён": "Order saved",
     "Выход включён": "Egress on",
-    "Выход выключен": "Egress off"
+    "Выход выключен": "Egress off",
+    "Добавить подключение": "Add connection",
+    "Новое подключение": "New connection",
+    "По ключу: Shadowsocks, VLESS, VMess или Trojan": "By key: Shadowsocks, VLESS, VMess or Trojan",
+    "Определяется по вставленному ключу": "Detected from the pasted key",
+    "Ключ": "Key",
+    "Пусто — из ключа": "Empty — taken from the key",
+    "Подключение появится включённым в конце списка на вкладке «Активный выход» — резервом, пока вы не поднимете его выше. Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду.": "The connection is added switched on, at the end of the list on the “Active egress” tab — a reserve until you move it up. The gateway restarts routing — the house loses the connection for a second.",
+    "задан": "set",
+    "Заменить ключ": "Replace key",
+    "Прежний ключ сохраняется рядом; сам ключ на страницу не возвращается. Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду.": "The previous key is kept alongside; the key itself is never sent back to the page. The gateway restarts routing — the house loses the connection for a second.",
+    "Как подключение называется на обеих вкладках": "How the connection is named on both tabs",
+    "Удалить подключение": "Delete connection",
+    "ss://…@сервер:порт#имя": "ss://…@server:port#name",
+    "vless://…@сервер:порт?…#имя": "vless://…@server:port?…#name",
+    "trojan://…@сервер:порт?…#имя": "trojan://…@server:port?…#name",
+    "Вставьте ключ": "Paste a key",
+    "Проверяю и добавляю…": "Checking and adding…",
+    "Браузер не дал прочитать буфер — вставьте вручную (⌘V / Ctrl+V)": "The browser did not allow reading the clipboard — paste manually (⌘V / Ctrl+V)",
+    "Подключение добавлено, трафик идёт через него": "Connection added, traffic now goes through it",
+    "Подключение добавлено резервом": "Connection added as a reserve",
+    "Подключение удалено": "Connection deleted",
+    "Название сохранено": "Name saved",
+    "Нужен ключ ss://, vless://, vmess:// или trojan://": "An ss://, vless://, vmess:// or trojan:// key is needed",
+    "Ключ не разбирается: проверьте, что он скопирован целиком": "The key cannot be parsed: check that it was copied in full",
+    "Ключ не разбирается": "The key cannot be parsed",
+    "Этот ключ уже добавлен": "This key has already been added",
+    "Слишком длинный ключ": "The key is too long",
+    "Ключей слишком много": "Too many keys",
+    "Нельзя удалить последний выход: весь трафик пошёл бы напрямую": "The last egress cannot be deleted: all traffic would go direct",
+    "Удалить можно только выход по ключу": "Only key-based egresses can be deleted",
+    "Нет такого выхода": "No such egress"
   },
   "patterns": [
+    [
+      "^Удалить «(.+)»\\? Через него сейчас идёт трафик дома — он переключится на следующий выход по списку\\. Привязанные к нему правила \\((\\d+)\\) пойдут через основной выход\\. Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду\\.$",
+      "Delete “$1”? The house's traffic is going through it now — it will switch to the next egress in the list. The $2 rules pinned to it will use the primary egress. The gateway restarts routing — the house loses the connection for a second."
+    ],
+    [
+      "^Удалить «(.+)»\\? Через него сейчас идёт трафик дома — он переключится на следующий выход по списку\\. Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду\\.$",
+      "Delete “$1”? The house's traffic is going through it now — it will switch to the next egress in the list. The gateway restarts routing — the house loses the connection for a second."
+    ],
+    [
+      "^Удалить «(.+)»\\? Привязанные к нему правила \\((\\d+)\\) пойдут через основной выход\\. Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду\\.$",
+      "Delete “$1”? The $2 rules pinned to it will use the primary egress. The gateway restarts routing — the house loses the connection for a second."
+    ],
+    [
+      "^Удалить «(.+)»\\? Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду\\.$",
+      "Delete “$1”? The gateway restarts routing — the house loses the connection for a second."
+    ],
+    [
+      "^(.+) · ключ$",
+      "$1 · key"
+    ],
     [
       "^Привязанные к нему правила \\((\\d+)\\) пойдут через основной выход\\. Выключить\\?$",
       "The $1 rules pinned to it will use the primary egress. Switch it off?"

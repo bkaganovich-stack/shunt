@@ -691,31 +691,6 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <!-- Connections: one card per VPN, moved to the servers tab by ui.js. -->
       <div id="conn-cards" class="conn-grid"><div class="card conn-loading">Загрузка подключений…</div></div>
 
-      <div class="card">
-        <div class="card-title">Другие серверы (ключи Shadowsocks / VLESS / …)</div>
-        <div id="vpn-servers-list">
-          <div class="text-muted" style="font-size:13px;padding:8px 0">Загрузка…</div>
-        </div>
-        <div class="mt-4">
-          <button class="btn btn-secondary btn-sm" onclick="loadVpnServers()">Обновить</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Добавить сервер</div>
-        <div class="field"><label>Ключ подключения (ss://, vless://, vmess://, trojan://)</label>
-          <textarea id="vpn-add-key" placeholder="ss://… или vless://… или vmess://… или trojan://…"
-                    rows="3"></textarea></div>
-        <div class="field"><label>Имя (опционально)</label>
-          <input id="vpn-add-name" type="text" placeholder="Мой сервер"></div>
-        <div class="btn-row">
-          <button class="btn btn-primary" onclick="addVpnServer()">Добавить</button>
-          <button class="btn btn-secondary" onclick="pasteVpnKey()">Из буфера</button>
-          <label class="btn btn-secondary" for="vpn-key-file">Файл</label>
-          <input type="file" id="vpn-key-file" accept=".json,.txt,.conf" onchange="loadVpnKeyFile(this)">
-        </div>
-        <div id="vpn-add-result" class="mt-4" style="display:none"></div>
-      </div>
     </div>
 
     <!-- ── PROFILE ────────────────────────────────────────────────────────── -->
@@ -1925,7 +1900,7 @@ function legacyShowPage(name, linkEl) {
 
   if (name === 'logs') { loadLogs(); if (currentLogTab === 'connections') loadConnections(); }
   if (name === 'geo') loadGeoInfo();
-  if (name === 'servers') { loadConnections(); loadVpnServers(); }
+  if (name === 'servers') loadConnections();
   if (name === 'discovered') loadDiscovered();
   if (name === 'settings') { loadAbout(); loadSnapshots(); loadTopology(); loadNetIfaces(); }
   if (name === 'rules' && !window.shuntUI?.rulesDirty) loadRules();
@@ -2297,27 +2272,6 @@ function updateSysNetUI(net) {
   if (rxBar) rxBar.style.width = (rx / sysinfoSpeedMax.rx * 100) + '%';
   const txBar = document.getElementById('sys-tx-bar');
   if (txBar) txBar.style.width = (tx / sysinfoSpeedMax.tx * 100) + '%';
-}
-
-// ─── VPN Key (legacy stub — redirects to VPN Servers page) ──────────────────
-function loadKeyFile(input) {
-  const file = input.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    let text = e.target.result.trim();
-    try {
-      const j = JSON.parse(text);
-      if (j.method && j.password && j.server && j.server_port)
-        text = `ss://${btoa(j.method+':'+j.password)}@${j.server}:${j.server_port}`;
-      else if (j.servers) {
-        const s = j.servers[0];
-        text = `ss://${btoa(s.method+':'+s.password)}@${s.server}:${s.server_port}`;
-      }
-    } catch {}
-    const el = document.getElementById('vpn-add-key');
-    if (el) { el.value = text; toast('Файл загружен'); }
-  };
-  reader.readAsText(file); input.value = '';
 }
 
 // ─── Profile ─────────────────────────────────────────────────────────────────
@@ -3495,133 +3449,6 @@ const POLICY_CSS = {
   all_except_ru:'policy-all_except_ru', blocked_only:'policy-blocked_only', all:'policy-all',
 };
 
-async function loadVpnServers() {
-  const [r, eg] = await Promise.all([apiJ('GET', '/api/vpn-servers'), apiJ('GET', '/api/egresses')]);
-  // Key-based servers carry traffic only when no egress in the ladder is on.
-  const covered = !!(eg && eg.active);
-  if (!r) return;
-  const el = document.getElementById('vpn-servers-list');
-  const servers = r.servers || [];
-  if (!el) return;
-  const banner = covered
-    ? '<div class="guide-note" style="margin-bottom:10px">Трафик сейчас идёт через выход из списка на вкладке «Активный выход» — эти серверы используются, только если там не включён ни один выход.</div>'
-    : '';
-  if (!servers.length) {
-    el.innerHTML = banner + '<div class="text-muted" style="padding:8px 0;font-size:13px">Нет серверов. Добавьте первый VPN-ключ ниже.</div>';
-    return;
-  }
-  el.innerHTML = banner + servers.map(s => {
-    const statusClass = s.last_status === 'ok' ? 'ok' : s.last_status === 'error' ? 'error' : 'unknown';
-    const activeBadge = s.is_active
-      ? (covered ? '<span class="badge badge-gray" style="font-size:11px">не используется</span>'
-                 : '<span class="badge badge-green" style="font-size:11px">Активный</span>')
-      : '';
-    const lat = s.latency_ms != null ? `${s.latency_ms} ms` : '—';
-    const checked = s.last_checked ? new Date(s.last_checked).toLocaleTimeString('ru-RU') : 'никогда';
-    return `<div class="vpn-server-card ${s.is_active && !covered ? 'active-server' : ''} ${!s.enabled ? 'disabled-server' : ''}">
-      <div class="vpn-server-header">
-        <div class="vpn-status-dot ${statusClass}"></div>
-        <div class="vpn-server-name">${escHtml(s.name)} ${activeBadge}</div>
-        <span class="badge ${s.enabled ? 'badge-green' : 'badge-gray'}" style="font-size:10px">
-          ${s.enabled ? 'Вкл' : 'Выкл'}</span>
-      </div>
-      <div class="vpn-server-meta">${escHtml(s.protocol)} · ${escHtml(s.server)}:${s.port}
-        · приоритет: ${s.priority} · ping: ${lat} · проверен: ${checked}</div>
-      <div class="vpn-actions">
-        ${!s.is_active ? `<button class="btn btn-primary btn-sm" onclick="activateVpn('${s.id}')">Активировать</button>` : ''}
-        <button class="btn btn-secondary btn-sm" onclick="checkVpn('${s.id}', this)">Проверить</button>
-        <button class="btn btn-secondary btn-sm" onclick="toggleVpn('${s.id}', ${!s.enabled})">${s.enabled ? 'Выключить' : 'Включить'}</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteVpn('${s.id}')">Удалить</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-async function addVpnServer() {
-  const key  = document.getElementById('vpn-add-key').value.trim();
-  const name = document.getElementById('vpn-add-name').value.trim();
-  const box  = document.getElementById('vpn-add-result');
-  box.style.display = 'block'; box.innerHTML = '<span class="text-muted">…</span>';
-  if (!key) { box.innerHTML = '<span class="text-red">Введите ключ</span>'; return; }
-  const r = await apiJ('POST', '/api/vpn-servers', { key, name });
-  if (r?.ok) {
-    box.innerHTML = '<span class="text-green">✓ Сервер добавлен</span>';
-    document.getElementById('vpn-add-key').value = '';
-    document.getElementById('vpn-add-name').value = '';
-    loadVpnServers(); refreshStatus(); toast('VPN сервер добавлен');
-  } else {
-    box.innerHTML = `<span class="text-red">✕ ${escHtml(r?.error || 'Ошибка')}</span>`;
-    toast(r?.error || 'Ошибка', false);
-  }
-}
-
-async function activateVpn(id) {
-  const r = await apiJ('POST', `/api/vpn-servers/${id}/activate`);
-  if (r?.ok) { toast('Сервер активирован'); loadVpnServers(); refreshStatus(); }
-  else toast(r?.error || 'Ошибка', false);
-}
-
-async function checkVpn(id, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '…'; }
-  const r = await apiJ('POST', `/api/vpn-servers/${id}/check`);
-  if (btn) { btn.disabled = false; btn.textContent = 'Проверить'; }
-  if (r?.ok) {
-    const msg = r.reachable ? `✓ Доступен, ${r.latency_ms} ms` : '✕ Недоступен';
-    toast(msg, r.reachable); loadVpnServers();
-  } else toast(r?.error || 'Ошибка', false);
-}
-
-async function toggleVpn(id, enable) {
-  const r = await apiJ('PATCH', `/api/vpn-servers/${id}`, { enabled: enable });
-  if (r?.ok) { loadVpnServers(); toast(enable ? 'Сервер включён' : 'Сервер выключен'); }
-  else toast(r?.error || 'Ошибка', false);
-}
-
-async function deleteVpn(id) {
-  if (!confirm(t('Удалить VPN сервер?'))) return;
-  const r = await apiJ('DELETE', `/api/vpn-servers/${id}`);
-  if (r?.ok) { loadVpnServers(); refreshStatus(); toast('Сервер удалён'); }
-  else toast(r?.error || 'Ошибка', false);
-}
-
-async function pasteVpnKey() {
-  try {
-    const text = await navigator.clipboard.readText();
-    document.getElementById('vpn-add-key').value = text.trim();
-  } catch { toast('Вставьте вручную (Ctrl+V / Cmd+V)', false); }
-}
-
-function loadVpnKeyFile(input) {
-  const file = input.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    let text = e.target.result.trim();
-    try {
-      const j = JSON.parse(text);
-      if (j.method && j.password && j.server)
-        text = `ss://${btoa(j.method+':'+j.password)}@${j.server}:${j.server_port}`;
-    } catch {}
-    document.getElementById('vpn-add-key').value = text;
-    toast('Файл загружен');
-  };
-  reader.readAsText(file); input.value = '';
-}
-
-// Legacy key management (kept for compatibility — updates first server)
-async function pasteKey() {
-  try {
-    const text = await navigator.clipboard.readText();
-    document.getElementById('vpn-add-key').value = text.trim();
-    showPage('vpn', document.querySelector('[onclick*="showPage(\'vpn\'"]'));
-  } catch { toast('Вставьте вручную', false); }
-}
-async function applyKey() { addVpnServer(); }
-async function deleteKey() {
-  if (!confirm(t('Удалить все VPN серверы?'))) return;
-  const r = await apiJ('DELETE', '/api/vpn-key');
-  if (r?.ok) { loadVpnServers(); refreshStatus(); toast('VPN ключ удалён'); }
-}
-
 // ─── Device Policies ─────────────────────────────────────────────────────────
 // Full human-readable labels for each policy value
 window.POLICY_FULL_LABELS = {
@@ -4696,12 +4523,19 @@ const EG_KIND = {
   trusttunnel: 'TrustTunnel · свой каскад',
   fptn: 'Подписка FPTN',
 };
+const KEY_TYPES = [
+  ['ss', 'Shadowsocks', 'ss://…@сервер:порт#имя'],
+  ['vless', 'VLESS', 'vless://…@сервер:порт?…#имя'],
+  ['vmess', 'VMess', 'vmess://…'],
+  ['trojan', 'Trojan', 'trojan://…@сервер:порт?…#имя'],
+];
+function egKind(e) { return e.kind === 'key' ? (e.key && e.key.protocol || 'Ключ') + ' · ключ' : (EG_KIND[e.id] || ''); }
 const EG_ICON = {
   up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
   down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M18 13l-6 6-6-6"/></svg>',
 };
 let _eg = null;                      // last /api/egresses
-const _conn = { probe: {}, editing: {}, ag: null, fp: null, locs: null };
+const _conn = { probe: {}, editing: {}, ag: null, fp: null, locs: null, adding: false };
 
 function egDate(ts) { return ts ? new Date(ts * 1000).toLocaleDateString('ru-RU') : ''; }
 // The one place an egress's condition is put into words, for both tabs.
@@ -4745,6 +4579,7 @@ function renderLadder() {
     const tag = e.primary ? `<span class="badge ${e.active ? 'badge-green' : 'badge-yellow'}">основной</span>` : '';
     const pinned = (e.pinned || []).reduce((a, p) => a + p.count, 0);
     const meta = [`<span class="${st.cls}">${escHtml(st.text)}</span>`];
+    if (e.kind === 'key') meta.push(escHtml((e.key && e.key.protocol) || 'Ключ'));
     if (e.active) meta.push('<span class="ok">трафик идёт здесь</span>');
     if (!e.configured) meta.push('<a href="#egress/servers">настройте на вкладке «VPN серверы»</a>');
     if (pinned) meta.push(`<span title="${escHtml((e.pinned || []).map(p => t(p.name) + ': ' + p.count).join('; '))}">привязано правил: ${pinned}</span>`);
@@ -4830,17 +4665,40 @@ function connCard(e) {
     </div>`;
   return `<div class="card conn-card" id="conn-${id}">
     <div class="conn-head">
-      <div><div class="conn-name">${escHtml(e.label.replace(/ \(свой каскад\)$/, ''))}</div><span class="conn-kind">${escHtml(EG_KIND[id] || '')}</span></div>
+      <div><div class="conn-name">${escHtml(e.label.replace(/ \(свой каскад\)$/, ''))}</div><span class="conn-kind">${escHtml(egKind(e))}</span></div>
       <span class="badge ${st.badge}">${escHtml(st.short || st.text)}</span>
     </div>
     ${probe}
     ${connAccess(e)}
     ${connParams(e)}
+    ${e.kind === 'key' ? `<div class="conn-foot"><button class="btn btn-danger btn-sm" onclick="connDelete('${id}')">Удалить подключение</button></div>` : ''}
   </div>`;
 }
 
 function connAccess(e) {
   const id = e.id;
+  if (e.kind === 'key') {
+    const k = e.key || {}, open = !!_conn.editing[id];
+    const where = k.server ? k.server + ':' + k.port : '';
+    return `<div class="conn-block">
+      <div class="conn-block-title">Доступ</div>
+      <div class="info-row"><span class="info-key">Сервер</span><span class="info-val monospace">${k.error ? '<span class="text-red">' + escHtml(k.error) + '</span>' : escHtml(where)}</span></div>
+      ${e.config_updated ? `<div class="info-row"><span class="info-key">Ключ</span><span class="info-val">задан <span class="monospace">${egDate(e.config_updated)}</span></span></div>` : ''}
+      <div class="btn-row" ${open ? 'hidden' : ''} id="conn-access-btns-${id}">
+        <button class="btn btn-secondary btn-sm" onclick="connEdit('${id}', true)">Заменить ключ</button>
+        ${e.prev_available ? `<button class="btn btn-secondary btn-sm" onclick="connRestore('${id}')">Вернуть предыдущий</button>` : ''}
+      </div>
+      <div class="conn-editor" id="conn-editor-${id}" ${open ? '' : 'hidden'}>
+        <textarea id="conn-text-${id}" autocomplete="off" spellcheck="false" placeholder="ss://… · vless://… · vmess://… · trojan://…"></textarea>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" onclick="connSaveAccess('${id}')">Сохранить</button>
+          <button class="btn btn-secondary btn-sm" onclick="connEdit('${id}', false)">Отмена</button>
+          <span class="conn-note" id="conn-access-note-${id}"></span>
+        </div>
+        <p class="conn-hint">Прежний ключ сохраняется рядом; сам ключ на страницу не возвращается. Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду.</p>
+      </div>
+    </div>`;
+  }
   if (id === 'adguard') return `<div class="conn-block">
       <div class="conn-block-title">Доступ</div>
       <div class="info-row"><span class="info-key">Учётная запись</span><span class="info-val monospace text-muted" id="conn-ag-license">загрузка…</span></div>
@@ -4906,6 +4764,9 @@ function connParams(e) {
       <div class="override-row"><div class="override-label">Сигнатурный пакет I1<span class="conn-sub">Маскирует начало соединения под другой протокол</span></div>
         <label class="toggle"><input type="checkbox" id="conn-awg-i1-on" ${i1on ? 'checked' : ''} onchange="document.getElementById('conn-awg-i1-box').hidden=!this.checked"><span class="slider"></span></label></div>
       <div class="conn-i1" id="conn-awg-i1-box" ${i1on ? '' : 'hidden'}><textarea id="conn-awg-i1" spellcheck="false" placeholder="<b 0x…><r 8>">${escHtml(i1val)}</textarea></div>`;
+  } else if (e.kind === 'key') {
+    rows = `<div class="override-row"><div class="override-label">Название<span class="conn-sub">Как подключение называется на обеих вкладках</span></div>
+        <input type="text" id="conn-name-${id}" maxlength="48" value="${escHtml(e.label)}"></div>`;
   } else if (id === 'trusttunnel') {
     const proto = p.protocol || 'http3';
     const anti = p.anti_dpi !== undefined ? p.anti_dpi : !!f.anti_dpi;
@@ -4924,8 +4785,124 @@ function connParams(e) {
 function renderConnections() {
   const root = document.getElementById('conn-cards');
   if (!root || !_eg) return;
+  // A re-render must not lose what is being typed: the add form moves over
+  // as it is, and open editors get their text back.
+  const add = document.getElementById('conn-add');
+  const typed = {};
+  root.querySelectorAll('.conn-editor:not([hidden]) textarea').forEach(ta => { if (ta.value) typed[ta.id] = ta.value; });
   root.innerHTML = (_eg.egresses || []).map(connCard).join('');
+  if (_conn.adding) root.prepend(add || document.createRange().createContextualFragment(connAddCard()));
+  Object.entries(typed).forEach(([id, v]) => { const ta = document.getElementById(id); if (ta) ta.value = v; });
   Object.entries(_conn.probe).forEach(([id, d]) => connShowProbe(id, d));
+}
+
+// ── Новое подключение по ключу ───────────────────────────────────────────────
+function connAddCard() {
+  return `<div class="card conn-card conn-add" id="conn-add">
+      <div class="conn-head"><div><div class="conn-name">Новое подключение</div><span class="conn-kind">По ключу: Shadowsocks, VLESS, VMess или Trojan</span></div></div>
+      <div class="conn-block">
+        <div class="override-row"><div class="override-label">Тип<span class="conn-sub">Определяется по вставленному ключу</span></div>
+          <select id="conn-add-type" onchange="connAddType()">${KEY_TYPES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+        <div class="conn-add-key"><label class="override-label" for="conn-add-key">Ключ</label>
+          <textarea id="conn-add-key" rows="3" autocomplete="off" spellcheck="false" placeholder="${escHtml(KEY_TYPES[0][2])}" oninput="connAddSniff()"></textarea></div>
+        <div class="override-row"><div class="override-label">Название<span class="conn-sub">Пусто — из ключа</span></div>
+          <input type="text" id="conn-add-name" maxlength="48" placeholder="Мой сервер"></div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="conn-add-save" onclick="connAddSave()">Добавить</button>
+          <button class="btn btn-secondary btn-sm" onclick="connAddPaste()">Из буфера</button>
+          <label class="btn btn-secondary btn-sm" for="conn-add-file">Из файла</label><input type="file" id="conn-add-file" accept=".json,.txt,.conf" onchange="connAddFile(this)">
+          <button class="btn btn-secondary btn-sm" onclick="connAddOpen(false)">Отмена</button>
+          <span class="conn-note" id="conn-access-note-add"></span>
+        </div>
+        <p class="conn-hint">Подключение появится включённым в конце списка на вкладке «Активный выход» — резервом, пока вы не поднимете его выше. Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду.</p>
+      </div>
+  </div>`;
+}
+
+// The form opens as the first card, right under the button that opened it.
+function connAddOpen(open) {
+  _conn.adding = open;
+  const root = document.getElementById('conn-cards');
+  let card = document.getElementById('conn-add');
+  if (!open) { if (card) card.remove(); return; }
+  if (!card && root) { root.insertAdjacentHTML('afterbegin', connAddCard()); card = document.getElementById('conn-add'); }
+  if (!card) return;
+  card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  document.getElementById('conn-add-key').focus({ preventScroll: true });
+}
+
+function connAddType() {
+  const v = document.getElementById('conn-add-type').value;
+  document.getElementById('conn-add-key').placeholder = t((KEY_TYPES.find(k => k[0] === v) || KEY_TYPES[0])[2]);
+}
+
+// The scheme names the type; the select follows what was pasted.
+function connAddSniff() {
+  const m = /^\s*([a-z]+):\/\//i.exec(document.getElementById('conn-add-key').value);
+  const v = m && m[1].toLowerCase();
+  if (v && KEY_TYPES.some(k => k[0] === v)) { document.getElementById('conn-add-type').value = v; connAddType(); }
+}
+
+async function connAddPaste() {
+  try {
+    document.getElementById('conn-add-key').value = (await navigator.clipboard.readText()).trim();
+    connAddSniff();
+  } catch (e) { connNote('access', 'add', 'Браузер не дал прочитать буфер — вставьте вручную (⌘V / Ctrl+V)', 'bad'); }
+}
+
+// A Shadowsocks client file (JSON) becomes an ss:// key; anything else is taken as text.
+function connAddFile(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  f.text().then(text => {
+    text = text.trim();
+    try {
+      const j = JSON.parse(text), c = j.servers ? j.servers[0] : j;
+      if (c && c.method && c.password && c.server && c.server_port)
+        text = `ss://${btoa(c.method + ':' + c.password)}@${c.server}:${c.server_port}`;
+    } catch (e) {}
+    document.getElementById('conn-add-key').value = text;
+    input.value = '';
+    connAddSniff();
+  });
+}
+
+async function connAddSave() {
+  const key = document.getElementById('conn-add-key').value.trim();
+  const name = document.getElementById('conn-add-name').value.trim();
+  if (!key) { connNote('access', 'add', 'Вставьте ключ', 'bad'); return; }
+  const btn = document.getElementById('conn-add-save');
+  btn.disabled = true;
+  connNote('access', 'add', 'Проверяю и добавляю…');
+  const r = await api('POST', '/api/egresses/keys', { key, name });
+  const d = r ? await r.json().catch(() => ({})) : {};
+  btn.disabled = false;
+  if (!r || !r.ok || !d.ok) { connNote('access', 'add', d.detail || d.error || 'Не удалось', 'bad'); return; }
+  connAddOpen(false);
+  toast(t(d.active === d.id ? 'Подключение добавлено, трафик идёт через него' : 'Подключение добавлено резервом'));
+  await loadConnections();
+  refreshStatus();
+  const card = document.getElementById('conn-' + d.id);
+  if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+async function connDelete(id) {
+  const e = egRow(id);
+  if (!e) return;
+  const pinned = (e.pinned || []).reduce((a, p) => a + p.count, 0);
+  const parts = ['Удалить «' + e.label + '»?'];
+  if (e.active) parts.push('Через него сейчас идёт трафик дома — он переключится на следующий выход по списку.');
+  if (pinned) parts.push('Привязанные к нему правила (' + pinned + ') пойдут через основной выход.');
+  parts.push('Шлюз перезапустит маршрутизацию — связь дома прервётся на секунду.');
+  if (!confirm(t(parts.join(' ')))) return;
+  const r = await api('DELETE', '/api/egresses/' + id);
+  const d = r ? await r.json().catch(() => ({})) : {};
+  if (!r || !r.ok || d.ok === false) { toast(d.detail || d.error || t('Не удалось'), false); return; }
+  delete _conn.probe[id];
+  const card = document.getElementById('conn-' + id);
+  if (card) card.remove();
+  toast(t('Подключение удалено'));
+  loadConnections(); refreshStatus();
 }
 
 function connSet(id, key, text, cls) {
@@ -4990,13 +4967,15 @@ async function connSaveAccess(id) {
   if (!text) { connNote('access', id, 'Вставьте содержимое', 'bad'); return; }
   if (!egAskIfCarrying(id, 'После сохранения он переподключится')) return;
   connNote('access', id, 'Проверяю и сохраняю…');
+  const isKey = (egRow(id) || {}).kind === 'key';
   const r = id === 'fptn' ? await api('POST', '/api/fptn/token', { token: text })
-                          : await api('POST', '/api/egresses/' + id + '/config', { text });
+          : isKey ? await api('PUT', '/api/egresses/' + id + '/key', { key: text })
+          : await api('POST', '/api/egresses/' + id + '/config', { text });
   const d = r ? await r.json().catch(() => ({})) : {};
   if (!r || !r.ok || !d.ok) { connNote('access', id, d.detail || 'Не удалось', 'bad'); return; }
   _conn.editing[id] = false;
   toast(t(d.restarted ? 'Сохранено, выход переподключается' : 'Сохранено'));
-  setTimeout(loadConnections, d.restarted ? 7000 : 300);
+  setTimeout(loadConnections, d.restarted && !isKey ? 7000 : 300);
 }
 
 async function connRestore(id) {
@@ -5006,7 +4985,7 @@ async function connRestore(id) {
   const d = r ? await r.json().catch(() => ({})) : {};
   if (!r || !r.ok) { toast(d.detail || t('Не удалось'), false); return; }
   toast(t(d.restarted ? 'Предыдущая версия возвращена, выход переподключается' : 'Предыдущая версия возвращена'));
-  setTimeout(loadConnections, d.restarted ? 7000 : 300);
+  setTimeout(loadConnections, d.restarted && (egRow(id) || {}).kind !== 'key' ? 7000 : 300);
 }
 
 async function connSaveParams(id) {
@@ -5024,6 +5003,15 @@ async function connSaveParams(id) {
     req = ['POST', '/api/fptn', { server: v }];
   } else if (id === 'adguard') {
     return connSaveAdguard();
+  } else if ((egRow(id) || {}).kind === 'key') {
+    const name = document.getElementById('conn-name-' + id).value.trim();
+    connNote('params', id, 'Сохраняю…');
+    const r = await api('PUT', '/api/egresses/' + id + '/key', { name });
+    const d = r ? await r.json().catch(() => ({})) : {};
+    if (!r || !r.ok) { connNote('params', id, d.detail || 'Не удалось', 'bad'); return; }
+    toast(t('Название сохранено'));
+    loadConnections();
+    return;
   }
   if (!egAskIfCarrying(id, 'Он переподключится с новыми параметрами')) return;
   connNote('params', id, 'Сохраняю…');

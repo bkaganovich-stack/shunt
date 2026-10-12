@@ -38,8 +38,11 @@ def _base(settings, ident):
 
 def valid_route(route):
     """direct, tunnel (whichever egress carries the house), or one egress by name."""
+    # A key egress is named by id; its existence is the settings' business,
+    # and a rule pinned to a key that is later removed is moved to the tunnel.
     return route in ("direct", "tunnel") or (
-        isinstance(route, str) and route.startswith("egress:") and route[7:] in egresses.CATALOG)
+        isinstance(route, str) and route.startswith("egress:") and (
+            route[7:] in egresses.CATALOG or re.fullmatch(r"key-[0-9a-f-]{1,36}", route[7:]) is not None))
 
 def validate_hostname(value):
     if not isinstance(value, str):
@@ -182,4 +185,4 @@ def catalog(settings):
         baseline = _base(settings, ident) if ident in BUILTINS else _validate(settings["custom_profiles"][ident]["original"], ident)
         rows.append({"id": ident, "name": c["name"], "description": BUILTINS[ident][1] if ident in BUILTINS else "Пользовательский профиль", "builtin": ident in BUILTINS, "modified": c != baseline, "baseline_config": deepcopy(baseline), "can_undo": ident in settings.get("profile_history", {}), "config": c})
     return {"active_profile": settings.get("profile", "all_except_ru"), "profiles": rows, "tunnel_lists": deepcopy(TUNNEL_LISTS), "services": deepcopy(SERVICES),
-            "egresses": [{"id": e, "label": egresses.CATALOG[e]["label"]} for e in egresses.order(settings)]}
+            "egresses": [{"id": e, "label": egresses.label(settings, e)} for e in egresses.order(settings)]}

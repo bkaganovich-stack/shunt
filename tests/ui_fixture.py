@@ -68,7 +68,7 @@ class Handler(BaseHTTPRequestHandler):
    '/api/discovered':{'rows':[{'domain':'candidate-%02d.example'%i,'enabled':True,'routed':False,'direct':'timeout','tunnel':'ok','last_checked':int(time.time())} for i in range(53)],'routed':0,'schedule':'@hourly','last_run':int(time.time())},
    '/api/network/wan-status':{'topology':'inline','wan':{'iface':'fixture0','link':True,'ip':'100.113.192.178','gateway':'100.113.192.1'}},
    '/api/geo-info':{'geo_updated':'2026-09-14','geosite_size':'12.5 MB','geoip_size':'70.0 MB'},
-   '/api/vpn-servers':{'servers':[]},'/api/adguard':{'enabled':True,'connected':True,'location':'United States'},'/api/fptn':{'enabled':True,'service':'active','active':False,'servers':{}},
+   '/api/adguard':{'enabled':True,'connected':True,'location':'United States'},'/api/fptn':{'enabled':True,'service':'active','active':False,'servers':{}},
    '/api/metrics':{'samples':[]},'/api/groups':{'groups':[]},'/api/devices':{'devices':[]},'/api/subscriptions':{'subscriptions':[]},'/api/scheduler':{'tasks':[]},'/api/snapshots':{'snapshots':[]},
    '/api/dns':{'upstream':['1.1.1.1'],'upstream_ru':[],'local_records':[],'cache_size':1000},'/api/dns/probe':{'chain':[],'resolvers':[]},'/api/adblock':{'enabled':True,'custom_rules':[],'allowlist':[],'total_blocked_domains':0},
    '/api/logs':{'logs':'Local fixture: no gateway logs.'},'/api/connections':{'connections':[]},'/api/alerts/log':{'events':[]},

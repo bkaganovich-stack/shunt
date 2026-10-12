@@ -68,7 +68,8 @@ class TestCompiled:
                                                  "fallbackTag": "proxy", "strategy": {"type": "random"}}]
         ob = next(o for o in cfg["outbounds"] if o["tag"] == "egress-amnezia")
         assert ob["settings"]["servers"] == [{"address": "192.168.244.6", "port": 1083}]
-        assert cfg["observatory"]["subjectSelector"] == ["egress-"]
+        # Only the pinned egresses are probed, not every key's outbound.
+        assert cfg["observatory"]["subjectSelector"] == ["egress-amnezia"]
         # the household still rides the active egress
         assert next(o for o in cfg["outbounds"] if o["tag"] == "proxy")["settings"]["servers"][0]["port"] == 1081
 

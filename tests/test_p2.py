@@ -77,9 +77,12 @@ class TestMigration:
         raw = {"vpn_key": "ss://Y2hhY2hhMjA6cGFzc0AxLjIuMy40OjEyMzQ=",
                "profile": "all_except_ru"}
         s = m._migrate_settings(raw)
+        key = "ss://Y2hhY2hhMjA6cGFzc0AxLjIuMy40OjEyMzQ="
         assert len(s["vpn_servers"]) == 1
-        assert s["vpn_servers"][0]["key"] == raw["vpn_key"]
-        assert s["active_vpn_id"] == s["vpn_servers"][0]["id"]
+        assert s["vpn_servers"][0]["key"] == key
+        assert s["vpn_servers"][0]["socks_port"] == 11001
+        # Dropped once migrated: kept, it brought deleted servers back.
+        assert s["vpn_key"] is None and s["active_vpn_id"] is None
 
     def test_device_names_migrate_to_devices(self):
         raw = {"device_names": {"192.168.1.5": "My Phone"}, "profile": "all_except_ru"}
@@ -432,45 +435,72 @@ class TestVPNMasking:
 # Tests: Multi-server config + failover selection
 # ─────────────────────────────────────────────────────────────────────────────
 class TestMultiServer:
-    def test_active_server_used_in_config(self):
-        sid1 = str(uuid.uuid4()); sid2 = str(uuid.uuid4())
-        s1 = _srv(id_=sid1, key="ss://Y2hhY2hhMjA6czFAMS4xLjEuMToyMjI=", priority=1)
-        s2 = _srv(id_=sid2, key="ss://Y2hhY2hhMjA6czJAMi4yLjIuMjoyMjI=", priority=2)
-        settings = _settings(vpn_servers=[s1, s2], active_vpn_id=sid2)
-        obs, has_proxy, server_ip = m._get_active_vpn_outbound(settings)
-        assert has_proxy
-        assert server_ip == "2.2.2.2"   # active is sid2
+    """Since 2.30 every key is an egress "key-<id>" in the one ladder."""
+    S1 = "ss://Y2hhY2hhMjA6czFAMS4xLjEuMToyMjI="
+    S2 = "ss://Y2hhY2hhMjA6czJAMi4yLjIuMjoyMjI="
 
-    def test_fallback_to_first_enabled_if_active_missing(self):
-        sid1 = str(uuid.uuid4())
-        s1   = _srv(id_=sid1, key="ss://Y2hhY2hhMjA6czFAMS4xLjEuMToyMjI=", priority=1)
-        settings = _settings(vpn_servers=[s1], active_vpn_id="nonexistent-id")
-        obs, has_proxy, server_ip = m._get_active_vpn_outbound(settings)
-        assert has_proxy
-        assert server_ip == "1.1.1.1"
+    def _keys(self, servers, active=None, **kw):
+        kw.setdefault("adguard", {"enabled": False})
+        kw.setdefault("fptn", {"enabled": False})
+        return m._migrate_settings(_settings(vpn_servers=servers, active_vpn_id=active, **kw))
 
-    def test_disabled_server_skipped_in_fallback(self):
-        sid1 = str(uuid.uuid4()); sid2 = str(uuid.uuid4())
-        s1   = _srv(id_=sid1, key="ss://Y2hhY2hhMjA6czFAMS4xLjEuMToyMjI=", enabled=False, priority=1)
-        s2   = _srv(id_=sid2, key="ss://Y2hhY2hhMjA6czJAMi4yLjIuMjoyMjI=", enabled=True,  priority=2)
-        settings = _settings(vpn_servers=[s1, s2], active_vpn_id=None)
+    def test_the_server_that_was_active_stays_the_primary(self):
+        s1 = _srv(id_="aaaa1111", key=self.S1); s2 = _srv(id_="bbbb2222", key=self.S2)
+        settings = self._keys([s1, s2], active="bbbb2222")
+        assert m._eg.candidates(settings) == ["key-bbbb2222", "key-aaaa1111"]
         obs, has_proxy, server_ip = m._get_active_vpn_outbound(settings)
-        assert has_proxy
-        assert server_ip == "2.2.2.2"   # s1 disabled, s2 used
+        assert has_proxy and server_ip == "2.2.2.2"
+        assert obs[0]["protocol"] == "shadowsocks" and obs[0]["tag"] == "proxy"
+
+    def test_disabled_key_is_not_a_candidate(self):
+        s1 = _srv(id_="aaaa1111", key=self.S1, enabled=False)
+        s2 = _srv(id_="bbbb2222", key=self.S2)
+        settings = self._keys([s1, s2])
+        assert m._eg.candidates(settings) == ["key-bbbb2222"]
+        assert m._get_active_vpn_outbound(settings)[2] == "2.2.2.2"
+
+    def test_keys_are_reserves_behind_adguard(self):
+        settings = self._keys([_srv(id_="aaaa1111", key=self.S1)],
+                              adguard={"enabled": True, "socks_host": "127.0.0.1", "socks_port": 1081})
+        assert m._eg.candidates(settings) == ["adguard", "key-aaaa1111"]
+        obs, has_proxy, server_ip = m._get_active_vpn_outbound(settings)
+        assert obs[0]["settings"]["servers"] == [{"address": "127.0.0.1", "port": 1081}]
+        assert server_ip is None
 
     def test_no_servers_returns_no_proxy(self):
-        settings = _settings(vpn_servers=[], active_vpn_id=None, vpn_key=None)
+        settings = self._keys([])
         obs, has_proxy, server_ip = m._get_active_vpn_outbound(settings)
         assert not has_proxy
         assert server_ip is None
 
-    def test_priority_ordering_in_fallback(self):
-        sid1 = str(uuid.uuid4()); sid2 = str(uuid.uuid4())
-        s_low  = _srv(id_=sid1, key="ss://Y2hhY2hhMjA6czFAMS4xLjEuMToyMjI=", priority=99)
-        s_high = _srv(id_=sid2, key="ss://Y2hhY2hhMjA6czJAMi4yLjIuMjoyMjI=", priority=1)
-        settings = _settings(vpn_servers=[s_low, s_high], active_vpn_id=None)
-        obs, has_proxy, server_ip = m._get_active_vpn_outbound(settings)
-        assert server_ip == "2.2.2.2"   # priority=1 wins
+    def test_ports_are_unique_and_kept(self):
+        a = _srv(id_="aaaa1111", key=self.S1); a["socks_port"] = 11005
+        b = _srv(id_="bbbb2222", key=self.S2); b["socks_port"] = 11005
+        settings = self._keys([a, b])
+        assert [k["socks_port"] for k in settings["vpn_servers"]] == [11005, 11001]
+        assert m._migrate_settings(settings)["vpn_servers"][1]["socks_port"] == 11001
+
+    def test_every_key_gets_a_loopback_port_that_leads_to_it_alone(self):
+        s1 = _srv(id_="aaaa1111", key=self.S1, enabled=False)
+        cfg = m.build_xray_config(self._keys([s1], profile="all_except_ru",
+                                             adguard={"enabled": True, "socks_host": "127.0.0.1", "socks_port": 1081}))
+        inb = [i for i in cfg["inbounds"] if i["tag"] == "in-key-aaaa1111"]
+        assert inb and inb[0]["listen"] == "127.0.0.1" and inb[0]["port"] == 11001
+        assert inb[0]["settings"]["auth"] == "noauth"
+        ob = [o for o in cfg["outbounds"] if o["tag"] == "egress-key-aaaa1111"]
+        assert len(ob) == 1 and ob[0]["protocol"] == "shadowsocks"
+        assert cfg["routing"]["rules"][0] == {"type": "field", "inboundTag": ["in-key-aaaa1111"],
+                                               "outboundTag": "egress-key-aaaa1111"}
+
+    def test_a_pinned_key_reuses_its_outbound(self):
+        s1 = _srv(id_="aaaa1111", key=self.S1)
+        settings = self._keys([s1], profile="all_except_ru",
+                              adguard={"enabled": True, "socks_host": "127.0.0.1", "socks_port": 1081})
+        settings["profile_overrides"] = {"all_except_ru": dict(m._profiles.effective(settings, "all_except_ru"),
+            custom_rules=[{"kind": "domain", "value": "example.org", "route": "egress:key-aaaa1111"}])}
+        cfg = m.build_xray_config(settings)
+        assert [o["tag"] for o in cfg["outbounds"]].count("egress-key-aaaa1111") == 1
+        assert cfg["routing"]["balancers"][0]["selector"] == ["egress-key-aaaa1111"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -71,7 +71,7 @@ def active_egress() -> tuple[str, str, str]:
         s = json.loads(SETTINGS.read_text())
         ident = eg.active(s)
         if ident:
-            return ident, eg.CATALOG[ident]["label"], "%s:%s" % eg.socks(s, ident)
+            return ident, eg.label(s, ident), "%s:%s" % eg.socks(s, ident)
     except Exception:
         pass
     return "adguard", "AdGuard VPN", SOCKS
