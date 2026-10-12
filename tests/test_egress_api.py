@@ -82,3 +82,79 @@ def test_bad_requests_change_nothing(api, body):
     before = copy.deepcopy(state)
     assert client.put("/api/egresses", json=body).status_code == 400
     assert state == before and runs == [] and applied == []
+
+
+AWG_OK = """[Interface]
+PrivateKey = cHJpdmF0ZWtleXByaXZhdGVrZXlwcml2YXRla2V5PQ==
+Address = 10.8.0.10/32
+Jc = 5
+H1 = 359814363-368086978
+
+[Peer]
+PublicKey = cHVibGlja2V5cHVibGlja2V5cHVibGlja2V5cHViPQ==
+Endpoint = 203.0.113.52:45587
+AllowedIPs = 0.0.0.0/0
+"""
+TT_OK = 'hostname = "static.example.net"\naddresses = ["static.example.net:443"]\nusername = "shunt"\npassword = "secret-pw"\n'
+
+
+@pytest.fixture
+def cfgdir(api, monkeypatch, tmp_path):
+    monkeypatch.setattr(m._eg, "EGRESS_DIR", tmp_path / "egress")
+    return tmp_path / "egress"
+
+
+def test_config_is_saved_private_with_the_previous_one_kept(api, cfgdir):
+    import os, stat
+    client, state, runs, *_ = api
+    (cfgdir / "amnezia").mkdir(parents=True)
+    (cfgdir / "amnezia" / "awg.conf").write_text("old\n")
+    state["egresses"]["amnezia"]["enabled"] = True
+    r = client.post("/api/egresses/amnezia/config", json={"text": AWG_OK.replace("\n", "\r\n")})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "restarted": True}
+    f = cfgdir / "amnezia" / "awg.conf"
+    assert f.read_text() == AWG_OK and stat.S_IMODE(os.stat(f).st_mode) == 0o600
+    assert (cfgdir / "amnezia" / "awg.conf.prev").read_text() == "old\n"
+    assert stat.S_IMODE(os.stat(cfgdir / "amnezia").st_mode) == 0o700
+    assert ["systemctl", "restart", "shunt-egress@amnezia.service"] in runs
+    assert "PrivateKey" not in r.text
+
+
+def test_trusttunnel_export_is_accepted_and_never_echoed(api, cfgdir):
+    client, *_ = api
+    r = client.post("/api/egresses/trusttunnel/config", json={"text": TT_OK})
+    assert r.status_code == 200 and "secret-pw" not in r.text
+    assert (cfgdir / "trusttunnel" / "endpoint.toml").read_text() == TT_OK
+    listing = client.get("/api/egresses").text
+    assert "secret-pw" not in listing
+
+
+@pytest.mark.parametrize("ident,text", [
+    ("amnezia", "hello"),
+    ("amnezia", AWG_OK.replace("PrivateKey", "Comment")),
+    ("amnezia", AWG_OK.replace("Endpoint = 203.0.113.52:45587\n", "")),
+    ("trusttunnel", 'hostname = "x"\n'),
+    ("adguard", TT_OK),
+    ("fptn", TT_OK),
+])
+def test_bad_config_never_replaces_a_working_one(api, cfgdir, ident, text):
+    client, state, runs, *_ = api
+    (cfgdir / "amnezia").mkdir(parents=True)
+    (cfgdir / "amnezia" / "awg.conf").write_text("working\n")
+    assert client.post("/api/egresses/%s/config" % ident, json={"text": text}).status_code == 400
+    assert (cfgdir / "amnezia" / "awg.conf").read_text() == "working\n" and runs == []
+
+
+def test_probe_reads_the_world_side_of_the_egress(api, monkeypatch):
+    client, *_ = api
+    answers = iter(['{"ip": "45.91.138.73", "org": "AS202051 NETGRID HOST LTD", "city": "Miami", "country": "US"}',
+                    "204 0.681", "5000000 1.25", "abcd= %d\n" % 0])
+
+    async def run(*cmd, timeout=20):
+        return next(answers)
+    monkeypatch.setattr(m, "_run", run)
+    d = client.get("/api/egresses/amnezia/probe").json()
+    assert (d["ip"], d["country"], d["ttfb_ms"], d["mbit"], d["alive"]) == ("45.91.138.73", "US", 681, 32.0, True)
+    assert d["handshake_age"] is None
+    assert client.get("/api/egresses/nope/probe").status_code == 404

@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.26.0"
+VERSION = "2.27.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -3108,6 +3108,14 @@ def _unit_state(unit: str) -> str:
     return r.stdout.strip() or "unknown"
 
 
+def _egress_config_mtime(ident: str) -> Optional[int]:
+    name = _EGRESS_CONFIG_FILE.get(ident)
+    try:
+        return int((_eg.EGRESS_DIR / ident / name).stat().st_mtime) if name else None
+    except OSError:
+        return None
+
+
 @app.get("/api/egresses")
 async def get_egresses(u: str = Depends(auth_dep)):
     """Every egress in the user's order, with what it is doing right now."""
@@ -3124,9 +3132,133 @@ async def get_egresses(u: str = Depends(auth_dep)):
                      "primary": bool(cands) and cands[0] == e, "active": e == active,
                      "alive": ok, "service": _unit_state(c["unit"]) if "unit" in c else
                      _unit_state("adguardvpn.service"),
-                     "socks": "%s:%s" % _eg.socks(s, e)})
+                     "socks": "%s:%s" % _eg.socks(s, e),
+                     "config_updated": _egress_config_mtime(e)})
     return {"egresses": rows, "active": active, "auto_fallback": bool(s.get("auto_fallback")),
             "in_fallback": bool(s.get("fallback_saved_profile"))}
+
+
+_EGRESS_PROBE_LOCK: dict[str, asyncio.Lock] = {}
+
+
+async def _run(*cmd: str, timeout: float = 20) -> str:
+    try:
+        p = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE,
+                                                 stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(p.communicate(), timeout)
+        return out.decode(errors="replace")
+    except Exception:
+        return ""
+
+
+@app.get("/api/egresses/{ident}/probe")
+async def probe_egress(ident: str, u: str = Depends(auth_dep)):
+    """
+    Measure one egress the way the household would feel it: the address the
+    world sees (and whose network it is), time to first byte, and a short
+    download. Through its own SOCKS port, so a reserve can be measured while
+    another egress carries the house.
+    """
+    if ident not in _eg.CATALOG:
+        raise HTTPException(404, "Нет такого выхода")
+    lock = _EGRESS_PROBE_LOCK.setdefault(ident, asyncio.Lock())
+    if lock.locked():
+        raise HTTPException(429, "Замер этого выхода уже идёт")
+    async with lock:
+        s = load_settings()
+        sock = "%s:%s" % _eg.socks(s, ident)
+        curl = ("curl", "-s", "-m", "12", "--socks5-hostname", sock)
+        info_raw, ttfb_raw, dl_raw = await asyncio.gather(
+            _run(*curl, "https://ipinfo.io/json"),
+            _run(*curl, "-o", "/dev/null", "-w", "%{http_code} %{time_starttransfer}",
+                 "https://www.google.com/generate_204"),
+            _run("curl", "-s", "-m", "25", "--socks5-hostname", sock, "-o", "/dev/null",
+                 "-w", "%{size_download} %{time_total}",
+                 "https://speed.cloudflare.com/__down?bytes=5000000", timeout=30))
+        try:
+            info = json.loads(info_raw)
+        except ValueError:
+            info = {}
+        result = {"id": ident, "ip": info.get("ip"), "org": info.get("org"),
+                  "city": info.get("city"), "country": info.get("country"),
+                  "ttfb_ms": None, "mbit": None, "handshake_age": None}
+        parts = ttfb_raw.split()
+        if len(parts) == 2 and parts[0] == "204":
+            result["ttfb_ms"] = round(float(parts[1]) * 1000)
+        parts = dl_raw.split()
+        if len(parts) == 2 and float(parts[1]) > 0 and int(float(parts[0])) >= 5000000:
+            result["mbit"] = round(float(parts[0]) * 8 / float(parts[1]) / 1e6, 1)
+        if ident == "amnezia":
+            out = await _run("ip", "netns", "exec", "amnezia", "/opt/shunt/egress/bin/awg",
+                             "show", "awg0", "latest-handshakes", timeout=5)
+            try:
+                t = int(out.split()[1])
+                result["handshake_age"] = int(time.time()) - t if t else None
+            except (IndexError, ValueError):
+                pass
+        result["alive"] = bool(result["ip"])
+        return result
+
+
+_EGRESS_CONFIG_FILE = {"amnezia": "awg.conf", "trusttunnel": "endpoint.toml"}
+
+
+def _check_egress_config(ident: str, text: str) -> None:
+    """Refuse what the client would refuse, before it replaces a working config."""
+    if ident == "amnezia":
+        import sys as _s
+        for d in (str(SCRIPT), str(Path(__file__).resolve().parent.parent / "scripts")):
+            if d not in _s.path:
+                _s.path.insert(0, d)
+        import egress_config
+        if not re.search(r"(?m)^\s*PrivateKey\s*=", text) or not re.search(r"(?m)^\s*PublicKey\s*=", text):
+            raise ValueError("Нет ключей: нужна конфигурация клиента AmneziaWG целиком")
+        egress_config.split_awg(text, resolve=lambda h: h)
+    else:
+        for key in ("hostname", "addresses", "username", "password"):
+            if not re.search(r"(?m)^\s*%s\s*=" % key, text):
+                raise ValueError("Это не выгрузка TrustTunnel: нет поля %s" % key)
+
+
+class EgressConfigReq(BaseModel):
+    text: str
+
+
+@app.post("/api/egresses/{ident}/config")
+async def set_egress_config(ident: str, req: EgressConfigReq, u: str = Depends(auth_dep)):
+    """
+    Replace a cascade egress's configuration as issued by the cascade server.
+    The previous one is kept beside it; the content never goes back to the
+    page -- it carries the private key or the password.
+    """
+    if ident not in _EGRESS_CONFIG_FILE:
+        raise HTTPException(400, "Конфигурация загружается только для выходов своего каскада")
+    text = (req.text or "").replace("\r\n", "\n").strip() + "\n"
+    if len(text) > 20000:
+        raise HTTPException(400, "Слишком большой файл для конфигурации")
+    try:
+        _check_egress_config(ident, text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    d = _eg.EGRESS_DIR / ident
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d.parent, 0o700)
+    os.chmod(d, 0o700)
+    target = d / _EGRESS_CONFIG_FILE[ident]
+    if target.exists():
+        prev = target.with_name(target.name + ".prev")
+        prev.write_bytes(target.read_bytes())
+        os.chmod(prev, 0o600)
+    tmp = target.with_name(target.name + ".new")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, target)
+    restarted = False
+    if _eg.enabled(load_settings(), ident):
+        subprocess.run(["systemctl", "restart", _eg.CATALOG[ident]["unit"]], capture_output=True)
+        restarted = True
+    return {"ok": True, "restarted": restarted}
 
 
 class EgressesReq(BaseModel):

@@ -1,3 +1,26 @@
+shunt (2.27.0) stable; urgency=medium
+
+  * A card on the egress page, "Выходы и порядок резервирования": every
+    egress in the order the fallback walks, with what it is (primary,
+    reserve, off, no configuration), whether it answers, and whether the
+    house's traffic is going through it right now. Arrows and "make
+    primary" reorder the ladder; a live egress moved to the top takes the
+    house at once. The cascade egresses get their switch here; AdGuard and
+    FPTN keep theirs in the blocks below.
+  * "Проверить" measures one egress through its own port, so a reserve can
+    be measured while another carries the house: the address the world
+    sees, whose network and country it is, time to first byte, a 5 MB
+    download, and for AmneziaWG how long ago the last handshake was.
+  * The cascade server's configurations are uploaded on the same card,
+    pasted or from a file. They are checked first -- a config the client
+    would refuse never replaces a working one -- written root-only with the
+    previous one kept beside it, and the egress reconnects. The content
+    never comes back to the page: it holds a private key or a password.
+  * "Активный выход сейчас" names whichever egress carries the house, not
+    only AdGuard.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 12 Oct 2026 18:30:00 +0300
+
 shunt (2.26.0) stable; urgency=medium
 
   * Egresses become a list in the user's order instead of a fixed pair.

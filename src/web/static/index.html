@@ -677,6 +677,18 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <h2>VPN серверы</h2>
       <p class="page-desc">Выход в интернет и управление VPN-серверами. Активный выход используется для заблокированного трафика.</p>
 
+      <!-- Egress ladder: every tunnel, in the order the fallback walks -->
+      <div class="card" id="egresses-card" style="border-color:rgba(52,211,153,0.4)">
+        <div class="card-title">🧭 Выходы и порядок резервирования</div>
+        <p class="text-muted" style="font-size:12px;margin:0 0 10px">
+          Трафик идёт через первый включённый выход. Если он не отвечает около трёх минут,
+          его подменяет следующий живой по списку; когда первый оживает — трафик возвращается к нему.
+          «Напрямую» — только если не отвечает ни один.
+        </p>
+        <div id="egresses-list"><div class="text-muted" style="font-size:13px">Загрузка…</div></div>
+        <div id="egresses-foot" class="text-muted" style="font-size:12px;margin-top:8px"></div>
+      </div>
+
       <!-- Egress selection (unified: AdGuard VPN vs server key) -->
       <div class="card" style="border-color:rgba(108,142,245,0.4)">
         <div class="card-title">🛰️ Выход в интернет (egress)</div>
@@ -744,7 +756,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         </div>
 
         <div class="override-row" style="padding:10px 0">
-          <div class="override-label">Резервный выход FPTN <span class="hint" tabindex="0" data-tip="Отдельный провайдер и протокол. Включается автоматически, только если AdGuard недоступен.">?</span></div>
+          <div class="override-label">Резервный выход FPTN <span class="hint" tabindex="0" data-tip="Отдельный провайдер и протокол. Его место в очереди резервирования — в блоке «Выходы и порядок резервирования» выше.">?</span></div>
           <label class="toggle"><input type="checkbox" id="fptn-enabled" onchange="saveFptn({enabled:this.checked})"><span class="slider"></span></label>
         </div>
 
@@ -2013,7 +2025,7 @@ function legacyShowPage(name, linkEl) {
   if (name === 'settings') { loadAbout(); loadSnapshots(); loadTopology(); loadNetIfaces(); }
   if (name === 'rules' && !window.shuntUI?.rulesDirty) loadRules();
   if (name === 'devices') loadDevices();
-  if (name === 'vpn') { loadVpnServers(); loadFptn(); }
+  if (name === 'vpn') { loadVpnServers(); loadFptn(); loadEgresses(); }
   if (name === 'dns') { loadDnsSettings(); loadDnsStatus(); }
   if (name === 'path') startPathPolling(); else stopPathPolling();
   if (name === 'inbound') loadInbound();
@@ -3606,7 +3618,7 @@ async function loadVpnServers() {
   const servers = r.servers || [];
   const active = servers.find(s => s.is_active);
   const actEl = document.getElementById('egress-active');
-  if (actEl) actEl.textContent = agOn
+  if (actEl && !window._egressActiveLabel) actEl.textContent = agOn
     ? ('AdGuard VPN' + (ag.location ? ' · ' + ag.location : ''))
     : (active ? active.name : 'сервер не выбран');
   if (!el) return;
@@ -4888,6 +4900,145 @@ async function rebootGateway() {
   const r = document.getElementById('sysact-result');
   if (r) r.textContent = 'перезагружаю, шлюз вернётся через минуту…';
   await apiJ('POST', '/api/system/reboot', { confirm: true });
+}
+
+// ─── Выходы: порядок резервирования ─────────────────────────────────────────
+// Каждый выход — строка в порядке, в котором автопереход их перебирает.
+// Конфигурации каскада загружаются сюда, но обратно никогда не показываются:
+// в них закрытый ключ или пароль.
+let _egresses = null;
+const _egressProbe = {};
+
+async function loadEgresses() {
+  const d = await apiJ('GET', '/api/egresses');
+  if (!d) return;
+  _egresses = d;
+  const act = (d.egresses || []).find(e => e.active);
+  window._egressActiveLabel = act ? act.label : null;
+  const actEl = document.getElementById('egress-active');
+  if (actEl && act) actEl.textContent = act.label + (d.in_fallback ? ' — сейчас всё идёт напрямую' : '');
+  renderEgresses();
+}
+
+function _egressBadges(e) {
+  const b = [];
+  if (!e.configured) b.push('<span class="badge badge-gray">нет конфигурации</span>');
+  else if (!e.enabled) b.push('<span class="badge badge-gray">выключен</span>');
+  else if (e.primary) b.push('<span class="badge badge-green">основной</span>');
+  else b.push('<span class="badge badge-gray">резерв</span>');
+  if (e.active) b.push('<span class="badge badge-green">трафик идёт здесь</span>');
+  return b.join(' ');
+}
+
+function _egressState(e) {
+  if (!e.enabled) return '<span class="text-muted">—</span>';
+  if (e.alive) return '<span class="text-green">отвечает</span>';
+  if (e.service === 'activating') return '<span class="text-red">не подключается, повтор позже</span>';
+  return '<span class="text-red">не отвечает</span>';
+}
+
+function _egressProbeLine(id) {
+  const p = _egressProbe[id];
+  if (!p) return '';
+  if (p.busy) return '<div class="text-muted" style="font-size:12px">замеряю…</div>';
+  if (!p.ip) return '<div class="text-red" style="font-size:12px">через этот выход ответа нет</div>';
+  const parts = [p.ip + (p.country ? ' · ' + p.country + (p.city ? ', ' + p.city : '') : '')];
+  if (p.org) parts.push(p.org);
+  if (p.ttfb_ms != null) parts.push('отклик ' + (p.ttfb_ms / 1000).toFixed(2) + ' с');
+  if (p.mbit != null) parts.push(p.mbit + ' Мбит/с');
+  if (p.handshake_age != null) parts.push('рукопожатие ' + p.handshake_age + ' с назад');
+  return '<div style="font-size:12px" class="monospace">' + parts.map(escHtml).join(' · ') + '</div>';
+}
+
+function renderEgresses() {
+  const el = document.getElementById('egresses-list');
+  if (!el || !_egresses) return;
+  const rows = _egresses.egresses || [];
+  el.innerHTML = rows.map((e, i) => {
+    const up = i > 0 ? `<button class="btn btn-secondary btn-sm" title="Выше" onclick="moveEgress('${e.id}',-1)">↑</button>` : '';
+    const down = i < rows.length - 1 ? `<button class="btn btn-secondary btn-sm" title="Ниже" onclick="moveEgress('${e.id}',1)">↓</button>` : '';
+    const top = i > 0 && e.enabled ? `<button class="btn btn-secondary btn-sm" onclick="moveEgress('${e.id}',-99)">Сделать основным</button>` : '';
+    const toggle = e.cascade
+      ? `<label class="toggle" title="${e.configured ? 'Включить или выключить' : 'Сначала загрузите конфигурацию'}"><input type="checkbox" ${e.enabled ? 'checked' : ''} ${e.configured ? '' : 'disabled'} onchange="toggleCascadeEgress('${e.id}', this.checked)"><span class="slider"></span></label>`
+      : '<span class="text-muted" style="font-size:11px">вкл. в блоке ниже</span>';
+    const cfg = e.cascade ? `
+      <details style="margin-top:6px"><summary class="text-muted" style="font-size:12px;cursor:pointer">Конфигурация от сервера каскада${e.config_updated ? ' — обновлена ' + new Date(e.config_updated * 1000).toLocaleDateString('ru-RU') : ' — не загружена'}</summary>
+        <textarea id="egcfg-${e.id}" rows="4" style="width:100%;margin-top:6px" autocomplete="off" spellcheck="false"
+          placeholder="${e.id === 'amnezia' ? '[Interface] … — файл .conf клиента AmneziaWG целиком' : 'hostname = … — выгрузка trusttunnel_endpoint -c <пользователь> -f toml'}"></textarea>
+        <div class="btn-row">
+          <button class="btn btn-sm btn-secondary" onclick="saveEgressConfig('${e.id}')">Сохранить</button>
+          <label class="btn btn-sm btn-secondary" for="egfile-${e.id}">Из файла</label>
+          <input type="file" id="egfile-${e.id}" style="display:none" accept=".conf,.toml,.txt" onchange="egressConfigFile('${e.id}', this)">
+          <span id="egcfg-res-${e.id}" class="text-muted" style="font-size:12px">прежняя сохранится рядом; содержимое сюда не возвращается</span>
+        </div>
+      </details>` : '';
+    return `<div style="border-top:1px solid rgba(128,128,128,.2);padding:8px 0">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <b style="min-width:18px">${i + 1}.</b>
+        <span style="min-width:190px">${escHtml(e.label)}</span>
+        ${_egressBadges(e)}
+        <span style="font-size:12px">${_egressState(e)}</span>
+        <span style="flex:1"></span>
+        ${toggle} ${up} ${down} ${top}
+        <button class="btn btn-secondary btn-sm" ${e.enabled ? '' : 'disabled'} onclick="probeEgress('${e.id}')">Проверить</button>
+      </div>
+      ${_egressProbeLine(e.id)}
+      ${cfg}
+    </div>`;
+  }).join('');
+  const foot = document.getElementById('egresses-foot');
+  if (foot) foot.textContent = _egresses.auto_fallback
+    ? 'Автопереход включён.' : 'Автопереход выключен: при сбое основного трафик сам не переключится.';
+}
+
+async function moveEgress(id, delta) {
+  if (!_egresses) return;
+  const order = _egresses.egresses.map(e => e.id);
+  const i = order.indexOf(id);
+  const j = delta === -99 ? 0 : Math.max(0, Math.min(order.length - 1, i + delta));
+  order.splice(i, 1); order.splice(j, 0, id);
+  const r = await api('PUT', '/api/egresses', { order });
+  const d = r ? await r.json().catch(() => ({})) : {};
+  if (!r || !r.ok) { toast(d.detail || 'Не удалось изменить порядок', false); return; }
+  toast(d.applied ? 'Порядок сохранён, трафик переключён' : 'Порядок сохранён');
+  loadEgresses(); refreshStatus();
+}
+
+async function toggleCascadeEgress(id, on) {
+  const r = await api('PUT', '/api/egresses', { enabled: { [id]: on } });
+  const d = r ? await r.json().catch(() => ({})) : {};
+  if (!r || !r.ok) toast(d.detail || 'Не удалось', false);
+  else toast(on ? 'Выход включён' : 'Выход выключен');
+  setTimeout(loadEgresses, on ? 6000 : 500);
+}
+
+async function probeEgress(id) {
+  _egressProbe[id] = { busy: true }; renderEgresses();
+  const r = await api('GET', '/api/egresses/' + id + '/probe');
+  const d = r ? await r.json().catch(() => ({})) : {};
+  _egressProbe[id] = r && r.ok ? d : { ip: null };
+  renderEgresses();
+}
+
+async function saveEgressConfig(id) {
+  const ta = document.getElementById('egcfg-' + id);
+  const res = document.getElementById('egcfg-res-' + id);
+  const text = (ta && ta.value || '').trim();
+  if (!text) return;
+  if (res) res.textContent = 'проверяю…';
+  const r = await api('POST', '/api/egresses/' + id + '/config', { text });
+  const d = r ? await r.json().catch(() => ({})) : {};
+  if (r && r.ok && d.ok) {
+    ta.value = '';
+    toast(d.restarted ? 'Конфигурация сохранена, выход переподключается' : 'Конфигурация сохранена');
+    setTimeout(loadEgresses, d.restarted ? 8000 : 300);
+  } else if (res) res.textContent = d.detail || 'не удалось';
+}
+
+function egressConfigFile(id, input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  f.text().then(t => { const ta = document.getElementById('egcfg-' + id); if (ta) ta.value = t; input.value = ''; });
 }
 
 async function loadFptn() {
