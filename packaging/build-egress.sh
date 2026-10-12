@@ -8,6 +8,9 @@
 # main package for the same reason xray is: they are per-architecture binaries
 # with their own release cycles, and repackaged unmodified.
 set -euo pipefail
+# The build host's umask must not leak into the package: on the gateway it is
+# 002, which made every directory group-writable.
+umask 022
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SRC=${1:?usage: build-egress.sh <dir-with-binaries>}
 OUT="$ROOT/dist"; mkdir -p "$OUT"
