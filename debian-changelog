@@ -1,3 +1,28 @@
+shunt (2.26.0) stable; urgency=medium
+
+  * Egresses become a list in the user's order instead of a fixed pair.
+    Until now AdGuard was always the primary and FPTN the only reserve; with
+    the own cascade there are four (AdGuard, AmneziaWG, TrustTunnel, FPTN),
+    and which one carries the house is the user's call, to be revisited as
+    measurements come in. The default order keeps AdGuard first, the
+    cascade next, FPTN last.
+  * The fallback ladder walks that order. The first enabled egress is the
+    primary and wins whenever it is alive; while it is dead (three misses in
+    a row, ~3 min, so a watchdog restart moves nothing), the first live
+    reserve carries the house, and a better reserve that recovers takes
+    over from a worse one. Routing direct remains the last rung.
+  * GET/PUT /api/egresses: the order, each egress's state and liveness, and
+    switches for the cascade egresses (which start and stop their units).
+    Moving a live egress to the top takes over at once; a dead one is left
+    to the fallback loop.
+  * TrustTunnel now sits behind a bridge like every other egress, so all
+    four are plain SOCKS addresses to xray, the probes and the watchdog.
+  * The watchdog's speed and service checks measure the egress that carries
+    the house, and name it; AdGuard-specific advice (change the location)
+    is only given when AdGuard is the one.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 12 Oct 2026 16:00:00 +0300
+
 shunt (2.25.0) stable; urgency=medium
 
   * Two new egresses through the user's own cascade (entry in Riga, exit in

@@ -2058,8 +2058,8 @@ async function refreshStatus() {
   window.shuntUI?.status(d);
   renderFallbackState(d);
   let stateHtml = STATE_HTML[d.state] || d.state;
-  if (d.egress && d.egress.kind === 'adguard')
-    stateHtml += ` <span class="text-muted" style="font-size:12px">через AdGuard VPN${d.egress.location ? ' · ' + d.egress.location : ''}</span>`;
+  if (d.egress && d.egress.kind)
+    stateHtml += ` <span class="text-muted" style="font-size:12px">через ${escHtml(d.egress.label || 'AdGuard VPN')}${d.egress.location ? ' · ' + escHtml(d.egress.location) : ''}</span>`;
   document.getElementById('s-state').innerHTML = stateHtml;
   document.getElementById('s-gw').textContent = d.gateway_ip || '—';
   document.getElementById('s-profile').textContent = PROFILE_LABELS[d.profile] || d.profile;

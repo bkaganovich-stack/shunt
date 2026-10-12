@@ -69,7 +69,7 @@ def used(settings, ident):
 
 
 def path_revision(m, settings):
-    keys = ('egress_active', 'adguard', 'fptn', 'vpn_key', 'vpn_servers', 'active_vpn_id', 'dns')
+    keys = ('egress_active', 'egress_order', 'egresses', 'adguard', 'fptn', 'vpn_key', 'vpn_servers', 'active_vpn_id', 'dns')
     state = {k: settings.get(k) for k in keys}
     state['paths'] = m._ft._probe_paths(settings)
     # FPTN server selection is stored outside settings.json.

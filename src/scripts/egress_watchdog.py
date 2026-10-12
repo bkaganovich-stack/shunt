@@ -29,6 +29,10 @@ from pathlib import Path
 BASE = Path("/opt/shunt")
 sys.path.insert(0, str(BASE / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# egresses.py lives with the web application: /opt/shunt/web when installed,
+# src/web beside src/scripts in the repository.
+sys.path.insert(0, str(BASE / "web"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "web"))
 
 import diagnose as dg  # noqa: E402
 
@@ -51,6 +55,26 @@ WINDOW_SEC = 1800
 # the tunnel. The household shares the tunnel with the probe, but a working one
 # still leaves it several Mbit/s.
 SOCKS = "127.0.0.1:1081"
+SETTINGS = BASE / "config" / "settings.json"
+
+
+def active_egress() -> tuple[str, str, str]:
+    """
+    (id, label, socks) of the egress carrying the house now.
+
+    The speed and service checks are about what the household gets, so they
+    measure whichever egress that is -- AdGuard, the own cascade or FPTN. The
+    ladder and the restarts below stay AdGuard's: they diagnose its client.
+    """
+    try:
+        import egresses as eg
+        s = json.loads(SETTINGS.read_text())
+        ident = eg.active(s)
+        if ident:
+            return ident, eg.CATALOG[ident]["label"], "%s:%s" % eg.socks(s, ident)
+    except Exception:
+        pass
+    return "adguard", "AdGuard VPN", SOCKS
 SPEED_EVERY = 900
 SLOW_MBIT = 2.0
 SLOW_CONFIRM = 2
@@ -140,7 +164,7 @@ def measure_mbit(n: int) -> float:
     """Download ~2 MB through the tunnel; 0.0 when nothing arrived."""
     url, rng = SPEED_TARGETS[n % len(SPEED_TARGETS)]
     cmd = ["curl", "-s", "-o", "/dev/null", "-m", "12",
-           "-w", "%{size_download} %{time_total}", "--socks5-hostname", SOCKS]
+           "-w", "%{size_download} %{time_total}", "--socks5-hostname", active_egress()[2]]
     if rng:
         cmd += ["-r", rng]
     try:
@@ -186,12 +210,15 @@ def check_speed(state: dict) -> None:
     log("туннель медленный: %.2f Мбит/с (замер %d из %d)"
         % (mbit, streak + 1, SLOW_CONFIRM))
     if streak + 1 >= SLOW_CONFIRM:
-        ep = adguard_endpoint()
-        attention("slow",
-                  "Туннель работает, но медленно: %.1f Мбит/с" % mbit,
-                  "Сервер AdGuard %s. Разные локации AdGuard идут через разные "
-                  "серверы — смените локацию на странице «VPN серверы» и "
-                  "замерьте снова." % (ep or "не определён"))
+        ident, label, _ = active_egress()
+        if ident == "adguard":
+            detail = ("Сервер AdGuard %s. Разные локации AdGuard идут через разные "
+                      "серверы — смените локацию на странице «VPN серверы» и "
+                      "замерьте снова." % (adguard_endpoint() or "не определён"))
+        else:
+            detail = ("Выход: %s. Если медленно и дальше, поставьте первым в "
+                      "порядке выходов другой и сравните." % label)
+        attention("slow", "Туннель работает, но медленно: %.1f Мбит/с" % mbit, detail)
 
 
 # A tunnel can also be fast and still useless for what it is there for. On Sep
@@ -220,7 +247,7 @@ def fetch(url: str) -> tuple[int, dict, str]:
     """One request through the tunnel, redirects not followed; status 0 when
     nothing came back."""
     cmd = ["curl", "-s", "-m", "15", "-A", UA, "-D", "-", "-o", "-",
-           "--socks5-hostname", SOCKS, url]
+           "--socks5-hostname", active_egress()[2], url]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=25)
     except (OSError, subprocess.SubprocessError):
@@ -329,9 +356,14 @@ def check_services(state: dict) -> None:
             seen = exit_seen_by(host)
             if seen and seen != common:
                 own.append("%s выходит через %s" % (name, seen))
-    detail = ("Выход локации AdGuard: %s. Смените локацию на странице "
-              "«VPN серверы»." % (common or "не определён"))
-    if own:
+    ident, label, _ = active_egress()
+    if ident == "adguard":
+        detail = ("Выход локации AdGuard: %s. Смените локацию на странице "
+                  "«VPN серверы»." % (common or "не определён"))
+    else:
+        detail = ("Выход: %s, адрес %s. Попробуйте поставить первым другой "
+                  "выход." % (label, common or "не определён"))
+    if own and ident == "adguard":
         detail += (" У части сервисов у AdGuard свой выход, смена локации его "
                    "может не затронуть: %s." % "; ".join(own))
     attention("services", "Через туннель не открываются: %s" % listed, detail)

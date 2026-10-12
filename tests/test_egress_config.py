@@ -170,3 +170,20 @@ class TestPlumbing:
         script = (ROOT / "src/scripts/egress-netns.sh").read_text()
         assert "--uid-owner $BRIDGE_UID" in script and "REJECT" in script
         assert "setpriv --reuid=$BRIDGE_UID" in script
+
+
+class TestTrustTunnelLoopback:
+    def test_loopback_listener_needs_no_credentials(self):
+        s = ec.tt_client(WIZARD, "127.0.0.1:1085", protocol="http3", resolve=no_dns)
+        sock = s.split("[listener.socks]")[1]
+        assert 'address = "127.0.0.1:1085"' in sock and "username" not in sock
+
+    def test_off_loopback_without_credentials_is_refused(self):
+        with pytest.raises(ValueError):
+            ec.tt_client(WIZARD, "192.168.244.10:1084", resolve=no_dns)
+
+    def test_every_egress_is_a_plain_socks_address(self):
+        # Probes, xray and the watchdog all speak to "the tunnel" with no auth.
+        script = (ROOT / "src/scripts/egress-netns.sh").read_text()
+        assert script.count('"auth": "noauth"') == 2
+        assert "127.0.0.1:1085" in script

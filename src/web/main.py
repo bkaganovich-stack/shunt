@@ -5,12 +5,13 @@ import asyncio, base64, fcntl, hashlib, hmac, io, ipaddress, json, os, pty
 import re, secrets, shutil, signal, socket, struct, subprocess, tarfile, tempfile, termios, time
 import urllib.parse, urllib.request
 import uuid as _uuid_mod
+import copy
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.25.0"
+VERSION = "2.26.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -22,6 +23,7 @@ import dnspath as _dns
 import geosite as _geo
 import blockprobe as _bp
 import freezewatch as _fw
+import egresses as _eg
 import dnsnames as _dnames
 import profiles as _profiles
 
@@ -148,6 +150,12 @@ DEFAULT_SETTINGS: dict = {
     # shadowsocks/vless key. Keeps this regen-safe across build_xray_config().
     "adguard": {"enabled": False, "socks_host": "127.0.0.1", "socks_port": 1081,
                 "post_quantum": False},
+    # The egresses beyond AdGuard and FPTN (egresses.py): the own cascade's
+    # AmneziaWG and TrustTunnel, off until the server has issued a config and
+    # someone turns them on. egress_order is the fallback ladder, best first;
+    # empty means egresses.DEFAULT_ORDER.
+    "egresses": {"amnezia": {"enabled": False}, "trusttunnel": {"enabled": False}},
+    "egress_order": [],
     # Update history stored in SQLite; this just holds last-check cache
     "update_cache": {},
 }
@@ -670,25 +678,14 @@ def _build_subscription_rules(settings: dict, final: str) -> list[dict]:
 # ── Xray Config Builder ────────────────────────────────────────────────────────
 def _get_active_vpn_outbound(settings: dict) -> tuple[list, bool, Optional[str]]:
     """Return (outbounds, has_proxy, proxy_server_ip) for active VPN server."""
-    # AdGuard VPN egress takes precedence: route the proxy outbound through the local
-    # adguardvpn-cli SOCKS. No proxy_server_ip bypass rule — the adguardvpn-cli's own
-    # traffic to AdGuard servers is bypassed at L3 (agvpn uid owner rule in iptables.sh).
-    fp = settings.get("fptn", {})
-    if settings.get("egress_active") == "fptn" and fp.get("enabled"):
-        # Second egress: the FPTN client lives in a netns and exposes a SOCKS
-        # bridge that can only reach the internet through its tunnel, so a dead
-        # tunnel means failed connections rather than a silent direct leak.
-        ob = {"protocol": "socks", "tag": "proxy",
-              "settings": {"servers": [{"address": fp.get("socks_host", "192.168.244.2"),
-                                        "port": int(fp.get("socks_port", 1082))}]}}
-        return [ob], True, None
-    ag = settings.get("adguard", {})
-    if ag.get("enabled"):
-        host = ag.get("socks_host", "127.0.0.1")
-        port = int(ag.get("socks_port", 1081))
-        ob = {"protocol": "socks", "tag": "proxy",
-              "settings": {"servers": [{"address": host, "port": port}]}}
-        return [ob], True, None
+    # Every tunnelled egress -- AdGuard's CLI, FPTN and the own cascade -- is a
+    # plain SOCKS address (egresses.py). The isolated ones sit behind a bridge
+    # that can only leave through its tunnel, so a dead tunnel means failed
+    # connections rather than a silent direct leak. AdGuard's own traffic to its
+    # servers is bypassed at L3 (agvpn uid rule in iptables.sh).
+    ident = _eg.active(settings)
+    if ident:
+        return [_eg.outbound(settings, ident)], True, None
     servers = settings.get("vpn_servers", [])
     active_id = settings.get("active_vpn_id")
     active = None
@@ -2269,7 +2266,7 @@ def get_xray_state() -> str:
     # counting it the dashboard reports "no key" while every packet is in fact
     # being tunnelled, which reads as if the gateway were wide open.
     has_egress = bool(s.get("active_vpn_id") or s.get("vpn_key")
-                      or (s.get("adguard") or {}).get("enabled"))
+                      or _eg.candidates(s))
     if not has_egress:
         return "no_key"
     # One consultation of the measurement, whichever egress is configured.
@@ -2705,13 +2702,13 @@ async def get_status(u: str = Depends(auth_dep)):
         except Exception:
             vpn_meta = {"name": "Invalid key", "protocol":"?","server":"?","port":0}
     egress = None
-    if not (s.get("active_vpn_id") or s.get("vpn_key")):
-        ag = s.get("adguard") or {}
-        if ag.get("enabled"):
-            egress = {"kind": "adguard", "location": ag.get("location")}
+    ident = _eg.active(s)
+    if ident:
+        egress = {"kind": ident, "label": _eg.CATALOG[ident]["label"],
+                  "location": (s.get("adguard") or {}).get("location") if ident == "adguard" else None}
     return {"state": state, "egress": egress,
             "auto_fallback": bool(s.get("auto_fallback")),
-            "egress_active": s.get("egress_active", "adguard"),
+            "egress_active": _eg.active(s),
             "fptn_enabled": bool((s.get("fptn") or {}).get("enabled")),
             "in_fallback": bool(s.get("fallback_saved_profile")),
             "fallback_saved_profile": s.get("fallback_saved_profile"),
@@ -2780,24 +2777,24 @@ def _socks_probe(host: str, port) -> bool:
 
 
 def _egress_probe() -> bool:
-    """Is the AdGuard egress — the primary one — alive?"""
-    ag = (load_settings().get("adguard") or {})
-    return _socks_probe(ag.get("socks_host", "127.0.0.1"), ag.get("socks_port", 1081))
+    """Is the AdGuard egress alive? Kept for callers that ask about AdGuard by name."""
+    return _probe_egress("adguard")
 
 
-def _fptn_probe() -> bool:
-    """Is the FPTN egress — the secondary one — alive?"""
-    fp = (load_settings().get("fptn") or {})
-    return _socks_probe(fp.get("socks_host", "192.168.244.2"), fp.get("socks_port", 1082))
+def _probe_egress(ident: str, settings: Optional[dict] = None) -> bool:
+    host, port = _eg.socks(settings or load_settings(), ident)
+    return _socks_probe(host, port)
 
 
 async def _egress_fallback_loop() -> None:
-    """Keep traffic flowing by walking down a ladder of egresses.
+    """Keep traffic flowing by walking down the user's ladder of egresses.
 
-    AdGuard is the primary and always wins when it is alive. FPTN is the
-    secondary: a different provider, protocol and network, so a block that takes
-    out one is unlikely to take out the other. Direct routing is the last rung —
-    unencrypted, so it is only reached when both tunnels are gone.
+    The order is the user's (egresses.py; AdGuard first, the own cascade next,
+    FPTN last until they say otherwise). The first enabled egress is the
+    primary and always wins when alive; while it is dead, the first live
+    reserve in order carries the house, and a better reserve that recovers
+    takes over from a worse one. Direct routing is the last rung --
+    unencrypted, so it is only reached when every tunnel is gone.
 
     Motivated by the 2026-09-03 outage: the AdGuard tunnel was dead for 6h34m
     while the ISP link stayed healthy the whole time (391 probe failures, each
@@ -2805,60 +2802,47 @@ async def _egress_fallback_loop() -> None:
     all night although working paths existed.
     """
     await _idle(90)
-    ag_fails = 0
+    fails = 0
     loop = asyncio.get_event_loop()
     while True:
         try:
             s = load_settings()
             if s.get("auto_fallback"):
-                ag_alive = await loop.run_in_executor(None, _egress_probe)
-                active = s.get("egress_active", "adguard")
-                saved = s.get("fallback_saved_profile")
+                probed: dict[str, bool] = {}
 
-                if ag_alive:
-                    ag_fails = 0
-                    # Primary is back: undo whatever we did, in reverse order.
-                    if active != "adguard" or saved:
-                        old_s = dict(s)
-                        s["egress_active"] = "adguard"
-                        if saved:
-                            s["profile"] = saved
-                            s["fallback_saved_profile"] = None
-                        save_settings(s)
-                        await loop.run_in_executor(
-                            None, lambda: apply_config(s, "egress_restore_adguard",
-                                                       _pre_settings=old_s))
-                        fire_alert("failover_executed", "AdGuard egress restored")
-                else:
-                    ag_fails += 1
-                    # three misses (~3 min) before acting, so a brief hiccup or a
-                    # single watchdog restart does not move the household's traffic
-                    if ag_fails >= 3:
-                        fp = s.get("fptn") or {}
-                        fptn_alive = (await loop.run_in_executor(None, _fptn_probe)
-                                      if fp.get("enabled") else False)
-                        if fptn_alive and active != "fptn":
-                            old_s = dict(s)
-                            s["egress_active"] = "fptn"
-                            save_settings(s)
-                            await loop.run_in_executor(
-                                None, lambda: apply_config(s, "egress_switch_fptn",
-                                                           _pre_settings=old_s))
-                            fire_alert("failover_executed",
-                                       "AdGuard dead — switched to the FPTN egress")
-                        elif not fptn_alive and not saved and s.get("profile") != "direct":
-                            # Both tunnels gone: routing direct beats no internet,
-                            # but it is unencrypted, so it is the last resort only.
-                            old_s = dict(s)
-                            s["fallback_saved_profile"] = s.get("profile", "all_except_ru")
-                            s["profile"] = "direct"
-                            s["egress_active"] = "adguard"
-                            save_settings(s)
-                            await loop.run_in_executor(
-                                None, lambda: apply_config(s, "egress_fallback_direct",
-                                                           _pre_settings=old_s))
-                            fire_alert("failover_executed",
-                                       "Both egresses dead — routing direct")
+                def alive(ident: str) -> bool:
+                    if ident not in probed:
+                        probed[ident] = _probe_egress(ident, s)
+                    return probed[ident]
+
+                ident, fails, action = await loop.run_in_executor(
+                    None, lambda: _eg.decide(s, alive, fails))
+                saved = s.get("fallback_saved_profile")
+                if action in ("restore", "switch"):
+                    old_s = dict(s)
+                    s["egress_active"] = ident
+                    if saved:
+                        s["profile"] = saved
+                        s["fallback_saved_profile"] = None
+                    save_settings(s)
+                    await loop.run_in_executor(
+                        None, lambda: apply_config(s, "egress_" + action + "_" + ident,
+                                                   _pre_settings=old_s))
+                    label = _eg.CATALOG[ident]["label"]
+                    fire_alert("failover_executed",
+                               ("Основной выход снова работает: " if action == "restore"
+                                else "Основной выход не отвечает — переключено на ") + label)
+                elif action == "direct" and not saved and s.get("profile") != "direct":
+                    # Every tunnel gone: routing direct beats no internet, but it is
+                    # unencrypted, so it is the last resort only.
+                    old_s = dict(s)
+                    s["fallback_saved_profile"] = s.get("profile", "all_except_ru")
+                    s["profile"] = "direct"
+                    save_settings(s)
+                    await loop.run_in_executor(
+                        None, lambda: apply_config(s, "egress_fallback_direct",
+                                                   _pre_settings=old_s))
+                    fire_alert("failover_executed", "Все выходы не отвечают — трафик идёт напрямую")
         except Exception:
             pass
         await _idle(60)
@@ -3027,7 +3011,7 @@ async def get_fptn(u: str = Depends(auth_dep)):
             "service": svc, "alive": alive, "servers": servers,
             "servers_source": source,
             "token_updated": token_updated,
-            "active": s.get("egress_active", "adguard") == "fptn"}
+            "active": _eg.active(s) == "fptn"}
 
 
 @app.post("/api/fptn")
@@ -3104,6 +3088,85 @@ async def set_auto_fallback(req: AutoFallbackReq, u: str = Depends(auth_dep)):
     if restored:
         apply_config(s, "auto_fallback_off", _pre_settings=old_s)
     return {"ok": True, "enabled": req.enabled, "restored_profile": restored}
+
+
+# ── Egresses: order and the own cascade ───────────────────────────────────────
+async def _quick_alive(host: str, port: int) -> bool:
+    try:
+        p = await asyncio.create_subprocess_exec(
+            "curl", "-s", "-o", "/dev/null", "-m", "4", "-w", "%{http_code}",
+            "--socks5", "%s:%s" % (host, port), "http://cp.cloudflare.com/generate_204",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await p.communicate()
+        return out.decode().strip() == "204"
+    except Exception:
+        return False
+
+
+def _unit_state(unit: str) -> str:
+    r = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True)
+    return r.stdout.strip() or "unknown"
+
+
+@app.get("/api/egresses")
+async def get_egresses(u: str = Depends(auth_dep)):
+    """Every egress in the user's order, with what it is doing right now."""
+    s = load_settings()
+    order = _eg.order(s)
+    cands = _eg.candidates(s)
+    active = _eg.active(s)
+    alive = await asyncio.gather(*[_quick_alive(*_eg.socks(s, e)) for e in order])
+    rows = []
+    for e, ok in zip(order, alive):
+        c = _eg.CATALOG[e]
+        rows.append({"id": e, "label": c["label"], "cascade": e in _eg.CASCADE,
+                     "configured": _eg.configured(e), "enabled": _eg.enabled(s, e),
+                     "primary": bool(cands) and cands[0] == e, "active": e == active,
+                     "alive": ok, "service": _unit_state(c["unit"]) if "unit" in c else
+                     _unit_state("adguardvpn.service"),
+                     "socks": "%s:%s" % _eg.socks(s, e)})
+    return {"egresses": rows, "active": active, "auto_fallback": bool(s.get("auto_fallback")),
+            "in_fallback": bool(s.get("fallback_saved_profile"))}
+
+
+class EgressesReq(BaseModel):
+    order: Optional[list[str]] = None
+    enabled: Optional[dict[str, bool]] = None
+
+
+@app.put("/api/egresses")
+async def set_egresses(req: EgressesReq, u: str = Depends(auth_dep)):
+    """
+    The fallback order, and the own cascade's egresses on or off. AdGuard and
+    FPTN keep their own switches on their own pages: turning them on or off
+    means starting their clients, which those pages already do properly.
+    """
+    s = load_settings()
+    old_s = copy.deepcopy(s)
+    if req.order is not None:
+        if sorted(req.order) != sorted(_eg.CATALOG):
+            raise HTTPException(400, "Порядок должен перечислять каждый выход ровно один раз")
+        s["egress_order"] = list(req.order)
+    for e, on in (req.enabled or {}).items():
+        if e not in _eg.CASCADE:
+            raise HTTPException(400, "Здесь включаются только выходы своего каскада")
+        if on and not _eg.configured(e):
+            raise HTTPException(400, "Для этого выхода сервер каскада ещё не выпустил конфигурацию")
+        s.setdefault("egresses", {}).setdefault(e, {})["enabled"] = bool(on)
+        unit = _eg.CATALOG[e]["unit"]
+        subprocess.run(["systemctl", "enable" if on else "disable", "--now", unit],
+                       capture_output=True)
+    # A new primary takes over at once if it is alive; a dead one is left to
+    # the fallback loop, which will not move the house onto it.
+    primary = (_eg.candidates(s) or [None])[0]
+    if primary and primary != _eg.active(s) and await _quick_alive(*_eg.socks(s, primary)):
+        s["egress_active"] = primary
+    save_settings(s)
+    applied = None
+    if _eg.active(s) != _eg.active(old_s):
+        ok, err = apply_config(s, "egress_order", _pre_settings=old_s)
+        applied = {"ok": ok, "error": err or None}
+    return {"ok": True, "active": _eg.active(s), "order": _eg.order(s), "applied": applied}
 
 
 # ── Metrics sampler ───────────────────────────────────────────────────────────

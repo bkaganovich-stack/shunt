@@ -296,3 +296,31 @@ class TestFetch:
         monkeypatch.setattr(wd.subprocess, "run",
                             lambda *a, **k: SimpleNamespace(stdout=b"", returncode=28))
         assert REAL_FETCH("https://claude.ai/") == (0, {}, "")
+
+
+class TestMeasuresTheActiveEgress:
+    """From 2.26 the house may ride the own cascade; the checks follow it."""
+
+    def test_active_egress_is_read_from_settings(self, tmp_path, monkeypatch):
+        f = tmp_path / "settings.json"
+        f.write_text(json.dumps({"adguard": {"enabled": True},
+                                 "egresses": {"amnezia": {"enabled": True}},
+                                 "egress_order": ["amnezia", "adguard", "trusttunnel", "fptn"]}))
+        monkeypatch.setattr(wd, "SETTINGS", f)
+        monkeypatch.setattr(wd, "BASE", tmp_path)
+        import egresses
+        monkeypatch.setattr(egresses, "configured", lambda ident, base=None: True)
+        assert wd.active_egress() == ("amnezia", "AmneziaWG (свой каскад)", "192.168.244.6:1083")
+
+    def test_unreadable_settings_fall_back_to_adguard(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(wd, "SETTINGS", tmp_path / "missing.json")
+        assert wd.active_egress() == ("adguard", "AdGuard VPN", "127.0.0.1:1081")
+
+    def test_slow_cascade_notice_names_it_not_adguard(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(wd, "active_egress",
+                            lambda: ("amnezia", "AmneziaWG (свой каскад)", "192.168.244.6:1083"))
+        monkeypatch.setattr(wd, "adguard_endpoint",
+                            lambda: pytest.fail("asked AdGuard about a cascade egress"))
+        TestSlowTunnel()._run(monkeypatch, tmp_path, [0.3, 0.4])
+        [item] = [i for i in json.loads(wd.ATTENTION.read_text()) if not i.get("cleared")]
+        assert "AmneziaWG" in item["detail"] and "AdGuard" not in item["detail"]

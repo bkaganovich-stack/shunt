@@ -82,14 +82,16 @@ def split_awg(text: str, resolve=_resolve4) -> tuple[str, dict]:
     return "\n".join(out) + "\n", facts
 
 
-def tt_client(wizard: str, socks: str, user: str, password: str,
+def tt_client(wizard: str, socks: str, user: str | None = None, password: str | None = None,
               protocol: str = "http3", resolve=_resolve4) -> str:
     """
     Rewrite the setup wizard's client config for SOCKS-only use in a namespace.
 
-    The client refuses a SOCKS listener on a non-loopback address without
-    credentials, which is right: the veth is reachable from the host. The
-    endpoint is pinned to its IPv4 address because the namespace has no
+    egress-netns.sh puts the listener on the namespace's loopback and a bridge
+    in front of it, like every other egress: Shunt speaks to all of them as a
+    plain SOCKS address. The client refuses a non-loopback listener without
+    credentials, so they are written when given and required off loopback.
+    The endpoint is pinned to its IPv4 address because the namespace has no
     resolver; the hostname stays, since it is also the TLS name.
     """
     if protocol not in ("http2", "http3"):
@@ -108,8 +110,12 @@ def tt_client(wizard: str, socks: str, user: str, password: str,
     # Everything from the listener section on is replaced: the wizard writes a
     # TUN listener, and a client holding both would also grab the route.
     s = re.sub(r"(?ms)^\[listener\].*\Z", "", s).rstrip() + "\n"
-    s += '\n[listener]\n\n[listener.socks]\naddress = "%s"\nusername = "%s"\npassword = "%s"\n' % (
-        socks, user, password)
+    loopback = ipaddress.ip_address(socks.rpartition(":")[0].strip("[]")).is_loopback
+    if not loopback and not (user and password):
+        raise ValueError("a SOCKS listener off loopback needs credentials")
+    s += '\n[listener]\n\n[listener.socks]\naddress = "%s"\n' % socks
+    if user and password:
+        s += 'username = "%s"\npassword = "%s"\n' % (user, password)
     return s
 
 
@@ -121,14 +127,13 @@ def main(argv: list[str]) -> int:
         for k in ("address", "mtu", "dns", "endpoint_ip", "endpoint_port"):
             print("%s=%s" % (k.upper(), facts.get(k, "")))
         return 0
-    if len(argv) >= 7 and argv[1] == "tt":
-        user, password = open(argv[4]).read().split()
-        out = tt_client(open(argv[2]).read(), argv[5], user, password, argv[6])
+    if len(argv) >= 6 and argv[1] == "tt":
+        out = tt_client(open(argv[2]).read(), argv[4], protocol=argv[5])
         with open(argv[3], "w") as f:
             f.write(out)
         return 0
     print("usage: egress_config.py awg <awg.conf> <setconf-out>\n"
-          "       egress_config.py tt <wizard.toml> <out.toml> <cred> <socks-addr> <http2|http3>",
+          "       egress_config.py tt <wizard.toml> <out.toml> <socks-addr> <http2|http3>",
           file=sys.stderr)
     return 2
 

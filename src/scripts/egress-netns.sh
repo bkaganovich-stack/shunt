@@ -75,13 +75,13 @@ run_amnezia() {
     ip -n "$NS" link set awg0 mtu "$MTU" up
     ip -n "$NS" route add "$ENDPOINT_IP/32" via "$HOSTIP"
     ip -n "$NS" route replace default dev awg0
-    cat > "$RUN/bridge.json" <<EOF
+    cat > "$RUN/bridge.json" <<JSON
 {"log": {"loglevel": "warning"},
  "dns": {"servers": ["${DNS:-1.1.1.1}"]},
  "inbounds": [{"tag": "socks-in", "listen": "$NSIP", "port": $PORT,
                "protocol": "socks", "settings": {"auth": "noauth", "udp": true}}],
  "outbounds": [{"protocol": "freedom", "tag": "out", "settings": {"domainStrategy": "UseIP"}}]}
-EOF
+JSON
     chmod 644 "$RUN/bridge.json"; chmod 711 "$RUN"
     ip netns exec "$NS" setpriv --reuid=$BRIDGE_UID --regid=$BRIDGE_UID --clear-groups \
         /opt/shunt/bin/xray run -config "$RUN/bridge.json" &
@@ -92,22 +92,33 @@ EOF
     exit 1
 }
 
-# ── TrustTunnel: the client's own SOCKS listener, HTTP/2 or HTTP/3 to the endpoint
+# ── TrustTunnel: the client listens on the namespace's loopback; a bridge
+# exposes it on the veth like every other egress, as a plain SOCKS address.
 run_trusttunnel() {
+    local proto pids
     umask 077
-    local proto
     proto=$(cat "$CFG/upstream" 2>/dev/null || echo http3)
-    # The client insists on credentials for a non-loopback listener. Kept with
-    # the config because the xray outbound that will use this port needs them.
-    if [ ! -s "$CFG/socks.cred" ]; then
-        echo "shunt $(head -c 24 /dev/urandom | base64 | tr -d '/+=')" > "$CFG/socks.cred"
-    fi
     "$BIN/setup_wizard" --mode non-interactive --endpoint_config "$CFG/endpoint.toml" \
         --settings "$RUN/wizard.toml" >/dev/null 2>&1 || exit 1
     python3 /opt/shunt/scripts/egress_config.py tt "$RUN/wizard.toml" "$RUN/client.toml" \
-        "$CFG/socks.cred" "$NSIP:$PORT" "$proto" || exit 1
+        127.0.0.1:1085 "$proto" || exit 1
     rm -f "$RUN/wizard.toml"
-    exec ip netns exec "$NS" "$BIN/trusttunnel_client" --config "$RUN/client.toml"
+    ip netns exec "$NS" "$BIN/trusttunnel_client" --config "$RUN/client.toml" &
+    pids=$!
+    cat > "$RUN/bridge.json" <<JSON
+{"log": {"loglevel": "warning"},
+ "inbounds": [{"tag": "socks-in", "listen": "$NSIP", "port": $PORT,
+               "protocol": "socks", "settings": {"auth": "noauth", "udp": true}}],
+ "outbounds": [{"protocol": "socks", "tag": "out",
+                "settings": {"servers": [{"address": "127.0.0.1", "port": 1085}]}}]}
+JSON
+    chmod 644 "$RUN/bridge.json"; chmod 711 "$RUN"
+    ip netns exec "$NS" setpriv --reuid=$BRIDGE_UID --regid=$BRIDGE_UID --clear-groups \
+        /opt/shunt/bin/xray run -config "$RUN/bridge.json" &
+    pids="$pids $!"
+    wait -n $pids
+    kill $pids 2>/dev/null
+    exit 1
 }
 
 teardown() {
