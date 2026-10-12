@@ -7,11 +7,13 @@ shunt (2.28.0) stable; urgency=medium
   * Such a rule rides its egress while it answers and falls back to the
     household tunnel the moment it stops: it compiles to an xray balancer
     over that egress alone with "proxy" as its fallback, watched by xray's
-    observatory once a minute through the same probe target the rest of
+    observatory every 20 s through the same probe target the rest of
     Shunt uses. Checked on the gateway's Xray 26.3.27 before it was written:
     a pinned request left through Miami, one pinned to a dead egress left
-    through AdGuard. An egress that is switched off leaves the rule on the
-    ordinary tunnel.
+    through AdGuard. Measured live with a pinned site: it left through
+    Miami, fell back to AdGuard 26 s after AmneziaWG was stopped and came
+    back once it returned. An egress that is switched off leaves the rule on
+    the ordinary tunnel.
   * The profile editor offers every egress as a route, in the fallback
     order; the route preview names the pinned egress and its fallback.
 

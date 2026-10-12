@@ -921,10 +921,14 @@ def _pinned_extras(settings: dict, rules: list[dict]) -> tuple[list, list, Optio
     outbounds = [dict(_eg.outbound(settings, e), tag="egress-" + e) for e in pinned]
     balancers = [{"tag": "pin-" + e, "selector": ["egress-" + e], "fallbackTag": "proxy",
                   "strategy": {"type": "random"}} for e in pinned]
-    # Probed once a minute through each pinned egress -- the same target the
-    # watchdog and the probes use, so "alive" means one thing everywhere.
+    # Probed every 20 s through each pinned egress -- the same target the
+    # watchdog and the probes use, so "alive" means one thing everywhere. The
+    # interval is also how long a pinned rule rides the fallback after every
+    # xray restart (an unprobed egress counts as dead) and how long it keeps
+    # trying a dead one: at 1 m that measured 26 s to fall back and ~2 min to
+    # return on the gateway, 20 s cuts both to under half a minute.
     observatory = {"subjectSelector": ["egress-"], "probeURL": "https://www.google.com/generate_204",
-                   "probeInterval": "1m", "enableConcurrency": True}
+                   "probeInterval": "20s", "enableConcurrency": True}
     return outbounds, balancers, observatory
 
 
