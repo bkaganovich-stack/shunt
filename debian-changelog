@@ -1,3 +1,22 @@
+shunt (2.28.0) stable; urgency=medium
+
+  * A profile rule can now name an egress: "sony.com -> through AmneziaWG"
+    while the rest of the house stays on the primary. Motivated by Sony and
+    4pda refusing AdGuard's shared Datacamp address, which nobody else in the
+    house needs to leave.
+  * Such a rule rides its egress while it answers and falls back to the
+    household tunnel the moment it stops: it compiles to an xray balancer
+    over that egress alone with "proxy" as its fallback, watched by xray's
+    observatory once a minute through the same probe target the rest of
+    Shunt uses. Checked on the gateway's Xray 26.3.27 before it was written:
+    a pinned request left through Miami, one pinned to a dead egress left
+    through AdGuard. An egress that is switched off leaves the rule on the
+    ordinary tunnel.
+  * The profile editor offers every egress as a route, in the fallback
+    order; the route preview names the pinned egress and its fallback.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 12 Oct 2026 21:00:00 +0300
+
 shunt (2.27.0) stable; urgency=medium
 
   * A card on the egress page, "Выходы и порядок резервирования": every

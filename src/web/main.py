@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.27.0"
+VERSION = "2.28.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -898,6 +898,36 @@ def _live_addresses(settings: dict) -> list[str]:
                                  if r.get("source") == "live"])
 
 
+def _pinned_target(settings: dict, ident: str, final: str) -> dict:
+    """
+    Where a rule pinned to one egress sends its traffic.
+
+    To a balancer over that egress alone, with the household's tunnel as its
+    fallback: while xray's observatory sees the egress answer, the rule rides
+    it; the moment it stops, the same traffic goes wherever everything else
+    tunnelled goes, rather than nowhere. An egress that is switched off, or no
+    tunnel at all, leaves the rule on the ordinary route.
+    """
+    if final != "proxy" or not _eg.enabled(settings, ident):
+        return {"outboundTag": final}
+    return {"balancerTag": "pin-" + ident}
+
+
+def _pinned_extras(settings: dict, rules: list[dict]) -> tuple[list, list, Optional[dict]]:
+    """Outbounds, balancers and the observatory the pinned rules need."""
+    pinned = sorted({r["balancerTag"][4:] for r in rules if str(r.get("balancerTag", "")).startswith("pin-")})
+    if not pinned:
+        return [], [], None
+    outbounds = [dict(_eg.outbound(settings, e), tag="egress-" + e) for e in pinned]
+    balancers = [{"tag": "pin-" + e, "selector": ["egress-" + e], "fallbackTag": "proxy",
+                  "strategy": {"type": "random"}} for e in pinned]
+    # Probed once a minute through each pinned egress -- the same target the
+    # watchdog and the probes use, so "alive" means one thing everywhere.
+    observatory = {"subjectSelector": ["egress-"], "probeURL": "https://www.google.com/generate_204",
+                   "probeInterval": "1m", "enableConcurrency": True}
+    return outbounds, balancers, observatory
+
+
 def _profile_rules(settings, ident, final):
     """Single ordered policy compiler, consumed by datapath and route preview."""
     config = _profiles.effective(settings, ident)
@@ -914,7 +944,12 @@ def _profile_rules(settings, ident, final):
     for index, rule in enumerate(config["custom_rules"]):
         field = "ip" if rule["kind"] == "ip" else "domain"
         value = rule["value"] if field == "ip" else rule["kind"] + ":" + rule["value"]
-        add(field, [value], final if rule["route"] == "tunnel" else "direct", "profile:custom:" + str(index + 1))
+        reason = "profile:custom:" + str(index + 1)
+        if rule["route"].startswith("egress:"):
+            rules.append({"type": "field", field: [value], "_reason": reason,
+                          **_pinned_target(settings, rule["route"][7:], final)})
+        else:
+            add(field, [value], final if rule["route"] == "tunnel" else "direct", reason)
     if config["apple_vpn"]:
         add("domain", ["domain:cdn-apple.com", "domain:itunes.apple.com", "domain:aaplimg.com"], final, "apple-cdn-override")
     add("domain", ["full:" + d for d in config["extra_tunnel_domains"]], final, "profile:extra_tunnel_domains")
@@ -997,6 +1032,8 @@ def build_xray_config(settings: dict) -> dict:
 
     rules = [{k: v for k, v in r.items() if not k.startswith("_")}
              for r in _compiled_rules(settings, final, proxy_server_ip)]
+    pin_outbounds, balancers, observatory = _pinned_extras(settings, rules)
+    outbounds = outbounds + pin_outbounds
 
     return {
         "log": {"loglevel": "warning",
@@ -1032,7 +1069,9 @@ def build_xray_config(settings: dict) -> dict:
             "streamSettings": {"sockopt": {"tproxy": "tproxy", "mark": 255}},
         }],
         "outbounds": outbounds,
-        "routing": {"domainStrategy": "IPIfNonMatch", "rules": rules},
+        "routing": {"domainStrategy": "IPIfNonMatch", "rules": rules,
+                    **({"balancers": balancers} if balancers else {})},
+        **({"observatory": observatory} if observatory else {}),
         # Routing service only, on loopback: lets the freeze detector swap its
         # rule into the running xray instead of restarting it, which drops
         # every connection in the house. No stats service -- see below.
@@ -1926,7 +1965,13 @@ def route_test(target: str, settings: dict, profile_id: Optional[str] = None, so
         if reason in ("geosite_database", "geoip_database"):
             reason = hit
         source = "custom_rule" if reason.startswith(("custom:", "profile:custom:")) else "block_probe" if reason == "probe:discovered" else "geosite_database" if reason.startswith("geosite:") else "geoip_database" if reason.startswith("geoip:") or reason == "shared-edge" else "global_profile_fallback"
-        r = result(rule["outboundTag"], reason, "В списке заблокированных адресов" if reason == "geoip:ru-blocked" else "", rule_source=source)
+        pinned = str(rule.get("balancerTag", ""))[4:]
+        note = ("Через выход «%s»; если он не отвечает — через активный выход"
+                % _eg.CATALOG[pinned]["label"]) if pinned in _eg.CATALOG else \
+               "В списке заблокированных адресов" if reason == "geoip:ru-blocked" else ""
+        r = result(rule.get("outboundTag") or final, reason, note, rule_source=source)
+        if pinned:
+            r["egress"] = pinned
         if disabled_hit:
             r["note"] += " — " + disabled_hit
         if rule.get("source"):

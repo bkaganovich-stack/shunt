@@ -4,6 +4,8 @@ import ipaddress
 import re
 import uuid
 
+import egresses
+
 TUNNEL_LISTS = [
     {"id": ref, "label": ref, "description": description, "source_url": "https://github.com/runetfreedom/russia-v2ray-rules-dat"}
     for ref, description in [
@@ -33,6 +35,11 @@ def _base(settings, ident):
     name, _, default = BUILTINS[ident]
     selective = ident in ("blocked_only", "all_except_ru")
     return {"name": name, "default_route": default, "tunnel_lists": [v["id"] for v in TUNNEL_LISTS] if selective else [], "disabled_tunnel_lists": [], "services": [v["id"] for v in SERVICES] if ident == "blocked_only" else [], "use_discovered": selective, "apple_vpn": selective, "realtime_direct": True, "extra_tunnel_domains": [], "custom_rules": []}
+
+def valid_route(route):
+    """direct, tunnel (whichever egress carries the house), or one egress by name."""
+    return route in ("direct", "tunnel") or (
+        isinstance(route, str) and route.startswith("egress:") and route[7:] in egresses.CATALOG)
 
 def validate_hostname(value):
     if not isinstance(value, str):
@@ -72,7 +79,7 @@ def _validate(config, ident):
         raise ValueError("Допускается не более 100 своих правил")
     normalized = []
     for rule in custom:
-        if not isinstance(rule, dict) or set(rule) != {"kind", "value", "route"} or rule["kind"] not in ("full", "domain", "ip") or rule["route"] not in ("direct", "tunnel") or not isinstance(rule["value"], str):
+        if not isinstance(rule, dict) or set(rule) != {"kind", "value", "route"} or rule["kind"] not in ("full", "domain", "ip") or not valid_route(rule["route"]) or not isinstance(rule["value"], str):
             raise ValueError("Для правила укажите тип, назначение и маршрут")
         value = rule["value"].strip()
         if rule["kind"] == "ip":
@@ -174,4 +181,5 @@ def catalog(settings):
         c = effective(settings, ident)
         baseline = _base(settings, ident) if ident in BUILTINS else _validate(settings["custom_profiles"][ident]["original"], ident)
         rows.append({"id": ident, "name": c["name"], "description": BUILTINS[ident][1] if ident in BUILTINS else "Пользовательский профиль", "builtin": ident in BUILTINS, "modified": c != baseline, "baseline_config": deepcopy(baseline), "can_undo": ident in settings.get("profile_history", {}), "config": c})
-    return {"active_profile": settings.get("profile", "all_except_ru"), "profiles": rows, "tunnel_lists": deepcopy(TUNNEL_LISTS), "services": deepcopy(SERVICES)}
+    return {"active_profile": settings.get("profile", "all_except_ru"), "profiles": rows, "tunnel_lists": deepcopy(TUNNEL_LISTS), "services": deepcopy(SERVICES),
+            "egresses": [{"id": e, "label": egresses.CATALOG[e]["label"]} for e in egresses.order(settings)]}
