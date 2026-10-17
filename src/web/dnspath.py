@@ -204,7 +204,7 @@ def inventory(settings: dict, iface: str, lan_ip: str | None = None) -> list[dic
     for u in dns.get("upstream", []):
         add(u, "upstream", "верхний резолвер dnsmasq", True)
     for u in dns.get("upstream_ru", []):
-        add(u, "upstream_ru", "верхний резолвер для .ru и .local", True)
+        add(u, "upstream_ru", "верхний резолвер для имён, которые идут напрямую (.ru, .local и российские сервисы)", True)
     for u in doh_upstreams():
         add(u, "doh", "куда ходит DoH-прокси (через туннель)", True)
     configured = {parse_server(x)[0] for x in
@@ -259,10 +259,10 @@ def describe_chain(settings: dict, lan_ip: str | None = None) -> list[dict]:
     ru = list(dns.get("upstream_ru", []))
     if ru:
         hops.append({
-            "step": "Имена .ru и .local",
+            "step": "Имена, которые идут напрямую",
             "to": ", ".join(ru),
             "via": "напрямую, мимо туннеля",
-            "note": "Для этих имён используются настроенные DNS-серверы прямого маршрута",
+            "note": ".ru, .local и всё, что правила маршрутизации отправляют напрямую, — чтобы российские сервисы отвечали российскими адресами. Заблокированные сайты в .ru идут через туннель и разрешаются там же",
         })
     up = list(dns.get("upstream", []))
     if up:

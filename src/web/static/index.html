@@ -1408,9 +1408,9 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       </div>
 
       <div class="card">
-        <div class="card-title">Split-DNS: российские домены / .local</div>
+        <div class="card-title">Split-DNS: имена, которые идут напрямую</div>
         <p class="text-muted" style="font-size:12px;margin-bottom:8px">
-          Если задан — .ru и .local домены резолвятся через этот upstream (например, роутер провайдера)</p>
+          Если задан — через этот upstream резолвятся .ru, .local и все имена, которые правила маршрутизации отправляют напрямую (например, DNS провайдера). Так российские сервисы на других зонах (avito.st, yandex.net, vk.com) отдают российские узлы, а не зарубежные</p>
         <div id="dns-ru-upstream-list" class="dns-upstream-list"></div>
         <div class="rule-add-row">
           <input id="dns-ru-input" type="text" placeholder="192.168.50.1"

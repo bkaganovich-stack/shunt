@@ -1,3 +1,26 @@
+shunt (2.31.0) stable; urgency=medium
+
+  * DNS follows the route. Until now only .ru and .local went to the Russian
+    upstreams; every other name was resolved abroad, through the tunnel. A
+    Russian service on another zone then got a foreign answer from its CDN:
+    Avito's photos (avito.st) came back as Qrator in Germany and Level3 in
+    the Netherlands instead of Russian nodes. The routing rightly sent them
+    direct, and the direct path to a foreign address froze after ~20 KB, so
+    pictures half loaded on Avito and on other Russian sites.
+  * Now every name the routing rules send direct -- Russian lists, the
+    profile's own "direct" rules, the global always-direct rules -- is
+    resolved by the Russian upstreams, decided the way xray decides: the
+    first rule a name matches. Names tunnelled under those zones go back to
+    the default resolver, including blocked sites under .ru, which used to
+    get the Russian answer as well. On the gateway: ~880 zones direct, ~22
+    thousand tunnelled ones carved back out.
+  * dnsmasq is brought in line after every apply and once after start, and
+    restarted only when its file actually changes; the work is cached while
+    the name-based rules and the list file stay the same.
+  * Saving the DNS page no longer drops the ad-blocking rules from dnsmasq.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sat, 17 Oct 2026 12:44:33 +0300
+
 shunt (2.30.0) stable; urgency=medium
 
   * Key-based servers (Shadowsocks, VLESS, VMess, Trojan) are egresses in

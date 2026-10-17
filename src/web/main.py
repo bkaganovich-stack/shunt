@@ -6,12 +6,13 @@ import re, secrets, shutil, signal, socket, struct, subprocess, tarfile, tempfil
 import urllib.parse, urllib.request
 import uuid as _uuid_mod
 import copy
+import threading
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.30.0"
+VERSION = "2.31.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -21,6 +22,7 @@ import netpath as _np
 import inbound as _in
 import dnspath as _dns
 import geosite as _geo
+import dnssplit as _dsplit
 import blockprobe as _bp
 import freezewatch as _fw
 import egresses as _eg
@@ -87,7 +89,7 @@ DEFAULT_SETTINGS: dict = {
     # DNS config (drives dnsmasq)
     "dns": {
         "upstream":     ["192.168.50.1"],
-        "upstream_ru":  [],          # split-DNS: upstream for .ru / local
+        "upstream_ru":  [],          # split-DNS: upstream for names routed direct (dnssplit.py)
         "cache_size":   1000,
         "local_records": [],         # [{"hostname":"x.local","ip":"1.2.3.4"}]
     },
@@ -1162,7 +1164,7 @@ def validate_dns_settings(dns: dict) -> list[str]:
             errors.append(f"Invalid IP for record: {rec.get('ip')}")
     return errors
 
-def build_dnsmasq_conf(dns: dict) -> str:
+def build_dnsmasq_conf(dns: dict, split: Optional[tuple[list, list]] = None) -> str:
     """
     The whole dnsmasq configuration, not only the DNS half.
 
@@ -1201,6 +1203,13 @@ def build_dnsmasq_conf(dns: dict) -> str:
     for ip in dns.get("upstream_ru", []):
         lines.append(f"server=/ru/{ip}")
         lines.append(f"server=/local/{ip}")
+    # Names the routing sends direct are resolved by the Russian upstreams too,
+    # and names it tunnels under those zones go back abroad (dnssplit.py).
+    if split and dns.get("upstream_ru"):
+        direct, back = split
+        lines += ["", "# DNS follows the route: direct names, Russian resolvers (%d zones; "
+                  "%d tunnelled zones back to the default)" % (len(direct), len(back))]
+        lines += _dsplit.dnsmasq_lines(direct, back, dns["upstream_ru"])
     for rec in dns.get("local_records", []):
         lines.append(f"address=/{rec['hostname']}/{rec['ip']}")
     # The DHCP half belongs to the topology, but it lives in this file, so it
@@ -1217,9 +1226,49 @@ def build_dnsmasq_conf(dns: dict) -> str:
         ]
     return "\n".join(lines) + "\n"
 
+def _dns_split(settings: dict) -> Optional[tuple[list, list]]:
+    """
+    (direct zones, tunnelled zones under them) from the rules the datapath
+    runs, for the house's own profile -- not the emergency direct one, which
+    would hand every name to the Russian resolvers for the length of an outage.
+    None when it cannot be worked out; the configuration then keeps .ru alone,
+    as before 2.31.
+    """
+    dns = settings.get("dns") or {}
+    if not dns.get("upstream_ru"):
+        return None
+    try:
+        profile = settings.get("fallback_saved_profile") or settings.get("profile", "all_except_ru")
+        if profile == "direct":
+            return None
+        rules = _compiled_rules(dict(settings, profile=profile), "proxy")
+        # Working it out reads the lists and walks ~20 thousand names (~20 s on
+        # the gateway); most applies change no name-based rule, so the answer
+        # is kept for as long as those rules and the list file stay the same.
+        try:
+            st = GEOSITE_DAT.stat()
+            stamp = [st.st_mtime_ns, st.st_size]
+        except OSError:
+            stamp = None
+        key = json.dumps([[r for r in rules if "domain" in r or r.get("_reason") == "catch-all"], stamp],
+                         sort_keys=True, default=str)
+        if _dns_split_memo.get("key") == key:
+            return _dns_split_memo["value"]
+        names = {n for kind, n in _geo.referenced({"routing": {"rules": rules}}) if kind == "geosite"}
+        names = {n.split("@")[0] for n in names}
+        value = _dsplit.split(rules, _geo.entries(GEOSITE_DAT, names))
+        _dns_split_memo.update(key=key, value=value)
+        return value
+    except Exception:
+        return None
+
+
+_dns_split_memo: dict = {}
+
+
 def build_dnsmasq_conf_full(settings: dict) -> str:
     """Build full dnsmasq config including adblock rules."""
-    base = build_dnsmasq_conf(settings.get("dns", DEFAULT_SETTINGS["dns"]))
+    base = build_dnsmasq_conf(settings.get("dns", DEFAULT_SETTINGS["dns"]), _dns_split(settings))
     adblock_lines = _ft.build_adblock_dnsmasq_lines(settings)
     if adblock_lines:
         base += "\n# Adblock rules\n" + "\n".join(adblock_lines) + "\n"
@@ -1240,6 +1289,27 @@ def apply_dns_config(dns: dict, settings: Optional[dict] = None) -> tuple[bool, 
         return True, ""
     except Exception as e:
         return False, str(e)
+
+_dns_sync_lock = threading.Lock()
+
+
+def _sync_dns(settings: dict) -> str:
+    """
+    Bring dnsmasq in line with the rules just applied. Restarted only when the
+    file actually changes: a restart empties the cache, and most rule edits do
+    not move a single name between resolvers.
+    """
+    with _dns_sync_lock:
+        try:
+            conf = build_dnsmasq_conf_full(settings)
+            if DNS_CONF.exists() and DNS_CONF.read_text() == conf:
+                return "unchanged"
+            DNS_CONF.write_text(conf)
+            r = subprocess.run(["systemctl", "restart", "dnsmasq"], capture_output=True, text=True, timeout=15)
+            return "restarted" if r.returncode == 0 else "restart failed: " + r.stderr[:120]
+        except Exception as e:
+            return "failed: %s" % e
+
 
 def get_dns_status() -> dict:
     """
@@ -1351,6 +1421,8 @@ def apply_config(settings: dict, reason: str = "config_change",
         r = subprocess.run(["systemctl", "is-active", "shunt"],
                             capture_output=True, text=True)
         if r.stdout.strip() == "active":
+            # Off the request path: reading the lists takes a few seconds.
+            threading.Thread(target=_sync_dns, args=(copy.deepcopy(settings),), daemon=True).start()
             return True, ""
     # Auto-rollback
     ok, msg = restore_snapshot(snap_id)
@@ -2608,6 +2680,17 @@ async def startup_event():
     asyncio.create_task(_metrics_loop())
     asyncio.create_task(_egress_fallback_loop())
     asyncio.create_task(_freeze_watch_loop())
+    asyncio.create_task(_dns_sync_at_start())
+
+
+async def _dns_sync_at_start() -> None:
+    """
+    Once after start: the topology script (apply_topology.py) writes dnsmasq's
+    file without the split, and an upgrade brings new rules -- either leaves
+    DNS out of line with the route until the next apply.
+    """
+    await _idle(20)
+    await asyncio.get_event_loop().run_in_executor(None, lambda: _sync_dns(load_settings()))
 
 # ── Pydantic Models ────────────────────────────────────────────────────────────
 class LoginReq(BaseModel):        username: str; password: str
@@ -3923,7 +4006,7 @@ async def set_dns(req: DNSSettingsReq, u: str = Depends(auth_dep)):
     if errors: raise HTTPException(400, "; ".join(errors))
     s = load_settings()
     s["dns"] = dns; save_settings(s)
-    ok, err = apply_dns_config(dns)
+    ok, err = apply_dns_config(dns, s)
     return {"ok": ok, "error": err or None}
 
 @app.get("/api/dns/probe")

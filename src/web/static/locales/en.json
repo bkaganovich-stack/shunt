@@ -268,8 +268,6 @@
     "Управление dnsmasq: upstream, split-DNS, локальные записи, кэш": "dnsmasq management: upstream servers, split DNS, local records, cache",
     "Upstream DNS серверы": "Upstream DNS servers",
     "Основные DNS серверы для всех запросов": "The main DNS servers for all queries",
-    "Split-DNS: российские домены / .local": "Split DNS: Russian domains / .local",
-    "Если задан — .ru и .local домены резолвятся через этот upstream (например, роутер провайдера)": "When set, .ru and .local domains are resolved through this upstream — the ISP's router, for instance",
     "Локальные DNS-записи": "Local DNS records",
     "Размер кэша (записей):": "Cache size (entries):",
     "✓ Применить настройки DNS": "✓ Apply DNS settings",
@@ -738,11 +736,9 @@
     "Правила перенаправления порта 53 нет — устройства в сети не попадут в dnsmasq.": "The port-53 redirect rule is missing — devices on the LAN will not reach dnsmasq.",
     "dnsmasq — сюда попадают устройства": "dnsmasq — where devices land",
     "верхний резолвер dnsmasq": "dnsmasq's upstream",
-    "верхний резолвер для .ru и .local": "upstream for .ru and .local",
     "куда ходит DoH-прокси (через туннель)": "where the DoH proxy goes (through the tunnel)",
     "выдан провайдером в аренде": "handed out by the provider in the lease",
     "Устройства в сети": "Devices on the network",
-    "Имена .ru и .local": ".ru and .local names",
     "Все остальные имена": "All other names",
     "напрямую, мимо туннеля": "direct, bypassing the tunnel",
     "перенаправление в nat PREROUTING": "a redirect in nat PREROUTING",
@@ -1201,7 +1197,12 @@
     "Ключей слишком много": "Too many keys",
     "Нельзя удалить последний выход: весь трафик пошёл бы напрямую": "The last egress cannot be deleted: all traffic would go direct",
     "Удалить можно только выход по ключу": "Only key-based egresses can be deleted",
-    "Нет такого выхода": "No such egress"
+    "Нет такого выхода": "No such egress",
+    "Split-DNS: имена, которые идут напрямую": "Split DNS: names routed direct",
+    "Если задан — через этот upstream резолвятся .ru, .local и все имена, которые правила маршрутизации отправляют напрямую (например, DNS провайдера). Так российские сервисы на других зонах (avito.st, yandex.net, vk.com) отдают российские узлы, а не зарубежные": "When set, .ru, .local and every name the routing rules send direct are resolved through this upstream (the ISP's DNS, for instance), so Russian services on other zones (avito.st, yandex.net, vk.com) hand out Russian nodes rather than foreign ones",
+    "верхний резолвер для имён, которые идут напрямую (.ru, .local и российские сервисы)": "upstream for names routed direct (.ru, .local and Russian services)",
+    "Имена, которые идут напрямую": "Names routed direct",
+    ".ru, .local и всё, что правила маршрутизации отправляют напрямую, — чтобы российские сервисы отвечали российскими адресами. Заблокированные сайты в .ru идут через туннель и разрешаются там же": ".ru, .local and everything the routing rules send direct, so Russian services answer with Russian addresses. Blocked sites under .ru go through the tunnel and are resolved there"
   },
   "patterns": [
     [

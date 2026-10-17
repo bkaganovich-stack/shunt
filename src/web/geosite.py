@@ -143,3 +143,104 @@ def missing(config: dict, geosite_path: str | Path,
                   for kind, name in refs
                   if have[kind] and name not in have[kind])
     return problems + gone
+
+
+# ── List contents ──────────────────────────────────────────────────────────
+# Domain types as geosite.dat stores them (v2fly's Domain.Type).
+_PLAIN, _REGEX, _DOMAIN, _FULL = 0, 1, 2, 3
+_entries_cache: dict[str, tuple[tuple, dict]] = {}
+
+
+def entries(path: str | Path, names) -> dict[str, dict]:
+    """
+    The domains in the named geosite lists: {NAME: {"full", "domain", "plain",
+    "regex"}}, sets of lower-case strings (regex as source text). One pass over
+    the file for all of them, kept until the file changes; asking again for a
+    subset of what was read costs nothing.
+
+    Attributes (@ads and the like) are not read: a reference carrying one is
+    the caller's to treat with care, not this function's to half-honour.
+    """
+    path = Path(path)
+    want = {n.upper() for n in names}
+    try:
+        st = path.stat()
+    except OSError:
+        return {n: _empty() for n in want}
+    key, stamp = str(path), (st.st_mtime_ns, st.st_size)
+    hit = _entries_cache.get(key)
+    if hit and hit[0] == stamp and want <= hit[1].keys():
+        return {n: hit[1][n] for n in want}
+    wanted = want | (set(hit[1]) if hit and hit[0] == stamp else set())
+    out = {n: _empty() for n in wanted}
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return {n: out[n] for n in want}
+    i, n = 0, len(data)
+    try:
+        while i < n:
+            tag, i = _varint(data, i)
+            if tag >> 3 != 1 or tag & 7 != 2:
+                break
+            length, i = _varint(data, i)
+            end = i + length
+            name, j, doms = None, i, []
+            while j < end:
+                t, j = _varint(data, j)
+                field, wire = t >> 3, t & 7
+                if wire == 2:
+                    l, j = _varint(data, j)
+                    if field == 1:
+                        name = data[j:j + l].decode("utf-8", "replace").upper()
+                        if name not in wanted:
+                            break                      # skip the payload unread
+                    elif field == 2:
+                        doms.append(_domain(data, j, j + l))
+                    j += l
+                elif wire == 0:
+                    _, j = _varint(data, j)
+                elif wire == 5:
+                    j += 4
+                elif wire == 1:
+                    j += 8
+                else:
+                    break
+            if name in wanted:
+                bucket = out[name]
+                for kind, value in doms:
+                    if value:
+                        bucket[{_PLAIN: "plain", _REGEX: "regex", _DOMAIN: "domain",
+                                _FULL: "full"}.get(kind, "plain")].add(value)
+            i = end
+    except (IndexError, ValueError):
+        pass
+    _entries_cache[key] = (stamp, out)
+    return {n: out[n] for n in want}
+
+
+def _empty() -> dict:
+    return {"full": set(), "domain": set(), "plain": set(), "regex": set()}
+
+
+def _domain(data: bytes, i: int, end: int) -> tuple[int, str]:
+    kind, value = 0, ""
+    while i < end:
+        t, i = _varint(data, i)
+        field, wire = t >> 3, t & 7
+        if wire == 0:
+            v, i = _varint(data, i)
+            if field == 1:
+                kind = v
+        elif wire == 2:
+            l, i = _varint(data, i)
+            if field == 2:
+                value = data[i:i + l].decode("utf-8", "replace").lower()
+            i += l
+        elif wire == 5:
+            i += 4
+        elif wire == 1:
+            i += 8
+        else:
+            break
+    return kind, value
