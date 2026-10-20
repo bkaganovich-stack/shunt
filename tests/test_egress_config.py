@@ -214,3 +214,10 @@ class TestUserParams:
     def test_trusttunnel_anti_dpi(self):
         s = ec.tt_client(WIZARD, "127.0.0.1:1085", resolve=no_dns, anti_dpi=True)
         assert "anti_dpi = true" in s
+
+
+def test_warp_is_handed_names_not_addresses():
+    # WARP's IPv4 exit is Iran to Google; given a name it leaves over IPv6 (USA).
+    script = (ROOT / "src/scripts/egress-netns.sh").read_text()
+    inbound = script[script.index('"tag": "warp-in"'):script.index('"outbounds"', script.index('"tag": "warp-in"'))]
+    assert '"destOverride": ["http", "tls"]' in inbound and '"routeOnly": false' in inbound

@@ -1,3 +1,14 @@
+shunt (2.32.1) stable; urgency=medium
+
+  * The WARP egress is handed the site's name, not its address. The house's
+    xray passes on the IPv4 address a device dialled, and WARP then left
+    through its IPv4 pool, which Google places in Iran -- Gemini refused it
+    just as it refuses Russia. Given a name, WARP resolves it itself and
+    leaves over IPv6, which Google places in the USA. The WARP port on the
+    AmneziaWG bridge now reads the name from the TLS or HTTP start.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Tue, 20 Oct 2026 14:43:30 +0300
+
 shunt (2.32.0) stable; urgency=medium
 
   * A new egress, Cloudflare WARP, run on the cascade's Miami server and

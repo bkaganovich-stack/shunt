@@ -81,13 +81,21 @@ run_amnezia() {
     # A second port leads to Cloudflare WARP on the Miami server (warp-relay
     # there, reachable only through this tunnel): the "warp" egress. TCP only
     # -- the WARP client's proxy does not carry UDP; QUIC falls back to TCP.
+    #
+    # WARP is handed the site's name, not its address: the house's xray passes
+    # on the IPv4 address the device dialled, and WARP then leaves through its
+    # IPv4 pool -- which Google places in Iran ("IRN", 2026-10-20), refused by
+    # Gemini like Russia. Given a name, WARP resolves it itself and leaves over
+    # IPv6, which Google places in the USA. So this inbound reads the name from
+    # the TLS or HTTP start and sends that on.
     cat > "$RUN/bridge.json" <<JSON
 {"log": {"loglevel": "warning"},
  "dns": {"servers": ["${DNS:-1.1.1.1}"]},
  "inbounds": [{"tag": "socks-in", "listen": "$NSIP", "port": $PORT,
                "protocol": "socks", "settings": {"auth": "noauth", "udp": true}},
               {"tag": "warp-in", "listen": "$NSIP", "port": $WARP_PORT,
-               "protocol": "socks", "settings": {"auth": "noauth", "udp": false}}],
+               "protocol": "socks", "settings": {"auth": "noauth", "udp": false},
+               "sniffing": {"enabled": true, "destOverride": ["http", "tls"], "routeOnly": false}}],
  "outbounds": [{"protocol": "freedom", "tag": "out", "settings": {"domainStrategy": "UseIP"}},
                {"protocol": "socks", "tag": "warp",
                 "settings": {"servers": [{"address": "$WARP_RELAY_HOST", "port": $WARP_RELAY_PORT}]}}],
