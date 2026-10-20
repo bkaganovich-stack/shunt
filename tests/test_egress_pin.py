@@ -102,3 +102,40 @@ class TestPreview:
         r = m.route_test("www.sony.com", settings())
         assert r["outbound"] == "proxy" and r["egress"] == "amnezia"
         assert "AmneziaWG" in r["note"] and "активный выход" in r["note"]
+
+
+class TestQuicOnTcpOnlyEgress:
+    """2.32.2: QUIC for sites pinned to WARP (TCP only) is refused, so browsers use TCP."""
+    GOOGLE = [{"kind": "domain", "value": d, "route": "egress:warp"} for d in ("google.com", "youtube.com")]
+
+    def warp(self, rules):
+        s = settings(rules)
+        s["egresses"]["warp"] = {"enabled": True}
+        return s
+
+    def test_quic_is_blocked_ahead_of_the_pin(self):
+        rules = build(self.warp(self.GOOGLE))["routing"]["rules"]
+        i_block = next(i for i, r in enumerate(rules) if r.get("domain") == ["domain:google.com"] and r.get("network") == "udp")
+        i_pin = next(i for i, r in enumerate(rules) if r.get("domain") == ["domain:google.com"] and r.get("balancerTag"))
+        assert i_block < i_pin and rules[i_block]["outboundTag"] == "block" and rules[i_block]["port"] == "443"
+
+    def test_googles_front_ends_are_blocked_once_for_unreadable_hellos(self):
+        rules = build(self.warp(self.GOOGLE))["routing"]["rules"]
+        ip_blocks = [r for r in rules if r.get("ip") == m.GOOGLE_FRONTENDS]
+        assert len(ip_blocks) == 1 and ip_blocks[0]["network"] == "udp" and ip_blocks[0]["outboundTag"] == "block"
+        assert "34.117.0.0/16" not in m.GOOGLE_FRONTENDS          # Google Cloud customers keep QUIC
+
+    def test_an_egress_that_carries_udp_keeps_quic(self):
+        rules = build(settings([SONY]))["routing"]["rules"]
+        assert not any(r.get("outboundTag") == "block" and r.get("network") == "udp" for r in rules)
+
+    def test_a_switched_off_warp_pin_blocks_nothing(self):
+        s = settings(self.GOOGLE)
+        s["egresses"]["warp"] = {"enabled": False}
+        assert not any(r.get("network") == "udp" and r.get("outboundTag") == "block"
+                       for r in build(s)["routing"]["rules"])
+
+    def test_dns_split_ignores_the_quic_rules(self):
+        import dnssplit
+        rules = m._compiled_rules(self.warp(self.GOOGLE), "proxy")
+        assert dnssplit.Matcher(rules, {}).route("www.google.com") == "balancer:pin-warp"

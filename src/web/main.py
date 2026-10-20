@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.32.1"
+VERSION = "2.32.2"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -953,6 +953,40 @@ def _pinned_target(settings: dict, ident: str, final: str) -> dict:
     return {"balancerTag": "pin-" + ident}
 
 
+# Google's own front ends (its services, not Google Cloud customers, which
+# geoip:google also holds): where a browser's QUIC to Google lands.
+GOOGLE_FRONTENDS = ["64.233.160.0/19", "66.102.0.0/20", "66.249.64.0/19", "72.14.192.0/18",
+                    "74.125.0.0/16", "108.177.0.0/17", "142.250.0.0/15", "172.217.0.0/16",
+                    "172.253.0.0/16", "173.194.0.0/16", "209.85.128.0/17", "216.58.192.0/19",
+                    "216.239.32.0/19"]
+_GOOGLE_DOMAINS = ("google.com", "googleapis.com", "gstatic.com", "youtube.com", "googlevideo.com",
+                   "ytimg.com", "ggpht.com", "googleusercontent.com")
+
+
+def _is_google(value: str) -> bool:
+    return any(value == d or value.endswith("." + d) for d in _GOOGLE_DOMAINS)
+
+
+def _quic_block(field: str, value: str, reason: str, ip_done: bool) -> list[dict]:
+    """
+    QUIC (UDP 443) for a site pinned to an egress that carries TCP only.
+
+    WARP's proxy has no UDP, so QUIC sent to it dies -- and QUIC whose name
+    xray cannot read (Chrome's post-quantum hello often spans two packets) is
+    not pinned at all and leaves through the house's egress, where Google sees
+    Russia (2026-10-20: 526 such connections against 1152 lost in WARP).
+    Refused outright instead, browsers fall back to TCP at once, where the name
+    is read reliably and the pin holds. For Google the refusal also covers its
+    front-end addresses, for the hellos with no readable name.
+    """
+    out = [{"type": "field", "network": "udp", "port": "443", field: [value],
+            "outboundTag": "block", "_reason": reason + ":quic"}]
+    if field == "domain" and not ip_done and _is_google(value.split(":", 1)[-1]):
+        out.append({"type": "field", "network": "udp", "port": "443", "ip": GOOGLE_FRONTENDS,
+                    "outboundTag": "block", "_reason": reason + ":quic-google"})
+    return out
+
+
 def _pinned_extras(settings: dict, rules: list[dict]) -> tuple[list, list, Optional[dict]]:
     """Outbounds, balancers and the observatory the pinned rules need."""
     pinned = sorted({r["balancerTag"][4:] for r in rules if str(r.get("balancerTag", "")).startswith("pin-")})
@@ -986,13 +1020,17 @@ def _profile_rules(settings, ident, final):
     # Exact availability constraint takes priority over any automatic tunnel rule.
     if ident in ("blocked_only", "all_except_ru") or settings.get("custom_profiles", {}).get(ident, {}).get("copied_from") in ("blocked_only", "all_except_ru"):
         add("domain", ["geosite:ru-available-only-inside"], "direct", "geosite:ru-available-only-inside")
+    quic_ip_done = False
     for index, rule in enumerate(config["custom_rules"]):
         field = "ip" if rule["kind"] == "ip" else "domain"
         value = rule["value"] if field == "ip" else rule["kind"] + ":" + rule["value"]
         reason = "profile:custom:" + str(index + 1)
         if rule["route"].startswith("egress:"):
-            rules.append({"type": "field", field: [value], "_reason": reason,
-                          **_pinned_target(settings, rule["route"][7:], final)})
+            target = _pinned_target(settings, rule["route"][7:], final)
+            if "balancerTag" in target and _eg.catalog(settings).get(rule["route"][7:], {}).get("tcp_only"):
+                rules.extend(_quic_block(field, value, reason, quic_ip_done))
+                quic_ip_done = quic_ip_done or (field == "domain" and _is_google(rule["value"]))
+            rules.append({"type": "field", field: [value], "_reason": reason, **target})
         else:
             add(field, [value], final if rule["route"] == "tunnel" else "direct", reason)
     if config["apple_vpn"]:

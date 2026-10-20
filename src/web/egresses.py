@@ -43,7 +43,7 @@ CATALOG = {
     # refused both, while a Cloudflare address in Miami stayed American.
     # It has no unit of its own: it lives and dies with AmneziaWG's.
     "warp":        {"label": "Cloudflare WARP (через каскад)", "host": "192.168.244.6", "port": 1086,
-                    "via": "amnezia"},
+                    "via": "amnezia", "tcp_only": True},
 }
 # Until the user says otherwise: AdGuard carries the house, the cascade is the
 # first reserve (agreed 2026-10-12), FPTN the last.

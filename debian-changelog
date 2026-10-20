@@ -1,3 +1,17 @@
+shunt (2.32.2) stable; urgency=medium
+
+  * QUIC is refused for sites pinned to an egress that carries TCP only
+    (WARP). WARP's proxy has no UDP, so QUIC sent to it died; and QUIC whose
+    name xray could not read -- Chrome's post-quantum hello often spans two
+    packets -- was not pinned at all and left through the house's egress,
+    where Google sees Russia. Google showed "Russia" in a browser while the
+    same search over TCP came from Miami. Refused, browsers fall back to TCP
+    at once, where the name is read reliably and the pin holds. For Google
+    the refusal also covers its own front-end addresses (not Google Cloud
+    customers), for hellos with no readable name.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Tue, 20 Oct 2026 15:14:12 +0300
+
 shunt (2.32.1) stable; urgency=medium
 
   * The WARP egress is handed the site's name, not its address. The house's
