@@ -810,7 +810,6 @@
     "Имя или адрес. Ответ учитывает все три слоя: перехват, выбор ядра, решение xray.": "A name or an address. The answer covers all three layers: interception, the kernel's choice, xray's decision.",
     "Проверки идут по порядку и останавливаются на первой неуспешной. Всё, что ниже неё, — следствие.": "Checks run in order and stop at the first failure. Everything below it is a consequence.",
     "Настройки опираются на то, как ведёт себя провайдер. Эти допущения перечислены здесь и проверяются.": "The configuration depends on how the provider behaves. Those assumptions are listed here and checked.",
-    "Сколько байт прошло за секунду измерения.": "Bytes that passed during one second of measurement.",
     "Счётчики правил, которые решают, кого забирать в туннель. Отсутствующее правило показано как отсутствующее.": "Counters for the rules that decide what goes into the tunnel. A missing rule is shown as missing.",
     "Каждому задан реальный запрос со случайным именем — измеряется путь, а не кэш.": "Each is asked a real query with a random name, so the path is measured rather than the cache.",
     "Шлюз проверяет домены, которыми вы пользуетесь, двумя путями — напрямую и через туннель — и отправляет в туннель то, что работает только через него. Домен уезжает в туннель не раньше, чем покажет себя заблокированным дважды подряд.": "The gateway probes the domains you use down both paths — direct and through the tunnel — and tunnels whatever only works that way. A domain is not routed until it has looked blocked on two consecutive runs.",
@@ -1202,7 +1201,18 @@
     "Если задан — через этот upstream резолвятся .ru, .local и все имена, которые правила маршрутизации отправляют напрямую (например, DNS провайдера). Так российские сервисы на других зонах (avito.st, yandex.net, vk.com) отдают российские узлы, а не зарубежные": "When set, .ru, .local and every name the routing rules send direct are resolved through this upstream (the ISP's DNS, for instance), so Russian services on other zones (avito.st, yandex.net, vk.com) hand out Russian nodes rather than foreign ones",
     "верхний резолвер для имён, которые идут напрямую (.ru, .local и российские сервисы)": "upstream for names routed direct (.ru, .local and Russian services)",
     "Имена, которые идут напрямую": "Names routed direct",
-    ".ru, .local и всё, что правила маршрутизации отправляют напрямую, — чтобы российские сервисы отвечали российскими адресами. Заблокированные сайты в .ru идут через туннель и разрешаются там же": ".ru, .local and everything the routing rules send direct, so Russian services answer with Russian addresses. Blocked sites under .ru go through the tunnel and are resolved there"
+    ".ru, .local и всё, что правила маршрутизации отправляют напрямую, — чтобы российские сервисы отвечали российскими адресами. Заблокированные сайты в .ru идут через туннель и разрешаются там же": ".ru, .local and everything the routing rules send direct, so Russian services answer with Russian addresses. Blocked sites under .ru go through the tunnel and are resolved there",
+    "Сколько байт прошло за секунду измерения через выход, который сейчас несёт трафик.": "How many bytes passed in one second of measurement through the egress that carries the traffic now.",
+    "для этого выхода счётчиков нет": "no counters for this egress",
+    "Cloudflare WARP · через каскад, Майами": "Cloudflare WARP · via the cascade, Miami",
+    "Cloudflare WARP (через каскад)": "Cloudflare WARP (via the cascade)",
+    "Где работает": "Runs on",
+    "на сервере каскада в Майами": "the cascade server in Miami",
+    "Путь": "Path",
+    "через AmneziaWG": "through AmneziaWG",
+    "Своих ключей у этого выхода нет: клиент WARP зарегистрирован на сервере в Майами и проверяется там командой": "This egress has no keys of its own: the WARP client is registered on the Miami server and is checked there with",
+    "Если выключить AmneziaWG, выключится и он.": "Switching AmneziaWG off switches it off too.",
+    "Выход": "Egress"
   },
   "patterns": [
     [

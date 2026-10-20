@@ -848,7 +848,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
       <div class="card">
         <div class="card-title">Трафик выхода</div>
         <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-          Сколько байт прошло за секунду измерения.</p>
+          Сколько байт прошло за секунду измерения через выход, который сейчас несёт трафик.</p>
         <div id="path-egress"><span class="text-muted">загрузка…</span></div>
       </div>
 
@@ -3049,13 +3049,15 @@ function renderPathLink(d) {
 function renderPathEgress(e) {
   const el = document.getElementById('path-egress');
   if (!e.available) {
-    el.innerHTML = '<span class="text-muted">счётчики выхода недоступны</span>';
+    el.innerHTML = e.label ? row('Выход', escHtml(e.label)) + '<span class="text-muted">для этого выхода счётчиков нет</span>'
+                           : '<span class="text-muted">счётчики выхода недоступны</span>';
     return;
   }
   const live = e.carrying
     ? '<span style="color:var(--green)">несёт трафик</span>'
     : '<span style="color:var(--yellow)">за секунду измерения — ни байта</span>';
-  let h = row('Сейчас', live);
+  let h = e.label ? row('Выход', escHtml(e.label)) : '';
+  h += row('Сейчас', live);
   h += row('Наружу / внутрь', bpsHuman(e.up_bps) + ' / ' + bpsHuman(e.down_bps), 'monospace');
   h += row('Всего с запуска',
            bytesHuman(e.up_bytes_total) + ' / ' + bytesHuman(e.down_bytes_total), 'monospace');
@@ -4522,6 +4524,7 @@ const EG_KIND = {
   amnezia: 'AmneziaWG 2.0 · свой каскад',
   trusttunnel: 'TrustTunnel · свой каскад',
   fptn: 'Подписка FPTN',
+  warp: 'Cloudflare WARP · через каскад, Майами',
 };
 const KEY_TYPES = [
   ['ss', 'Shadowsocks', 'ss://…@сервер:порт#имя'],
@@ -4665,7 +4668,7 @@ function connCard(e) {
     </div>`;
   return `<div class="card conn-card" id="conn-${id}">
     <div class="conn-head">
-      <div><div class="conn-name">${escHtml(e.label.replace(/ \(свой каскад\)$/, ''))}</div><span class="conn-kind">${escHtml(egKind(e))}</span></div>
+      <div><div class="conn-name">${escHtml(e.label.replace(/ \((свой|через) каскад\)$/, ''))}</div><span class="conn-kind">${escHtml(egKind(e))}</span></div>
       <span class="badge ${st.badge}">${escHtml(st.short || st.text)}</span>
     </div>
     ${probe}
@@ -4677,6 +4680,13 @@ function connCard(e) {
 
 function connAccess(e) {
   const id = e.id;
+  if (id === 'warp') return `<div class="conn-block">
+      <div class="conn-block-title">Доступ</div>
+      <div class="info-row"><span class="info-key">Где работает</span><span class="info-val">на сервере каскада в Майами</span></div>
+      <div class="info-row"><span class="info-key">Путь</span><span class="info-val">через AmneziaWG</span></div>
+      <p class="conn-hint">Своих ключей у этого выхода нет: клиент WARP зарегистрирован на сервере в Майами и проверяется там командой <code>warp-cli status</code>.</p>
+      <p class="conn-hint">Если выключить AmneziaWG, выключится и он.</p>
+    </div>`;
   if (e.kind === 'key') {
     const k = e.key || {}, open = !!_conn.editing[id];
     const where = k.server ? k.server + ':' + k.port : '';
@@ -4738,6 +4748,7 @@ function connAccess(e) {
 
 function connParams(e) {
   const id = e.id, p = e.params || {}, f = e.config_facts || {};
+  if (id === 'warp') return '';
   let rows = '';
   if (id === 'adguard') {
     const ag = _conn.ag || {};

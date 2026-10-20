@@ -56,7 +56,7 @@ class TestValidation:
 
     def test_editor_is_offered_every_egress_in_order(self):
         ids = [e["id"] for e in profiles.catalog(settings())["egresses"]]
-        assert ids == ["adguard", "amnezia", "trusttunnel", "fptn"]
+        assert ids == ["adguard", "amnezia", "trusttunnel", "fptn", "warp"]
 
 
 class TestCompiled:

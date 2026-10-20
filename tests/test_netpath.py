@@ -310,3 +310,16 @@ def test_lease_does_not_invent_renewal_timer_or_round_to_zero_hours():
     assert '45 мин' in note
     assert 'Запрос продления' not in note
     assert '0 ч' not in note
+
+
+class TestEgressCounter:
+    """2.32: count the egress carrying the house, not always AdGuard's port."""
+    def test_veth_counters_of_an_isolated_egress(self, monkeypatch):
+        reads = iter([{"up_bytes": 1000, "down_bytes": 5000}, {"up_bytes": 2000, "down_bytes": 9000}])
+        monkeypatch.setattr(np, "_iface_bytes", lambda iface: next(reads))
+        monkeypatch.setattr(np.time, "sleep", lambda s: None)
+        r = np.egress_rate(1.0, {"kind": "iface", "iface": "veg-am", "label": "AmneziaWG"})
+        assert r["carrying"] and r["up_bps"] == 8000 and r["down_bps"] == 32000 and r["label"] == "AmneziaWG"
+
+    def test_an_egress_without_counters_says_so(self):
+        assert np.egress_rate(1.0, {"kind": "none", "label": "Ключ"}) == {"available": False, "label": "Ключ"}

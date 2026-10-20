@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.31.0"
+VERSION = "2.32.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -3201,6 +3201,27 @@ def _unit_state(unit: str) -> str:
     return r.stdout.strip() or "unknown"
 
 
+# Where each egress's bytes can be counted. AdGuard's CLI is a local process,
+# so the accounting chain counts its SOCKS port; the isolated egresses each
+# have a veth to their namespace, whose host side sends what goes out (tx) and
+# receives what comes back (rx). A key egress is xray's own outbound and has
+# neither. Until 2.32 only AdGuard was counted, and the diagnostics page said
+# "not a byte" for as long as the house rode the cascade.
+_EGRESS_IFACE = {"amnezia": "veg-am", "warp": "veg-am", "trusttunnel": "veg-tt", "fptn": "veth-fptn"}
+
+
+def _egress_counter(settings: dict) -> dict:
+    ident = _eg.active(settings)
+    if not ident:
+        return {"kind": "none"}
+    label = _eg.label(settings, ident)
+    if ident == "adguard":
+        return {"kind": "acct", "label": label}
+    if ident in _EGRESS_IFACE:
+        return {"kind": "iface", "iface": _EGRESS_IFACE[ident], "label": label}
+    return {"kind": "none", "label": label}
+
+
 def _egress_prev_path(ident: str) -> Optional[Path]:
     """The previous credentials kept beside the current ones, if any."""
     if ident == "fptn":
@@ -3259,6 +3280,7 @@ async def get_egresses(u: str = Depends(auth_dep)):
                "configured": _eg.configured(e), "enabled": _eg.enabled(s, e),
                "primary": bool(cands) and cands[0] == e, "active": e == active,
                "alive": ok, "service": _unit_state(c["unit"]) if "unit" in c else
+               _unit_state(cat[c["via"]]["unit"]) if c.get("via") else
                xray if c.get("key") else _unit_state("adguardvpn.service"),
                "socks": "%s:%s" % _eg.socks(s, e),
                "config_updated": _egress_config_mtime(e),
@@ -4324,7 +4346,8 @@ async def network_path(u: str = Depends(auth_dep)):
     tunnel and no traffic, and only the combination said so.
     """
     conf = _net_conf()
-    return _np.snapshot(conf.get("WAN_IF", ""), conf.get("LAN_IF") or None)
+    return _np.snapshot(conf.get("WAN_IF", ""), conf.get("LAN_IF") or None,
+                        egress=_egress_counter(load_settings()))
 
 @app.get("/api/path/to")
 async def network_path_to(target: str, u: str = Depends(auth_dep)):

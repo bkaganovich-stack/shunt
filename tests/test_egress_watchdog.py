@@ -25,7 +25,7 @@ REAL_FETCH = wd.fetch
 def services_answer(monkeypatch):
     """No test reaches the network; the services accept the exit unless a
     test says otherwise."""
-    monkeypatch.setattr(wd, "fetch", lambda url: (200, {}, ""))
+    monkeypatch.setattr(wd, "fetch", lambda url, socks=None: (200, {}, ""))
 
 
 class TestWatchdogAttention:
@@ -200,7 +200,7 @@ class TestServiceRefusals:
         asked = []
         current = [None]
 
-        def fetch(url):
+        def fetch(url, socks=None):
             asked.append(url)
             if url.endswith("/cdn-cgi/trace"):
                 return (200, {}, TRACE[url]) if url in TRACE else (0, {}, "")
@@ -324,3 +324,36 @@ class TestMeasuresTheActiveEgress:
         TestSlowTunnel()._run(monkeypatch, tmp_path, [0.3, 0.4])
         [item] = [i for i in json.loads(wd.ATTENTION.read_text()) if not i.get("cleared")]
         assert "AmneziaWG" in item["detail"] and "AdGuard" not in item["detail"]
+
+
+class TestServiceEgress:
+    """A service pinned to an egress is checked through it (2.32)."""
+    def _settings(self, tmp_path, monkeypatch, route, warp_on=True):
+        s = {"profile": "all_except_ru", "egress_order": ["amnezia", "adguard"],
+             "adguard": {"enabled": True},
+             "egresses": {"amnezia": {"enabled": True}, "warp": {"enabled": warp_on}},
+             "profile_overrides": {"all_except_ru": {"custom_rules": [
+                 {"kind": "domain", "value": "google.com", "route": route}]}}}
+        p = tmp_path / "settings.json"
+        p.write_text(json.dumps(s))
+        monkeypatch.setattr(wd, "SETTINGS", p)
+        import egresses
+        monkeypatch.setattr(egresses, "configured", lambda ident, base=None: True)
+
+    def test_pinned_service_uses_its_egress(self, tmp_path, monkeypatch):
+        self._settings(tmp_path, monkeypatch, "egress:warp")
+        assert wd.egress_for("gemini.google.com")[2] == "192.168.244.6:1086"
+        assert wd.egress_for("claude.ai")[2] == "192.168.244.6:1083"     # the house's
+
+    def test_a_pin_to_a_switched_off_egress_falls_back(self, tmp_path, monkeypatch):
+        self._settings(tmp_path, monkeypatch, "egress:warp", warp_on=False)
+        assert wd.egress_for("gemini.google.com")[0] == "amnezia"
+
+    def test_refusal_names_the_egress_it_was_checked_through(self, tmp_path, monkeypatch):
+        self._settings(tmp_path, monkeypatch, "egress:warp")
+        seen = {}
+        monkeypatch.setattr(wd, "fetch", lambda url, socks=None: seen.setdefault(url, socks) and (200, {}, ""))
+        via = {}
+        wd.refused_services(via)
+        assert seen["https://gemini.google.com/app"] == "192.168.244.6:1086"
+        assert via == {"Gemini": "Cloudflare WARP (через каскад)"}

@@ -1,3 +1,24 @@
+shunt (2.32.0) stable; urgency=medium
+
+  * A new egress, Cloudflare WARP, run on the cascade's Miami server and
+    reached through the AmneziaWG tunnel: a second port on its bridge
+    (192.168.244.6:1086) leads to a relay on the cascade link. On 2026-10-20
+    Google began placing the NetGrid address -- and AdGuard's Atlanta one --
+    in Russia, and Gemini refused both; a Cloudflare address in Miami stayed
+    American (Gemini "USA", YouTube "US"). Profile rules can pin Google to it,
+    and like every pinned egress it falls back to the house's own when it
+    does not answer. It has no unit of its own and is on only while
+    AmneziaWG is.
+  * The service checks (Claude, ChatGPT, OpenAI API, Gemini) go through the
+    egress a profile rule pins each site to, not always the house's, and a
+    refusal names that egress.
+  * "Трафик выхода" on the diagnostics page counts the egress carrying the
+    house: AdGuard's SOCKS port as before, the veth of AmneziaWG, WARP,
+    TrustTunnel or FPTN otherwise. It said "not a byte" for as long as the
+    house rode the cascade.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Tue, 20 Oct 2026 14:35:20 +0300
+
 shunt (2.31.0) stable; urgency=medium
 
   * DNS follows the route. Until now only .ru and .local went to the Russian

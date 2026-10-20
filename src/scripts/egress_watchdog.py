@@ -75,6 +75,37 @@ def active_egress() -> tuple[str, str, str]:
     except Exception:
         pass
     return "adguard", "AdGuard VPN", SOCKS
+
+
+def egress_for(host: str) -> tuple[str, str, str]:
+    """
+    (id, label, socks) of the egress a site's traffic actually takes: the one
+    a profile rule pins it to, when that egress is on, else the house's.
+
+    Checking Gemini through the house's egress after Google was pinned to
+    WARP would keep reporting a refusal nobody meets (2026-10-20).
+    """
+    try:
+        import egresses as eg
+        import profiles
+        s = json.loads(SETTINGS.read_text())
+        profile = s.get("fallback_saved_profile") or s.get("profile", "all_except_ru")
+        for r in profiles.effective(s, profile).get("custom_rules", []):
+            v = r.get("value", "")
+            if r.get("kind") == "full" and host != v:
+                continue
+            if r.get("kind") == "domain" and not (host == v or host.endswith("." + v)):
+                continue
+            if r.get("kind") not in ("full", "domain"):
+                continue
+            route = r.get("route", "")
+            if route.startswith("egress:") and eg.enabled(s, route[7:]):
+                ident = route[7:]
+                return ident, eg.label(s, ident), "%s:%s" % eg.socks(s, ident)
+            break
+    except Exception:
+        pass
+    return active_egress()
 SPEED_EVERY = 900
 SLOW_MBIT = 2.0
 SLOW_CONFIRM = 2
@@ -243,11 +274,11 @@ GEMINI_REFUSED = {"ru": "Россия", "by": "Беларусь", "cn": "Кит�
 _GEMINI_TLD = re.compile(r'og\.qtm\.[a-z]{2}_[A-Z]{2}\.[^"]+\.O","([a-z.]{2,8})"')
 
 
-def fetch(url: str) -> tuple[int, dict, str]:
-    """One request through the tunnel, redirects not followed; status 0 when
-    nothing came back."""
+def fetch(url: str, socks: str | None = None) -> tuple[int, dict, str]:
+    """One request through the tunnel (the house's egress unless told which),
+    redirects not followed; status 0 when nothing came back."""
     cmd = ["curl", "-s", "-m", "15", "-A", UA, "-D", "-", "-o", "-",
-           "--socks5-hostname", active_egress()[2], url]
+           "--socks5-hostname", socks or active_egress()[2], url]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=25)
     except (OSError, subprocess.SubprocessError):
@@ -314,10 +345,16 @@ def exit_seen_by(host: str) -> str:
     return "%s (%s)" % (kv["ip"], kv.get("loc", "?"))
 
 
-def refused_services() -> dict:
+def refused_services(via: dict | None = None) -> dict:
+    """Services refusing their egress. `via` collects, per service, the label
+    of an egress other than the house's that it was checked through."""
     refused, answered = {}, False
+    house = active_egress()[0]
     for name, url, verdict, _ in SERVICE_CHECKS:
-        status, headers, body = fetch(url)
+        ident, label, socks = egress_for(url.split("/")[2])
+        if via is not None and ident != house:
+            via[name] = label
+        status, headers, body = fetch(url, socks)
         if not status:
             refused[name] = "не отвечает"
             continue
@@ -335,7 +372,8 @@ def check_services(state: dict) -> None:
     streak = sv.get("streak", 0)
     if not streak and now - sv.get("at", 0) < SERVICES_EVERY:
         return
-    refused = refused_services()
+    via: dict = {}
+    refused = refused_services(via)
     sv["at"] = now
     if not refused:
         if streak:
@@ -344,7 +382,8 @@ def check_services(state: dict) -> None:
         clear_attention("services")
         return
     sv["streak"] = streak + 1
-    listed = ", ".join("%s — %s" % kv for kv in refused.items())
+    listed = ", ".join("%s — %s" % (n, why + (" (выход «%s»)" % via[n] if n in via else ""))
+                       for n, why in refused.items())
     log("сервисы отказывают через туннель: %s (замер %d из %d)"
         % (listed, streak + 1, SERVICE_CONFIRM))
     if streak + 1 < SERVICE_CONFIRM:

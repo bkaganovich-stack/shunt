@@ -185,7 +185,7 @@ class TestTrustTunnelLoopback:
     def test_every_egress_is_a_plain_socks_address(self):
         # Probes, xray and the watchdog all speak to "the tunnel" with no auth.
         script = (ROOT / "src/scripts/egress-netns.sh").read_text()
-        assert script.count('"auth": "noauth"') == 2
+        assert script.count('"auth": "noauth"') == 3        # AmneziaWG, its WARP port, TrustTunnel
         assert "127.0.0.1:1085" in script
 
 

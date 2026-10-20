@@ -421,26 +421,49 @@ def parse_acct(iptables_output: str) -> dict:
     return out
 
 
-def egress_rate(sample_seconds: float = 1.0) -> dict:
+def _iface_bytes(iface: str) -> dict:
+    """A veth's host-side counters: tx is what goes out to the egress, rx what comes back."""
+    try:
+        base = "/sys/class/net/%s/statistics/" % iface
+        with open(base + "tx_bytes") as tx, open(base + "rx_bytes") as rx:
+            return {"up_bytes": int(tx.read()), "down_bytes": int(rx.read())}
+    except (OSError, ValueError):
+        return {}
+
+
+def egress_rate(sample_seconds: float = 1.0, egress: dict | None = None) -> dict:
     """
     Whether the tunnel is carrying anything, established by watching it carry.
 
     `systemctl is-active` was the old answer and it was the wrong question: the
     service was active through an outage in which nothing moved. Two samples of
     the byte counters a second apart cannot be wrong about that.
+
+    `egress` says whose bytes to count -- the egress carrying the house now
+    (main._egress_counter): AdGuard's SOCKS port in the accounting chain, or the
+    veth of an isolated egress. Without it, AdGuard's, as before 2.32.
     """
-    def read():
-        return parse_acct(_run("iptables", "-t", "mangle", "-L", "XRAY_ACCT",
-                               "-v", "-n", "-x"))
+    egress = egress or {"kind": "acct"}
+    label = egress.get("label")
+    if egress.get("kind") == "iface":
+        def read():
+            return _iface_bytes(egress["iface"])
+    elif egress.get("kind") == "acct":
+        def read():
+            return parse_acct(_run("iptables", "-t", "mangle", "-L", "XRAY_ACCT",
+                                   "-v", "-n", "-x"))
+    else:
+        return {"available": False, "label": label}
     a = read()
     if not a:
-        return {"available": False}
+        return {"available": False, "label": label}
     time.sleep(sample_seconds)
     b = read()
     up = b.get("up_bytes", 0) - a.get("up_bytes", 0)
     down = b.get("down_bytes", 0) - a.get("down_bytes", 0)
     return {
         "available": True,
+        "label": label,
         "up_bytes_total": b.get("up_bytes"),
         "down_bytes_total": b.get("down_bytes"),
         "up_bps": int(up * 8 / sample_seconds),
@@ -451,7 +474,8 @@ def egress_rate(sample_seconds: float = 1.0) -> dict:
 
 # ── the whole picture ─────────────────────────────────────────────────────────
 
-def snapshot(wan: str, lan: str | None = None, sample_seconds: float = 1.0) -> dict:
+def snapshot(wan: str, lan: str | None = None, sample_seconds: float = 1.0,
+             egress: dict | None = None) -> dict:
     """Everything above, in one reply, for one poll of the interface."""
     out = {
         "ts": int(time.time()),
@@ -459,7 +483,7 @@ def snapshot(wan: str, lan: str | None = None, sample_seconds: float = 1.0) -> d
         "counters": parse_rule_counters(
             _run("iptables", "-t", "mangle", "-L", "XRAY_PREROUTING",
                  "-v", "-n", "-x")),
-        "egress": egress_rate(sample_seconds),
+        "egress": egress_rate(sample_seconds, egress),
     }
     if lan:
         out["lan"] = {"link": parse_link(lan)}

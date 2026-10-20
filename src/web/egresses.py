@@ -36,10 +36,18 @@ CATALOG = {
                     "unit": "shunt-egress@trusttunnel.service"},
     "fptn":        {"label": "FPTN", "host": "192.168.244.2", "port": 1082,
                     "unit": "shunt-fptn-egress.service"},
+    # Cloudflare WARP on the Miami server, reached through the AmneziaWG tunnel:
+    # a second inbound on its bridge (egress-netns.sh) leads to the relay on
+    # the cascade link. Added 2026-10-20, when Google began placing the
+    # NetGrid address -- and AdGuard's Atlanta one -- in Russia and Gemini
+    # refused both, while a Cloudflare address in Miami stayed American.
+    # It has no unit of its own: it lives and dies with AmneziaWG's.
+    "warp":        {"label": "Cloudflare WARP (через каскад)", "host": "192.168.244.6", "port": 1086,
+                    "via": "amnezia"},
 }
 # Until the user says otherwise: AdGuard carries the house, the cascade is the
 # first reserve (agreed 2026-10-12), FPTN the last.
-DEFAULT_ORDER = ["adguard", "amnezia", "trusttunnel", "fptn"]
+DEFAULT_ORDER = ["adguard", "amnezia", "trusttunnel", "fptn", "warp"]
 CASCADE = ("amnezia", "trusttunnel")
 
 # ── Key-based servers ────────────────────────────────────────────────────────
@@ -100,6 +108,8 @@ def order(settings: dict) -> list[str]:
 
 def configured(ident: str, base: Path = EGRESS_DIR) -> bool:
     """A cascade egress exists only once the server has issued it a config."""
+    if ident in CATALOG and CATALOG[ident].get("via"):
+        return configured(CATALOG[ident]["via"], base)
     if ident not in CASCADE:
         return True
     try:
@@ -120,6 +130,9 @@ def enabled(settings: dict, ident: str, is_configured=None) -> bool:
     if is_key(ident):
         k = key_server(settings, ident)
         return bool(k and k.get("enabled", True) and k.get("socks_port"))
+    via = CATALOG.get(ident, {}).get("via")
+    if via and not enabled(settings, via, is_configured):
+        return False                      # its carrier is off: nothing to ride
     return bool((settings.get("egresses") or {}).get(ident, {}).get("enabled")) \
         and is_configured(ident)
 

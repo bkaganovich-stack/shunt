@@ -24,11 +24,11 @@ def step(s, up, fails=0):
 
 class TestOrder:
     def test_default_is_adguard_then_cascade_then_fptn(self):
-        assert eg.order({}) == ["adguard", "amnezia", "trusttunnel", "fptn"]
+        assert eg.order({}) == ["adguard", "amnezia", "trusttunnel", "fptn", "warp"]
 
     def test_saved_order_is_made_whole(self):
         s = {"egress_order": ["amnezia", "bogus", "amnezia", "fptn"]}
-        assert eg.order(s) == ["amnezia", "fptn", "adguard", "trusttunnel"]
+        assert eg.order(s) == ["amnezia", "fptn", "adguard", "trusttunnel", "warp"]
 
     def test_unconfigured_cascade_egress_is_never_a_candidate(self):
         s = settings()
@@ -101,3 +101,19 @@ class TestLadder:
         s = settings(adguard={"enabled": False}, fptn={"enabled": False},
                      egresses={"amnezia": {"enabled": False}})
         assert step(s, {"adguard"}) == (None, 0, "none")
+
+
+class TestWarp:
+    """WARP on the Miami server rides AmneziaWG's tunnel (2.32)."""
+    def test_it_is_only_on_while_its_carrier_is(self):
+        on = {"egresses": {"amnezia": {"enabled": True}, "warp": {"enabled": True}}}
+        assert eg.enabled(on, "warp", ALL)
+        assert not eg.enabled({"egresses": {"warp": {"enabled": True}}}, "warp", ALL)
+        assert not eg.enabled({"egresses": {"amnezia": {"enabled": True}}}, "warp", ALL)
+
+    def test_it_is_configured_when_amnezia_is(self):
+        assert eg.configured("warp", base=Path("/nonexistent")) is False
+
+    def test_its_address_is_a_port_on_the_amnezia_bridge(self):
+        assert eg.socks({}, "warp") == ("192.168.244.6", 1086)
+        assert "unit" not in eg.CATALOG["warp"]        # toggling it never stops AmneziaWG

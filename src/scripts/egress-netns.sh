@@ -31,6 +31,8 @@ case "$NAME" in
     *) echo "usage: $0 <amnezia|trusttunnel> {setup|run|teardown|status}" >&2; exit 2 ;;
 esac
 VETH=veg-$TAG; VETH_NS=veg-$TAG-ns
+# Cloudflare WARP on the cascade's exit (Miami), via its relay on the link.
+WARP_PORT=1086; WARP_RELAY_HOST=10.99.0.2; WARP_RELAY_PORT=40001
 
 setup() {
     teardown >/dev/null 2>&1
@@ -76,12 +78,20 @@ run_amnezia() {
     ip -n "$NS" link set awg0 mtu "$MTU" up
     ip -n "$NS" route add "$ENDPOINT_IP/32" via "$HOSTIP"
     ip -n "$NS" route replace default dev awg0
+    # A second port leads to Cloudflare WARP on the Miami server (warp-relay
+    # there, reachable only through this tunnel): the "warp" egress. TCP only
+    # -- the WARP client's proxy does not carry UDP; QUIC falls back to TCP.
     cat > "$RUN/bridge.json" <<JSON
 {"log": {"loglevel": "warning"},
  "dns": {"servers": ["${DNS:-1.1.1.1}"]},
  "inbounds": [{"tag": "socks-in", "listen": "$NSIP", "port": $PORT,
-               "protocol": "socks", "settings": {"auth": "noauth", "udp": true}}],
- "outbounds": [{"protocol": "freedom", "tag": "out", "settings": {"domainStrategy": "UseIP"}}]}
+               "protocol": "socks", "settings": {"auth": "noauth", "udp": true}},
+              {"tag": "warp-in", "listen": "$NSIP", "port": $WARP_PORT,
+               "protocol": "socks", "settings": {"auth": "noauth", "udp": false}}],
+ "outbounds": [{"protocol": "freedom", "tag": "out", "settings": {"domainStrategy": "UseIP"}},
+               {"protocol": "socks", "tag": "warp",
+                "settings": {"servers": [{"address": "$WARP_RELAY_HOST", "port": $WARP_RELAY_PORT}]}}],
+ "routing": {"rules": [{"type": "field", "inboundTag": ["warp-in"], "outboundTag": "warp"}]}}
 JSON
     chmod 644 "$RUN/bridge.json"; chmod 711 "$RUN"
     ip netns exec "$NS" setpriv --reuid=$BRIDGE_UID --regid=$BRIDGE_UID --clear-groups \

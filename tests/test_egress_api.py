@@ -38,7 +38,7 @@ def api(monkeypatch):
 def test_listing_is_in_the_users_order_with_state(api):
     client, *_ = api
     d = client.get("/api/egresses").json()
-    assert [e["id"] for e in d["egresses"]] == ["adguard", "amnezia", "trusttunnel", "fptn"]
+    assert [e["id"] for e in d["egresses"]] == ["adguard", "amnezia", "trusttunnel", "fptn", "warp"]
     row = {e["id"]: e for e in d["egresses"]}
     assert row["adguard"]["primary"] and row["adguard"]["active"] and row["adguard"]["alive"]
     assert not row["amnezia"]["enabled"] and row["amnezia"]["configured"]
@@ -58,7 +58,7 @@ def test_enabling_a_cascade_egress_starts_its_unit(api):
 def test_moving_a_live_egress_to_the_top_takes_over_at_once(api):
     client, state, runs, applied, _ = api
     client.put("/api/egresses", json={"enabled": {"amnezia": True}})
-    r = client.put("/api/egresses", json={"order": ["amnezia", "adguard", "trusttunnel", "fptn"]})
+    r = client.put("/api/egresses", json={"order": ["amnezia", "adguard", "trusttunnel", "fptn", "warp"]})
     assert r.json()["active"] == "amnezia" and applied == ["egress_order"]
 
 
@@ -67,13 +67,13 @@ def test_a_dead_new_primary_is_left_to_the_fallback_loop(api):
     client.put("/api/egresses", json={"enabled": {"amnezia": True}})
     alive["192.168.244.6:1083"] = False
     state["egress_active"] = "adguard"
-    r = client.put("/api/egresses", json={"order": ["amnezia", "adguard", "trusttunnel", "fptn"]})
+    r = client.put("/api/egresses", json={"order": ["amnezia", "adguard", "trusttunnel", "fptn", "warp"]})
     assert r.json()["active"] == "adguard" and applied == []
 
 
 @pytest.mark.parametrize("body", [
     {"order": ["adguard", "amnezia"]},                       # incomplete
-    {"order": ["adguard", "adguard", "trusttunnel", "fptn"]},  # duplicate
+    {"order": ["adguard", "adguard", "trusttunnel", "fptn", "warp"]},  # duplicate
     {"enabled": {"nope": True}},                              # no such egress
     {"enabled": {"trusttunnel": True}},                       # no config issued yet
 ])
@@ -274,7 +274,7 @@ def test_keys_take_part_in_order_and_switches(api):
     client, state, runs, applied, alive = api
     ident = _add(client)
     alive["127.0.0.1:11001"] = True
-    order = [ident, "adguard", "amnezia", "trusttunnel", "fptn"]
+    order = [ident, "adguard", "amnezia", "trusttunnel", "fptn", "warp"]
     r = client.put("/api/egresses", json={"order": order})
     assert r.status_code == 200 and r.json()["active"] == ident
     r = client.put("/api/egresses", json={"enabled": {ident: False}})
