@@ -1,3 +1,12 @@
+shunt (2.32.3) stable; urgency=medium
+
+  * The quick check behind "работает" / "не отвечает" on the egress pages
+    allows 6 s instead of 3 for an egress that rides another one. WARP goes
+    through AmneziaWG and two SOCKS hops and answers in 1.4-2.4 s, sometimes
+    more; its card read "не отвечает" while it carried Google for the house.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Wed, 21 Oct 2026 01:21:01 +0300
+
 shunt (2.32.2) stable; urgency=medium
 
   * QUIC is refused for sites pinned to an egress that carries TCP only

@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.32.2"
+VERSION = "2.32.3"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -3222,16 +3222,26 @@ async def set_auto_fallback(req: AutoFallbackReq, u: str = Depends(auth_dep)):
 
 
 # ── Egresses: order and the own cascade ───────────────────────────────────────
-async def _quick_alive(host: str, port: int) -> bool:
+async def _quick_alive(host: str, port: int, timeout: int = 3) -> bool:
     try:
         p = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-o", "/dev/null", "-m", "3", "-w", "%{http_code}",
+            "curl", "-s", "-o", "/dev/null", "-m", str(timeout), "-w", "%{http_code}",
             "--socks5", "%s:%s" % (host, port), "http://cp.cloudflare.com/generate_204",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         out, _ = await p.communicate()
         return out.decode().strip() == "204"
     except Exception:
         return False
+
+
+def _probe_timeout(settings: dict, ident: str) -> int:
+    """
+    Seconds a quick check may take. An egress that rides another one -- WARP
+    through AmneziaWG, two SOCKS hops and ~290 ms each way -- answers in
+    1.4-2.4 s and sometimes more; at 3 s the page called it dead while it
+    carried Google for the house (2026-10-21).
+    """
+    return 6 if _eg.catalog(settings).get(ident, {}).get("via") else 3
 
 
 def _unit_state(unit: str) -> str:
@@ -3308,7 +3318,7 @@ async def get_egresses(u: str = Depends(auth_dep)):
     order = _eg.order(s)
     cands = _eg.candidates(s)
     active = _eg.active(s)
-    alive = await asyncio.gather(*[_quick_alive(*_eg.socks(s, e)) for e in order])
+    alive = await asyncio.gather(*[_quick_alive(*_eg.socks(s, e), timeout=_probe_timeout(s, e)) for e in order])
     cat = _eg.catalog(s)
     xray = _unit_state("shunt")
     rows = []
@@ -3566,7 +3576,8 @@ async def set_egresses(req: EgressesReq, u: str = Depends(auth_dep)):
     # A new primary takes over at once if it is alive; a dead one is left to
     # the fallback loop, which will not move the house onto it.
     primary = (_eg.candidates(s) or [None])[0]
-    if primary and primary != _eg.active(s) and await _quick_alive(*_eg.socks(s, primary)):
+    if primary and primary != _eg.active(s) and await _quick_alive(*_eg.socks(s, primary),
+                                                                   timeout=_probe_timeout(s, primary)):
         s["egress_active"] = primary
     save_settings(s)
     applied = None

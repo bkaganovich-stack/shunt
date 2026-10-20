@@ -27,7 +27,7 @@ def api(monkeypatch):
     monkeypatch.setattr(m._eg, "configured", lambda ident, base=None: ident != "trusttunnel")
     alive = {"127.0.0.1:1081": True, "192.168.244.6:1083": True}
 
-    async def quick(host, port):
+    async def quick(host, port, timeout=3):
         return alive.get("%s:%s" % (host, port), False)
     monkeypatch.setattr(m, "_quick_alive", quick)
     m.app.dependency_overrides[m.auth_dep] = lambda: "test"
@@ -345,3 +345,17 @@ def test_status_names_a_key_egress_by_its_server_never_its_key(api, monkeypatch)
     assert d["egress"] == {"kind": "key", "id": ident, "label": "Frankfurt", "location": "Shadowsocks · 1.1.1.1"}
     assert d["vpn"]["server"] == "1.1.1.1" and d["vpn_server_count"] == 1
     assert "czE" not in r.text                                   # no part of the key
+
+
+def test_an_egress_riding_another_gets_a_longer_quick_check(api, monkeypatch):
+    client, state, *_ = api
+    state.setdefault("egresses", {})["amnezia"] = {"enabled": True}
+    state["egresses"]["warp"] = {"enabled": True}
+    seen = {}
+
+    async def quick(host, port, timeout=3):
+        seen["%s:%s" % (host, port)] = timeout
+        return True
+    monkeypatch.setattr(m, "_quick_alive", quick)
+    client.get("/api/egresses")
+    assert seen["192.168.244.6:1086"] == 6 and seen["192.168.244.6:1083"] == 3 and seen["127.0.0.1:1081"] == 3
