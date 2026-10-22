@@ -1,3 +1,18 @@
+shunt (2.32.5) stable; urgency=medium
+
+  * The box's NTP client (chrony, or timesyncd) reaches its servers directly
+    instead of through xray and the tunnel. After the power cut of
+    2026-10-22 the board's clock came back 35 days behind and chrony needed
+    9.5 minutes to get through a tunnel that itself needed the right time:
+    TrustTunnel's certificate was "not yet valid" to a box living in
+    September. Direct, the clock is set seconds after the provider answers.
+    NTS still authenticates the time.
+  * The cascade egresses wait up to 60 s for the clock to be synchronised
+    (after the WAN, before anything leaves), then start regardless. Their
+    start timeout is now 180 s to hold both waits.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Thu, 22 Oct 2026 15:10:00 +0300
+
 shunt (2.32.4) stable; urgency=medium
 
   * A cascade egress no longer starts before the house has a way out. After

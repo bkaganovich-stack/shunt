@@ -43,7 +43,7 @@ TT_NSIP=192.168.244.10    # TrustTunnel's bridge: WARP's second road (run_amnezi
 # kernel's conntrack then pinned that flow "no NAT" -- and keepalives every
 # 25 s kept it alive, so for 9 hours every packet went to the provider with
 # the source 192.168.244.6 and was dropped. TrustTunnel, restarted later,
-# was fine. Under TimeoutStartSec (90 s); systemd retries after that.
+# was fine. Together with wait_clock under the unit's TimeoutStartSec.
 wait_wan() {
     for _ in $(seq 75); do
         WAN=$(ip route show default | awk '/default/{print $5; exit}')
@@ -54,9 +54,23 @@ wait_wan() {
     return 1
 }
 
+# ...and the right time. The same night the board's clock came back 35 days
+# behind (a flat CMOS battery): TrustTunnel's certificate was "not yet valid"
+# and WireGuard's handshake timestamps looked like replays, until NTP -- which
+# now goes direct (iptables.sh) and needs only the WAN -- set it right. Not a
+# hard condition: past 60 s the egress starts anyway and retries on its own.
+wait_clock() {
+    for _ in $(seq 60); do
+        [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = yes ] && return 0
+        sleep 1
+    done
+    echo "clock not synchronised after 60 s -- starting anyway" >&2
+}
+
 setup() {
     teardown >/dev/null 2>&1
     wait_wan || exit 1
+    wait_clock
     install -d -m 700 "$RUN"
     ip netns add "$NS"
     ip link add "$VETH" type veth peer name "$VETH_NS"

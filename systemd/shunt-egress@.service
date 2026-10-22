@@ -13,6 +13,8 @@ Type=simple
 ExecStartPre=/opt/shunt/scripts/egress-netns.sh %i setup
 ExecStart=/opt/shunt/scripts/egress-netns.sh %i run
 ExecStopPost=/opt/shunt/scripts/egress-netns.sh %i teardown
+# setup waits for the WAN (75 s) and then the clock (60 s) before it starts.
+TimeoutStartSec=180
 Restart=always
 # Same backoff as FPTN: each failed start builds and tears down a veth, and
 # the AdGuard client reconnects on every link change it sees (Sep 25).

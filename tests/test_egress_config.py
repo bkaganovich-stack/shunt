@@ -245,9 +245,28 @@ class TestBootAndWarpFallback:
         setup = self.script[self.script.index("setup() {"):]
         assert setup.index("wait_wan || exit 1") < setup.index("MASQUERADE")
 
-    def test_wan_wait_ends_before_systemd_gives_up_on_the_start(self):
-        n = int(re.search(r"for _ in \$\(seq (\d+)\); do\n\s+WAN=", self.script).group(1))
-        assert n < 90                                       # TimeoutStartSec default
+    def test_waits_end_before_systemd_gives_up_on_the_start(self):
+        wan = int(re.search(r"for _ in \$\(seq (\d+)\); do\n\s+WAN=", self.script).group(1))
+        clock = int(re.search(r"for _ in \$\(seq (\d+)\); do\n\s+\[ \"\$\(timedatectl", self.script).group(1))
+        unit = (ROOT / "systemd/shunt-egress@.service").read_text()
+        limit = int(re.search(r"^TimeoutStartSec=(\d+)$", unit, re.M).group(1))
+        assert wan + clock + 20 <= limit
+
+    def test_the_clock_is_waited_for_after_the_wan_but_never_required(self):
+        setup = self.script[self.script.index("setup() {"):]
+        assert setup.index("wait_wan || exit 1") < setup.index("wait_clock") < setup.index("MASQUERADE")
+        body = self.script[self.script.index("wait_clock() {"):]
+        body = body[:body.index("\n}\n")]
+        assert "return 1" not in body and "exit" not in body
+
+    def test_ntp_goes_direct_not_through_a_tunnel(self):
+        ipt = (ROOT / "src/scripts/iptables.sh").read_text()
+        assert "for u in _chrony systemd-timesync; do id -u \"$u\" 2>/dev/null || true; done" in ipt
+        assert 'ip rule add uidrange "$_u-$_u" priority 50 lookup main' in ipt
+        assert 'ip rule del uidrange "$_u-$_u" priority 50 lookup main' in ipt
+        assert 'iptables -t mangle -A XRAY_OUTPUT -m owner --uid-owner "$_u" -j RETURN' in ipt
+        # Exempted before the catch-all marks that sends the box's own traffic to xray.
+        assert ipt.index('--uid-owner "$_u" -j RETURN') < ipt.index("-p udp -j MARK --set-mark $TPROXY_MARK")
 
     def test_no_route_in_main_means_unreachable_not_sing_box(self):
         assert 'ip rule add from "$SUB" priority 41 unreachable' in self.script

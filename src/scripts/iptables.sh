@@ -7,6 +7,8 @@ ACTION="${1:-up}"
 TPROXY_PORT=12345
 TPROXY_MARK=1
 XRAY_MARK=255   # mark on xray's own outbound sockets (set in xray config)
+# Whichever NTP client the box has (chrony on Ubuntu 26.04, timesyncd before).
+NTP_UIDS=$(for u in _chrony systemd-timesync; do id -u "$u" 2>/dev/null || true; done | tr '\n' ' ')
 
 # ── Resolve topology + interfaces ─────────────────────────────────────────────
 # Priority 1: network.conf written by install.sh / switch scripts
@@ -67,6 +69,7 @@ flush_rules() {
     done
     ip rule  del to 1.0.0.1/32 priority 50 lookup main 2>/dev/null || true
     ip rule  del uidrange 994-994 priority 50 lookup main 2>/dev/null || true
+    for _u in $NTP_UIDS; do ip rule del uidrange "$_u-$_u" priority 50 lookup main 2>/dev/null || true; done
     ip rule  del fwmark 0xff priority 40 lookup main 2>/dev/null || true
     ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null || true
     # DNS redirect cleanup — both old (LAN_IP-specific) and new (any dst) forms
@@ -160,6 +163,13 @@ for _dns in $(grep -hs '^DNS=' /run/systemd/netif/leases/* 2>/dev/null \
 done
 ip rule  add to 1.0.0.1/32 priority 50 lookup main 2>/dev/null || true
 ip rule  add uidrange 994-994 priority 50 lookup main 2>/dev/null || true   # AdGuard CLI (agvpn) egress -> direct
+# The clock's own way out: direct, like the AdGuard client's. NTP through a
+# tunnel is a circle -- the tunnels need the right time to come up (a TLS
+# certificate "not yet valid", WireGuard's handshake timestamps) and the time
+# needs a tunnel. After a power cut on 2026-10-22 the board's clock came back
+# 35 days behind and chrony needed 9.5 min to get through; TrustTunnel waited
+# for it. NTS authenticates the answer, so going direct costs nothing.
+for _u in $NTP_UIDS; do ip rule add uidrange "$_u-$_u" priority 50 lookup main 2>/dev/null || true; done
 ip route add local 0.0.0.0/0 dev lo table 100
 
 # ── PREROUTING: intercept forwarded LAN traffic ────────────────────────────
@@ -259,6 +269,9 @@ else
     echo "iptables: no agvpn account (adguardvpn-cli not installed) --" \
          "skipping its direct-egress exemption" >&2
 fi
+for _u in $NTP_UIDS; do   # the clock goes direct: see its ip rule above
+    iptables -t mangle -A XRAY_OUTPUT -m owner --uid-owner "$_u" -j RETURN
+done
 iptables -t mangle -A XRAY_OUTPUT -d 224.0.0.0/4   -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 240.0.0.0/4   -j RETURN
 iptables -t mangle -A XRAY_OUTPUT -d 100.64.0.0/10 -j RETURN
