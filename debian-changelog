@@ -1,3 +1,27 @@
+shunt (2.32.4) stable; urgency=medium
+
+  * A cascade egress no longer starts before the house has a way out. After
+    a power cut on 2026-10-22 AmneziaWG came up a minute before the
+    provider's DHCP answered; its first packets to Riga had no route in main,
+    fell through to sing-box's table and left un-NATed, and conntrack kept
+    that flow so -- keepalives every 25 s never let it expire. For 9 hours
+    every AWG packet left with the source 192.168.244.6 and was dropped,
+    and WARP, which rides AWG, went with it: the Google rules fell back to
+    the house egress and Gemini saw Russia. Now egress-netns.sh waits up to
+    75 s for a default route, refuses (rather than reroutes) its traffic when
+    main has none, and drops stale flows of its own once NAT is in place.
+  * The health monitor drops any cascade-egress flow that left without NAT,
+    and when AmneziaWG has had no handshake for 3 minutes while the house
+    reaches the internet it drops AWG's flows, then, if 3 more minutes change
+    nothing, restarts the egress (at most once per 15 minutes).
+  * WARP has a second road to Miami: when the road through AmneziaWG stops
+    answering, its bridge sends WARP traffic through TrustTunnel's, which
+    reaches the same relay. Riga allows TrustTunnel that one private address
+    and no other. Gemini keeps seeing the USA while AWG is down.
+  * Depends on conntrack.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Thu, 22 Oct 2026 14:30:00 +0300
+
 shunt (2.32.3) stable; urgency=medium
 
   * The quick check behind "работает" / "не отвечает" on the egress pages

@@ -245,3 +245,101 @@ class TestWhoIssuedTheAddress:
         self._setup(tmp_path, monkeypatch, "10.0.0.2/24", {"server": "10.0.0.1"})
         st = hm.note_wan_address({}, "enp1s0")
         assert st["wan_issuer"]["server"] == "10.0.0.1"
+
+
+# ── the own cascade's egresses (2026-10-22) ──────────────────────────────────
+CT = (
+    # the night's flow: answered to the private source -- never NATed
+    "udp      17 119 src=192.168.244.6 dst=31.58.46.52 sport=48519 dport=45587 "
+    "src=31.58.46.52 dst=192.168.244.6 sport=45587 dport=48519 [ASSURED] mark=0 use=1\n"
+    # a healthy one: answered to the WAN address
+    "udp      17 119 src=192.168.244.6 dst=31.58.46.52 sport=40001 dport=45587 "
+    "src=31.58.46.52 dst=100.116.102.41 sport=45587 dport=40001 [ASSURED] mark=0 use=1\n"
+    # bridge to bridge: private on purpose
+    "tcp      6 431999 ESTABLISHED src=192.168.244.6 dst=192.168.244.10 sport=5000 dport=1086 "
+    "src=192.168.244.10 dst=192.168.244.6 sport=1086 dport=5000 [ASSURED] mark=0 use=1\n"
+    "conntrack v1.4.8 (conntrack-tools): 3 flow entries have been shown.\n"
+)
+
+
+class TestUnnattedFlows:
+    def test_finds_only_the_flow_answered_to_the_private_source(self):
+        got = hm.unnatted_flows(CT, "192.168.244.6")
+        assert got == [{"proto": "udp", "src": "192.168.244.6", "dst": "31.58.46.52",
+                        "sport": "48519", "dport": "45587"}]
+
+    def test_other_sources_are_not_its_business(self):
+        assert hm.unnatted_flows(CT, "192.168.244.10") == []
+
+    def test_fix_deletes_exactly_that_flow(self, monkeypatch):
+        calls = []
+
+        def run(*cmd, timeout=20):
+            calls.append(cmd)
+            class R: returncode = 0; stdout = CT if cmd[:2] == ("conntrack", "-L") and "192.168.244.6" in cmd else ""; stderr = ""
+            return R()
+        monkeypatch.setattr(hm, "run", run)
+        monkeypatch.setattr(hm, "log", lambda m: None)
+        hm.fix_unnatted_flows()
+        deletes = [c for c in calls if c[:2] == ("conntrack", "-D")]
+        assert deletes == [("conntrack", "-D", "-p", "udp", "-s", "192.168.244.6", "-d", "31.58.46.52",
+                            "--sport", "48519", "--dport", "45587")]
+
+
+class TestCheckAwg:
+    NOW = 1_800_000_000.0
+
+    def _env(self, monkeypatch, handshake, up_for=3600, internet=True, active=True):
+        calls = []
+
+        def run(*cmd, timeout=20):
+            calls.append(cmd)
+            out = ""
+            if "latest-handshakes" in cmd:
+                out = "peerkey=\t%d\n" % handshake
+            class R: returncode = 0; stdout = out; stderr = ""
+            return R()
+        monkeypatch.setattr(hm, "run", run)
+        monkeypatch.setattr(hm, "log", lambda m: None)
+        monkeypatch.setattr(hm, "svc_active", lambda s: active)
+        monkeypatch.setattr(hm, "unit_up_for", lambda u: up_for)
+        monkeypatch.setattr(hm, "reaches_internet", lambda: internet)
+        return calls
+
+    @staticmethod
+    def _acts(calls):
+        return [c for c in calls if c[0] in ("conntrack", "systemctl")]
+
+    def test_fresh_handshake_is_left_alone(self, monkeypatch):
+        calls = self._env(monkeypatch, handshake=int(self.NOW) - 40)
+        assert hm.check_awg({"awg_stale": 1}, self.NOW) == {} and self._acts(calls) == []
+
+    def test_silent_first_drops_flows_then_restarts(self, monkeypatch):
+        calls = self._env(monkeypatch, handshake=int(self.NOW) - 900)
+        st = hm.check_awg({}, self.NOW)
+        assert self._acts(calls) == [("conntrack", "-D", "-s", "192.168.244.6")]
+        calls.clear()
+        st = hm.check_awg(st, self.NOW + 60)               # too soon for more
+        assert self._acts(calls) == []
+        st = hm.check_awg(st, self.NOW + hm.AWG_STALE_SEC)
+        assert self._acts(calls) == [("systemctl", "restart", "shunt-egress@amnezia")]
+        calls.clear()
+        hm.check_awg(st, self.NOW + 2 * hm.AWG_STALE_SEC)   # restarts are rationed
+        assert self._acts(calls) == []
+
+    def test_never_handshaken_counts_once_the_unit_had_time(self, monkeypatch):
+        calls = self._env(monkeypatch, handshake=0, up_for=60)
+        hm.check_awg({}, self.NOW)
+        assert self._acts(calls) == []
+        calls = self._env(monkeypatch, handshake=0, up_for=600)
+        hm.check_awg({}, self.NOW)
+        assert self._acts(calls) == [("conntrack", "-D", "-s", "192.168.244.6")]
+
+    def test_a_dead_wan_is_not_the_tunnels_fault(self, monkeypatch):
+        calls = self._env(monkeypatch, handshake=int(self.NOW) - 900, internet=False)
+        hm.check_awg({}, self.NOW)
+        assert self._acts(calls) == []
+
+    def test_stopped_egress_is_not_watched(self, monkeypatch):
+        calls = self._env(monkeypatch, handshake=0, active=False)
+        assert hm.check_awg({"awg_stale": 5}, self.NOW) == {} and self._acts(calls) == []

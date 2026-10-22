@@ -5,6 +5,7 @@ Configurations here are invented; the shapes are the ones the cascade server
 issues: awg-add.sh client configs (AmneziaWG 2.0, H ranges) and the
 TrustTunnel endpoint's toml export after the client's setup wizard.
 """
+import json
 import re
 import sys
 from pathlib import Path
@@ -185,7 +186,7 @@ class TestTrustTunnelLoopback:
     def test_every_egress_is_a_plain_socks_address(self):
         # Probes, xray and the watchdog all speak to "the tunnel" with no auth.
         script = (ROOT / "src/scripts/egress-netns.sh").read_text()
-        assert script.count('"auth": "noauth"') == 3        # AmneziaWG, its WARP port, TrustTunnel
+        assert script.count('"auth": "noauth"') == 4        # AmneziaWG, TrustTunnel, a WARP port on each
         assert "127.0.0.1:1085" in script
 
 
@@ -221,3 +222,67 @@ def test_warp_is_handed_names_not_addresses():
     script = (ROOT / "src/scripts/egress-netns.sh").read_text()
     inbound = script[script.index('"tag": "warp-in"'):script.index('"outbounds"', script.index('"tag": "warp-in"'))]
     assert '"destOverride": ["http", "tls"]' in inbound and '"routeOnly": false' in inbound
+
+
+def _bridges(script: str) -> dict:
+    """Both bridge configs as the script writes them, variables filled in."""
+    env = {"NSIP": "192.168.244.6", "PORT": "1083", "WARP_PORT": "1086", "DNS": "10.99.0.2",
+           "WARP_RELAY_HOST": "10.99.0.2", "WARP_RELAY_PORT": "40001", "TT_NSIP": "192.168.244.10"}
+    out = {}
+    for fn in ("run_amnezia", "run_trusttunnel"):
+        body = script[script.index(fn + "() {"):]
+        doc = body[body.index("<<JSON\n") + 7:body.index("\nJSON\n")]
+        doc = re.sub(r"\$\{DNS:-[^}]*\}", env["DNS"], doc)
+        out[fn] = json.loads(re.sub(r"\$([A-Z_]+)", lambda m: env[m.group(1)], doc))
+    return out
+
+
+class TestBootAndWarpFallback:
+    """2026-10-22: a power cut, an un-NATed AWG flow for 9 hours, WARP with it."""
+    script = (ROOT / "src/scripts/egress-netns.sh").read_text()
+
+    def test_setup_waits_for_the_wan_before_anything_leaves(self):
+        setup = self.script[self.script.index("setup() {"):]
+        assert setup.index("wait_wan || exit 1") < setup.index("MASQUERADE")
+
+    def test_wan_wait_ends_before_systemd_gives_up_on_the_start(self):
+        n = int(re.search(r"for _ in \$\(seq (\d+)\); do\n\s+WAN=", self.script).group(1))
+        assert n < 90                                       # TimeoutStartSec default
+
+    def test_no_route_in_main_means_unreachable_not_sing_box(self):
+        assert 'ip rule add from "$SUB" priority 41 unreachable' in self.script
+        assert 'ip rule del from "$SUB" priority 41 unreachable' in self.script
+
+    def test_stale_flows_are_dropped_after_nat_is_in_place(self):
+        setup = self.script[self.script.index("setup() {"):]
+        assert setup.index("MASQUERADE") < setup.index('conntrack -D -s "$NSIP"')
+
+    def test_bridges_may_reach_each_other_but_not_the_internet(self):
+        assert '-o "$VETH_NS" -d "$EGRESS_NET" -j ACCEPT' in self.script
+        assert 'route add "$EGRESS_NET" via "$HOSTIP"' in self.script
+        assert "EGRESS_NET=192.168.244.0/28" in self.script
+
+    def test_bridge_configs_are_valid_json(self):
+        b = _bridges(self.script)
+        assert set(b) == {"run_amnezia", "run_trusttunnel"}
+
+    def test_warp_rides_awg_and_falls_back_to_trusttunnel(self):
+        am = _bridges(self.script)["run_amnezia"]
+        bal = am["routing"]["balancers"][0]
+        assert bal["selector"] == ["relay-awg"] and bal["fallbackTag"] == "relay-tt"
+        assert am["observatory"]["subjectSelector"] == ["relay-awg"]
+        tags = {o["tag"]: o for o in am["outbounds"]}
+        # Prefix match: no other outbound may answer to the observed selector.
+        assert [t for t in tags if t.startswith("relay-awg")] == ["relay-awg"]
+        assert tags["relay-tt"]["settings"]["servers"][0] == {"address": "192.168.244.10", "port": 1086}
+        rule = am["routing"]["rules"][0]
+        assert rule["inboundTag"] == ["warp-in"] and rule["balancerTag"] == "warp"
+
+    def test_trusttunnel_warp_port_chains_through_its_client(self):
+        tt = _bridges(self.script)["run_trusttunnel"]
+        warp_in = [i for i in tt["inbounds"] if i["tag"] == "warp-in"][0]
+        assert warp_in["port"] == 1086 and warp_in["sniffing"]["routeOnly"] is False
+        warp = [o for o in tt["outbounds"] if o["tag"] == "warp"][0]
+        assert warp["settings"]["servers"][0] == {"address": "10.99.0.2", "port": 40001}
+        assert warp["proxySettings"] == {"tag": "out"}
+        assert tt["routing"]["rules"][0] == {"type": "field", "inboundTag": ["warp-in"], "outboundTag": "warp"}

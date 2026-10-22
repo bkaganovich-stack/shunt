@@ -15,6 +15,8 @@ What it guards (the failure modes seen in production):
   * INLINE WAN went dead after a switch        -> auto-revert to known-good loop
     (the missing post-switch safety net that stranded the box)
   * disk filling up                            -> prune old backups/logs
+  * a cascade egress's flow left un-NATed      -> drop it from conntrack
+  * AmneziaWG sends but hears nothing          -> drop its flows, then restart it
 
 It intentionally does NOTHING while a topology switch (xray-topology.service)
 is running, to avoid fighting it.
@@ -52,6 +54,12 @@ SHORT_LEASE_SEC = 30 * 60
 SERVICES        = ["shunt", "shunt-web", "dnsmasq", "sing-box"]
 DISK_PRUNE_PCT  = 90
 ACCESS_LOG      = BASE / "logs" / "access.log"
+# The own cascade's egresses (egress-netns.sh): the address each tunnel
+# client sends from, as the host sees it on the veth.
+EGRESS_SOURCES  = {"amnezia": "192.168.244.6", "trusttunnel": "192.168.244.10"}
+AWG             = ["ip", "netns", "exec", "amnezia", "/opt/shunt/egress/bin/awg"]
+AWG_STALE_SEC   = 180    # WireGuard re-handshakes every 2 min while it talks
+AWG_RESTART_GAP = 900    # at most one restart per 15 min
 ACCESS_MAX      = 200 * 1024 * 1024   # bytes (actual blocks) before rotation
 
 def log(msg: str) -> None:
@@ -371,6 +379,81 @@ def ap_up_check() -> None:
         log("AUTO-FIX: management AP down -> mgmt_ap.sh up")
         run("bash", str(MGMT_AP), "up", timeout=70)
 
+def unnatted_flows(table: str, source: str) -> list[dict]:
+    """
+    Flows from an egress's source that left for the internet without NAT.
+
+    conntrack prints the reply direction after the original one; a flow that
+    was masqueraded is answered to the WAN address, one that was not is
+    answered to the private source itself -- which no provider will deliver.
+    Addresses inside 192.168.244.0/24 (another egress's bridge) are fine.
+    """
+    out = []
+    for ln in table.splitlines():
+        pairs = re.findall(r"(src|dst|sport|dport)=(\S+)", ln)
+        if len(pairs) < 8:
+            continue
+        orig, reply = dict(pairs[:4]), dict(pairs[4:8])
+        if orig.get("src") != source or orig.get("dst", "").startswith("192.168.244."):
+            continue
+        if reply.get("dst") == source:
+            out.append({"proto": ln.split()[0], **orig})
+    return out
+
+def fix_unnatted_flows() -> None:
+    """2026-10-22: AmneziaWG's flow to Riga was recorded un-NATed while the
+    WAN was still coming up, and its keepalives kept it so for 9 hours."""
+    for name, src in EGRESS_SOURCES.items():
+        for f in unnatted_flows(run("conntrack", "-L", "-s", src).stdout, src):
+            log(f"AUTO-FIX: {name} flow {f['src']}:{f['sport']} -> {f['dst']}:{f['dport']} "
+                f"left without NAT -> dropped from conntrack")
+            run("conntrack", "-D", "-p", f["proto"], "-s", f["src"], "-d", f["dst"],
+                "--sport", f["sport"], "--dport", f["dport"])
+
+def awg_handshake_age(now: float | None = None) -> int | None:
+    """Seconds since AmneziaWG's last handshake; None if it never had one."""
+    m = re.search(r"\s(\d+)\s*$", run(*AWG, "show", "awg0", "latest-handshakes").stdout)
+    if not m or m.group(1) == "0":
+        return None
+    return int((now or time.time()) - int(m.group(1)))
+
+def unit_up_for(unit: str) -> float:
+    """Seconds since the unit last became active (systemd's monotonic clock)."""
+    v = run("systemctl", "show", "-p", "ActiveEnterTimestampMonotonic", "--value", unit).stdout.strip()
+    return time.monotonic() - int(v) / 1e6 if v.isdigit() and int(v) else 0.0
+
+def check_awg(state: dict, now: float | None = None) -> dict:
+    """
+    AmneziaWG that talks to Riga and hears nothing back: first drop its flows
+    (whatever pinned them, they are rebuilt from scratch), and if three more
+    minutes change nothing, restart the egress. Only while the house itself
+    reaches the internet -- a dead WAN is not the tunnel's fault.
+    """
+    now = now or time.time()
+    if not svc_active("shunt-egress@amnezia"):
+        state.pop("awg_stale", None)
+        return state
+    age = awg_handshake_age(now)
+    if age is not None and age <= AWG_STALE_SEC:
+        state.pop("awg_stale", None)
+        return state
+    if unit_up_for("shunt-egress@amnezia") < AWG_STALE_SEC:
+        return state                      # just started: give it its first handshake
+    if not reaches_internet():
+        return state
+    stale = state.get("awg_stale")
+    if not stale:
+        log(f"WARN: AmneziaWG silent ({f'last handshake {age} s ago' if age else 'no handshake yet'}) "
+            f"-> dropping its flows from conntrack")
+        run("conntrack", "-D", "-s", EGRESS_SOURCES["amnezia"])
+        state["awg_stale"] = now
+    elif now - stale >= AWG_STALE_SEC and now - float(state.get("awg_restart_at") or 0) >= AWG_RESTART_GAP:
+        log("AUTO-FIX: AmneziaWG still silent -> restart shunt-egress@amnezia")
+        run("systemctl", "restart", "shunt-egress@amnezia", timeout=120)
+        state["awg_restart_at"] = now
+        state["awg_stale"] = now
+    return state
+
 def prune_disk() -> None:
     log("AUTO-FIX: disk >%d%% -> pruning old backups/logs" % DISK_PRUNE_PCT)
     # keep only the newest gateway backup, truncate big rotated logs
@@ -564,6 +647,10 @@ def cycle(state: dict) -> dict:
             state["wan_fail"] = 0
     else:
         state["wan_fail"] = 0
+
+    # 4b) the own cascade's egresses
+    fix_unnatted_flows()
+    state = check_awg(state)
 
     # 5) rescue AP must stay up (survives reboots / accidental power cycles)
     # ap_up_check()  # disabled 2026-06-19: wlx repurposed as Home client
