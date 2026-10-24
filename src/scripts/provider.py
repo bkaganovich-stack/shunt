@@ -113,6 +113,11 @@ def _duration(v: str) -> int | None:
     return total if seen else None
 
 
+def identifies(fp: dict) -> bool:
+    """Whether a fingerprint carries anything that names a provider."""
+    return bool(fp.get("dhcp_server") or fp.get("resolvers"))
+
+
 def same_provider(a: dict, b: dict) -> bool:
     """
     Whether two fingerprints are plausibly the same provider.
@@ -291,7 +296,13 @@ def remember(fp: dict, path: Path = PROFILES, now: float | None = None) -> tuple
     afterwards from a journal.
     """
     now = int(now if now is not None else time.time())
-    profiles = load_profiles(path)
+    # A fingerprint taken before the lease arrived names no one: no DHCP
+    # server, no resolvers. Kept, every boot added a "new provider", and by
+    # October nine such blanks had pushed the real one out of the history --
+    # so the real one, seen again after a power cut, looked new as well.
+    profiles = [p for p in load_profiles(path) if identifies(p.get("fingerprint") or {})]
+    if not identifies(fp):
+        return profiles, False
     for p in profiles:
         if same_provider(p.get("fingerprint") or {}, fp):
             p["last_seen"] = now

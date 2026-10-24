@@ -1,3 +1,24 @@
+shunt (2.32.6) stable; urgency=medium
+
+  * "Обнаружены замечания к работе сети" no longer lights up for nothing.
+    In the seconds before a DHCP lease arrives -- every boot, every restart
+    of networkd -- the provider's server, gateway and prefix read as
+    nothing, and the next reading was announced as a change: "DHCP-сервер
+    изменился: — → 100.116.0.1", nine times in a week, the server never
+    having moved. A value now changes only when it was known before and is
+    known now; the monitor keeps the last known value across a blank, so a
+    real change made across one is still reported.
+  * A blank fingerprint is no longer remembered as a new provider. Nine
+    such blanks had pushed the real provider out of the ten-entry history,
+    so after the power cut of 2026-10-22 the same provider was announced as
+    "Похоже, сменился провайдер". Blanks already stored are dropped.
+  * The concerns and their "Принято" button moved to Диагностика → Сетевой
+    тракт, where the overview's notice points. They had stayed on the
+    profile page through the redesign, and the link led to a page that did
+    not show them.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Sat, 24 Oct 2026 22:00:00 +0300
+
 shunt (2.32.5) stable; urgency=medium
 
   * The box's NTP client (chrony, or timesyncd) reaches its servers directly

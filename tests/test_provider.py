@@ -179,3 +179,29 @@ class TestProviderIdentity:
         assert pv.load_profiles(f) == []
         _, is_new = pv.remember(self.A, f, now=1)
         assert is_new is True
+
+
+class TestBlankFingerprints:
+    """A fingerprint taken before the lease names no provider (2026-10)."""
+    A = {"dhcp_server": "100.116.0.1", "resolvers": ["213.234.193.1"], "network": "100.116.0.0/16"}
+    BLANK = {"dhcp_server": None, "resolvers": [], "network": None}
+
+    def test_blank_is_neither_new_nor_remembered(self, tmp_path):
+        f = tmp_path / "p.json"
+        pv.remember(self.A, f, now=1000)
+        profiles, is_new = pv.remember(self.BLANK, f, now=2000)
+        assert is_new is False and len(pv.load_profiles(f)) == 1
+
+    def test_blanks_cannot_push_the_real_one_out(self, tmp_path):
+        f = tmp_path / "p.json"
+        pv.remember(self.A, f, now=1000)
+        for i in range(pv.PROFILES_MAX + 3):
+            pv.remember(self.BLANK, f, now=2000 + i)
+        assert pv.remember(dict(self.A, network="100.113.192.0/19"), f, now=9000)[1] is False
+
+    def test_blanks_already_stored_are_dropped(self, tmp_path):
+        f = tmp_path / "p.json"
+        pv._save([{"first_seen": 1, "last_seen": 1, "fingerprint": self.BLANK}] * 9 +
+                 [{"first_seen": 2, "last_seen": 2, "fingerprint": self.A}], f)
+        profiles, is_new = pv.remember(self.A, f, now=3000)
+        assert is_new is False and len(profiles) == 1 and len(pv.load_profiles(f)) == 1

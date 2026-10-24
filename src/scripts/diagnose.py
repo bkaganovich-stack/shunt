@@ -153,23 +153,31 @@ def environment_changes(old: dict, new: dict) -> list[str]:
     """
     if not old:
         return []
+    # A value only "changes" when it was known before and is known now. In the
+    # seconds before a lease arrives -- every boot, every restart of networkd --
+    # the server, gateway and prefix read as nothing; "— → 100.116.0.1" then
+    # announced a new DHCP server nine times in a week while the provider sat
+    # still (2026-10).
+    def moved(k):
+        return bool(old.get(k)) and bool(new.get(k)) and old.get(k) != new.get(k)
+
     out = []
-    if old.get("class") != new.get("class"):
+    if moved("class"):
         out.append("Провайдер сменил тип адреса: %s → %s. Списки исключений, "
                    "которые перечисляют сети по адресам, надо перепроверить."
                    % (old.get("class"), new.get("class")))
-    elif old.get("prefix") != new.get("prefix") and new.get("prefix"):
+    elif moved("prefix"):
         out.append("Размер сети провайдера изменился: /%s → /%s."
                    % (old.get("prefix"), new.get("prefix")))
-    if old.get("gateway") != new.get("gateway") and new.get("gateway"):
+    if moved("gateway"):
         out.append("Сменился шлюз провайдера: %s → %s."
-                   % (old.get("gateway") or "—", new.get("gateway")))
-    if old.get("lease_band") != new.get("lease_band"):
+                   % (old.get("gateway"), new.get("gateway")))
+    if moved("lease_band"):
         out.append("Категория срока DHCP-аренды изменилась: %s → %s."
                    % (old.get("lease_band"), new.get("lease_band")))
-    if old.get("dhcp_server") != new.get("dhcp_server") and new.get("dhcp_server"):
+    if moved("dhcp_server"):
         out.append("DHCP-сервер изменился: %s → %s. Причина смены сервера не установлена."
-                   % (old.get("dhcp_server") or "—", new.get("dhcp_server")))
+                   % (old.get("dhcp_server"), new.get("dhcp_server")))
     return out
 
 

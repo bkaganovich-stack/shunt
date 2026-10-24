@@ -343,3 +343,24 @@ class TestCheckAwg:
     def test_stopped_egress_is_not_watched(self, monkeypatch):
         calls = self._env(monkeypatch, handshake=0, active=False)
         assert hm.check_awg({"awg_stale": 5}, self.NOW) == {} and self._acts(calls) == []
+
+
+
+class TestEnvironmentMemory:
+    """A change made across a blank reading is still A -> B (2026-10)."""
+
+    def test_known_values_survive_a_blank_cycle(self, monkeypatch, tmp_path):
+        raised = []
+        monkeypatch.setattr(hm, "DIAGNOSIS", tmp_path / "d.json")
+        monkeypatch.setattr(hm, "raise_attention", lambda k, t, d="": raised.append(t))
+        monkeypatch.setattr(hm, "clear_attention", lambda k: None)
+        monkeypatch.setattr(hm, "log", lambda m: None)
+        env = {"class": "CGNAT", "prefix": "16", "gateway": "100.116.0.1",
+               "lease_band": "короткая", "dhcp_server": "100.116.0.1"}
+        readings = iter([env, dict.fromkeys(env), dict(env, dhcp_server="100.200.0.1")])
+        monkeypatch.setattr(hm.dg, "ladder", lambda wan: {"environment": next(readings), "healthy": True})
+        st = hm.run_diagnosis({}, "enp1s0")
+        st = hm.run_diagnosis(st, "enp1s0")          # blank: nothing said, nothing forgotten
+        assert raised == [] and st["environment"]["dhcp_server"] == "100.116.0.1"
+        hm.run_diagnosis(st, "enp1s0")
+        assert raised == ["DHCP-сервер изменился: 100.116.0.1 → 100.200.0.1. Причина смены сервера не установлена."]

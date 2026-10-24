@@ -29,3 +29,15 @@ def test_gateway_serves_every_runtime_asset_without_external_dependencies():
 def test_ui_is_initialized_before_authentication_can_show_the_app():
     html = (STATIC / 'index.html').read_text()
     assert html.index('src="/static/ui-model.js"') < html.index('src="/static/ui.js"') < html.index("'/api/auth-check'")
+
+
+
+def test_concerns_live_where_the_overview_banner_points():
+    # "Обнаружены замечания" links to #diagnostics/path; until 2.32.6 the list
+    # and its "Принято" sat on the profile page, where no one looked.
+    html = (Path(__file__).resolve().parents[1] / "src/web/static/index.html").read_text()
+    path = html[html.index('<div id="page-path"'):html.index('<div id="page-geo"')]
+    assert 'id="attention-banner"' in path
+    assert html.count('id="attention-banner"') == 1
+    ui = (Path(__file__).resolve().parents[1] / "src/web/static/ui.js").read_text()
+    assert "link.href='#diagnostics/path'" in ui

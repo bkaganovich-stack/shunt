@@ -72,6 +72,16 @@ class TestEnvironmentChanges:
     def test_the_first_ever_reading_is_not_a_change(self):
         assert dg.environment_changes({}, self.BEFORE) == []
 
+    def test_unknown_before_is_not_a_change(self):
+        # Before the lease arrives the server, gateway and prefix read as
+        # nothing; the next reading is not "a new DHCP server" (2026-10).
+        blank = dict(self.BEFORE, dhcp_server=None, gateway=None, prefix=None, lease_band=None)
+        assert dg.environment_changes(blank, self.BEFORE) == []
+
+    def test_unknown_now_is_not_a_change_either(self):
+        blank = dict(self.BEFORE, dhcp_server=None, gateway=None)
+        assert dg.environment_changes(self.BEFORE, blank) == []
+
 
 class TestLadder:
     def _patch(self, monkeypatch, *, carrier=True, cidr="100.1.2.3/19",

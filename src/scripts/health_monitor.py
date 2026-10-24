@@ -530,10 +530,14 @@ def run_diagnosis(state: dict, wan: str) -> dict:
     except OSError:
         pass
 
-    for msg in dg.environment_changes(state.get("environment") or {}, d["environment"]):
+    known = state.get("environment") or {}
+    for msg in dg.environment_changes(known, d["environment"]):
         log("ENVIRONMENT: " + msg)
         raise_attention("environment", msg)
-    state["environment"] = d["environment"]
+    # Keep the last known value of anything this cycle could not read (no
+    # lease yet): a change made across such a blank, A -> nothing -> B, is
+    # still reported as A -> B.
+    state["environment"] = {**known, **{k: v for k, v in d["environment"].items() if v}}
 
     if d["healthy"]:
         clear_attention("path")
