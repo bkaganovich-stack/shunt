@@ -1,3 +1,21 @@
+shunt (2.32.8) stable; urgency=medium
+
+  * The egress bridges no longer log each connection. Their xray configs set
+    no access path, and xray then writes one line per connection to
+    stdout, which went to the journal and, until rsyslog was removed, to
+    /var/log/syslog too: about 93,000 lines a day, which shrank the
+    journal's 200 MB to a few days of history and kept the eMMC busy.
+    "access": "none" for both cascade bridges and the FPTN one; warnings
+    and errors are still logged.
+  * egress_config.py no longer crashes when the endpoint's name does not
+    resolve. A DNS blip at 00:06 on 2026-11-08 raised gaierror out of it
+    while TrustTunnel was restarting, which left a Python crash report in
+    /var/crash. The lookup is now tried three times, two seconds apart, and
+    a failure is a single "egress_config: cannot resolve ..." line and
+    exit 1; the unit fails and systemd restarts it as before.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 09 Nov 2026 12:56:07 +0300
+
 shunt (2.32.7) stable; urgency=medium
 
   * An upgrade no longer switches FPTN back on. The package enabled every

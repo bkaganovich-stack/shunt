@@ -24,6 +24,7 @@ import ipaddress
 import re
 import socket
 import sys
+import time
 
 # Keys only awg-quick understands. Everything else, including AmneziaWG's
 # obfuscation (Jc, Jmin, Jmax, S1-S4, H1-H4 ranges, I1-I5), passes to setconf.
@@ -31,15 +32,27 @@ _QUICK_ONLY = ("address", "dns", "mtu", "table", "preup", "postup",
                "predown", "postdown", "saveconfig")
 
 
-def _resolve4(host: str) -> str:
+def _resolve4(host: str, tries: int = 3, pause: float = 2.0) -> str:
+    """
+    The endpoint's IPv4 address. A failed lookup is retried briefly and then
+    reported as a ValueError: on 2026-11-08 a DNS blip at 00:06 raised gaierror
+    out of here, and the traceback became a crash report in /var/crash.
+    """
     try:
         ipaddress.IPv4Address(host)
         return host
     except ValueError:
         pass
-    for fam, _, _, _, addr in socket.getaddrinfo(host, None, socket.AF_INET):
-        return addr[0]
-    raise ValueError("cannot resolve %s" % host)
+    err: OSError | None = None
+    for attempt in range(tries):
+        try:
+            for fam, _, _, _, addr in socket.getaddrinfo(host, None, socket.AF_INET):
+                return addr[0]
+        except OSError as e:
+            err = e
+        if attempt + 1 < tries:
+            time.sleep(pause)
+    raise ValueError("cannot resolve %s%s" % (host, ": %s" % err if err else ""))
 
 
 def split_awg(text: str, resolve=_resolve4, params: dict | None = None) -> tuple[str, dict]:
@@ -148,7 +161,7 @@ def _params(path: str | None, ident: str) -> dict:
         return {}
 
 
-def main(argv: list[str]) -> int:
+def _main(argv: list[str]) -> int:
     if len(argv) >= 4 and argv[1] == "awg":
         setconf, facts = split_awg(open(argv[2]).read(),
                                    params=_params(argv[4] if len(argv) > 4 else None, "amnezia"))
@@ -168,6 +181,18 @@ def main(argv: list[str]) -> int:
           "       egress_config.py tt <wizard.toml> <out.toml> <socks-addr> <http2|http3> [settings.json]",
           file=sys.stderr)
     return 2
+
+
+def main(argv: list[str]) -> int:
+    """
+    Bad input or an unreachable resolver is a one-line message and exit 1; the
+    calling unit fails and systemd restarts it. Never a traceback.
+    """
+    try:
+        return _main(argv)
+    except (OSError, ValueError) as e:
+        print("egress_config: %s" % e, file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

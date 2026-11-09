@@ -73,7 +73,7 @@ bridge() {
     # and the traffic is rejected rather than leaked.
     cat > "$CONF" <<EOF
 {
-  "log": {"loglevel": "warning"},
+  "log": {"loglevel": "warning", "access": "none"},
   "dns": {"servers": ["172.20.0.1"]},
   "inbounds": [{
     "tag": "socks-in", "listen": "$NSIP", "port": $SOCKS_PORT,

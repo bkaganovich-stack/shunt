@@ -140,8 +140,11 @@ run_amnezia() {
     # to the house egress and Gemini saw Russia). TrustTunnel's bridge offers
     # the same relay on its own WARP port: the observatory watches the road
     # through AWG, and while it does not answer the balancer takes TT's.
+    # "access": "none": with no access path xray writes a line per connection
+    # to stdout, and from there to the journal -- 93k lines a day by
+    # 2026-11-09, which cut the journal's 200 MB down to a few days.
     cat > "$RUN/bridge.json" <<JSON
-{"log": {"loglevel": "warning"},
+{"log": {"loglevel": "warning", "access": "none"},
  "dns": {"servers": ["${DNS:-1.1.1.1}"]},
  "inbounds": [{"tag": "socks-in", "listen": "$NSIP", "port": $PORT,
                "protocol": "socks", "settings": {"auth": "noauth", "udp": true}},
@@ -187,7 +190,7 @@ run_trusttunnel() {
     # that one private address and no other (allow_private_network_connections
     # plus an nft output rule there, 2026-10-22).
     cat > "$RUN/bridge.json" <<JSON
-{"log": {"loglevel": "warning"},
+{"log": {"loglevel": "warning", "access": "none"},
  "inbounds": [{"tag": "socks-in", "listen": "$NSIP", "port": $PORT,
                "protocol": "socks", "settings": {"auth": "noauth", "udp": true}},
               {"tag": "warp-in", "listen": "$NSIP", "port": $WARP_PORT,

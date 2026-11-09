@@ -307,3 +307,55 @@ class TestBootAndWarpFallback:
         assert "proxySettings" not in warp
         assert warp["streamSettings"]["sockopt"]["dialerProxy"] == "out"
         assert tt["routing"]["rules"][0] == {"type": "field", "inboundTag": ["warp-in"], "outboundTag": "warp"}
+
+
+class TestQuietAndCrashFree:
+    """2026-11-09: the bridges logged every connection; a DNS blip crashed egress_config."""
+
+    def test_bridges_write_no_access_log(self):
+        for name, b in _bridges((ROOT / "src/scripts/egress-netns.sh").read_text()).items():
+            assert b["log"] == {"loglevel": "warning", "access": "none"}, name
+        assert '"log": {"loglevel": "warning", "access": "none"}' in \
+            (ROOT / "src/scripts/fptn-egress.sh").read_text()
+
+    def test_lookup_failure_is_retried_then_a_value_error(self, monkeypatch):
+        calls = []
+
+        def boom(*a, **k):
+            calls.append(a[0])
+            raise ec.socket.gaierror(-3, "Temporary failure in name resolution")
+        monkeypatch.setattr(ec.socket, "getaddrinfo", boom)
+        with pytest.raises(ValueError, match="cannot resolve tt.example: .*Temporary failure"):
+            ec._resolve4("tt.example", tries=3, pause=0)
+        assert calls == ["tt.example"] * 3
+
+    def test_lookup_recovers_on_a_later_try(self, monkeypatch):
+        answers = iter([ec.socket.gaierror(-3, "x"), [(2, 1, 6, "", ("203.0.113.7", 0))]])
+
+        def flaky(*a, **k):
+            r = next(answers)
+            if isinstance(r, Exception):
+                raise r
+            return r
+        monkeypatch.setattr(ec.socket, "getaddrinfo", flaky)
+        assert ec._resolve4("tt.example", tries=3, pause=0) == "203.0.113.7"
+
+    def test_cli_reports_one_line_and_exits_1(self, monkeypatch, tmp_path, capsys):
+        def boom(*a, **k):
+            raise ec.socket.gaierror(-3, "Temporary failure in name resolution")
+        monkeypatch.setattr(ec.socket, "getaddrinfo", boom)
+        monkeypatch.setattr(ec.time, "sleep", lambda s: None)
+        wiz = tmp_path / "wizard.toml"
+        wiz.write_text(WIZARD)
+        rc = ec.main(["egress_config.py", "tt", str(wiz), str(tmp_path / "out.toml"),
+                      "127.0.0.1:1085", "http3"])
+        err = capsys.readouterr().err
+        assert rc == 1 and "Traceback" not in err
+        assert err == "egress_config: cannot resolve static.example.net: " \
+                      "[Errno -3] Temporary failure in name resolution\n"
+        assert not (tmp_path / "out.toml").exists()
+
+    def test_cli_missing_file_is_one_line_too(self, tmp_path, capsys):
+        rc = ec.main(["egress_config.py", "tt", str(tmp_path / "nope.toml"), str(tmp_path / "o"),
+                      "127.0.0.1:1085", "http3"])
+        assert rc == 1 and capsys.readouterr().err.startswith("egress_config: ")
