@@ -237,8 +237,27 @@ case "$1" in
     # Enabled but not armed: a timer started here would fire while the old
     # services are still running, and one of them wrote its log into a
     # directory the switch below still has to move.
+    #
+    # FPTN is the one unit the administrator switches on and off from the web
+    # page, which enables or disables it to match. Enabling it here regardless
+    # undid that on every upgrade: 2.31.0 re-enabled a backup egress that had
+    # been switched off, and from the next boot it retried a dead server every
+    # ten minutes for three weeks. Its enablement follows the setting instead.
+    fptn_on=0
+    for f in "$BASE/config/settings.json" "$OLD/config/settings.json"; do
+        [ -f "$f" ] || continue
+        python3 -c 'import json,sys; sys.exit(0 if (json.load(open(sys.argv[1])).get("fptn") or {}).get("enabled") else 1)' \
+            "$f" 2>/dev/null && fptn_on=1
+        break
+    done
+    case " $RESUME " in *" shunt-fptn-egress.service "*) fptn_on=1;; esac
     for u in $UNITS; do
-        [ -f "/lib/systemd/system/$u" ] && systemctl enable "$u" >/dev/null 2>&1 || true
+        [ -f "/lib/systemd/system/$u" ] || continue
+        if [ "$u" = shunt-fptn-egress.service ] && [ "$fptn_on" = 0 ]; then
+            systemctl disable "$u" >/dev/null 2>&1 || true
+            continue
+        fi
+        systemctl enable "$u" >/dev/null 2>&1 || true
     done
     for u in $EGRESSES; do
         systemctl enable "$u" >/dev/null 2>&1 || true

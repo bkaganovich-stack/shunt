@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.32.6"
+VERSION = "2.32.7"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -1103,7 +1103,7 @@ def build_xray_config(settings: dict) -> dict:
     vpn_obs, has_proxy, proxy_server_ip = _get_active_vpn_outbound(settings)
     outbounds = vpn_obs + [
         {"protocol": "freedom", "tag": "direct",
-         "settings": {"domainStrategy": "UseIP"}, "streamSettings": {"sockopt": _sockopt()}},
+         "streamSettings": {"sockopt": dict(_sockopt(), domainStrategy="UseIP")}},
         {"protocol": "blackhole", "tag": "block"},
     ]
     final = "proxy" if has_proxy else "direct"

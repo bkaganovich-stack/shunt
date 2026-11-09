@@ -303,5 +303,7 @@ class TestBootAndWarpFallback:
         assert warp_in["port"] == 1086 and warp_in["sniffing"]["routeOnly"] is False
         warp = [o for o in tt["outbounds"] if o["tag"] == "warp"][0]
         assert warp["settings"]["servers"][0] == {"address": "10.99.0.2", "port": 40001}
-        assert warp["proxySettings"] == {"tag": "out"}
+        # proxySettings was removed in Xray 26.11; dialerProxy is the same chain.
+        assert "proxySettings" not in warp
+        assert warp["streamSettings"]["sockopt"]["dialerProxy"] == "out"
         assert tt["routing"]["rules"][0] == {"type": "field", "inboundTag": ["warp-in"], "outboundTag": "warp"}

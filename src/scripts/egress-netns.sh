@@ -148,7 +148,8 @@ run_amnezia() {
               {"tag": "warp-in", "listen": "$NSIP", "port": $WARP_PORT,
                "protocol": "socks", "settings": {"auth": "noauth", "udp": false},
                "sniffing": {"enabled": true, "destOverride": ["http", "tls"], "routeOnly": false}}],
- "outbounds": [{"protocol": "freedom", "tag": "out", "settings": {"domainStrategy": "UseIP"}},
+ "outbounds": [{"protocol": "freedom", "tag": "out",
+                "streamSettings": {"sockopt": {"domainStrategy": "UseIP"}}},
                {"protocol": "socks", "tag": "relay-awg",
                 "settings": {"servers": [{"address": "$WARP_RELAY_HOST", "port": $WARP_RELAY_PORT}]}},
                {"protocol": "socks", "tag": "relay-tt",
@@ -196,7 +197,7 @@ run_trusttunnel() {
                 "settings": {"servers": [{"address": "127.0.0.1", "port": 1085}]}},
                {"protocol": "socks", "tag": "warp",
                 "settings": {"servers": [{"address": "$WARP_RELAY_HOST", "port": $WARP_RELAY_PORT}]},
-                "proxySettings": {"tag": "out"}}],
+                "streamSettings": {"sockopt": {"dialerProxy": "out"}}}],
  "routing": {"rules": [{"type": "field", "inboundTag": ["warp-in"], "outboundTag": "warp"}]}}
 JSON
     chmod 644 "$RUN/bridge.json"; chmod 711 "$RUN"

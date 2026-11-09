@@ -81,7 +81,7 @@ bridge() {
   }],
   "outbounds": [{
     "protocol": "freedom", "tag": "out",
-    "settings": {"domainStrategy": "UseIP"}
+    "streamSettings": {"sockopt": {"domainStrategy": "UseIP"}}
   }]
 }
 EOF

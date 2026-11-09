@@ -1,3 +1,22 @@
+shunt (2.32.7) stable; urgency=medium
+
+  * An upgrade no longer switches FPTN back on. The package enabled every
+    unit it ships on each configure, FPTN's included, undoing the web
+    page's "off": 2.31.0 re-enabled it on 2026-10-17, and from the next boot
+    the client retried a server that no longer answered from Russia every
+    ten minutes, for three weeks, with FPTN shown as off. The unit's
+    enablement now follows fptn.enabled in settings.json (or what was
+    running, when migrating from xray-gateway).
+  * Ready for Xray 26.11. It removed the outbound "proxySettings", which the
+    TrustTunnel bridge used to carry WARP through the TrustTunnel client;
+    that bridge would no longer start, taking the TrustTunnel egress with
+    it. The chain is now streamSettings.sockopt.dialerProxy. The freedom
+    outbounds' domainStrategy, deprecated in the same release, moves to
+    sockopt as well. Both forms are understood by the Xray 26.3 shipped
+    until now, so the order of upgrading the two packages does not matter.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Mon, 09 Nov 2026 11:56:47 +0300
+
 shunt (2.32.6) stable; urgency=medium
 
   * "Обнаружены замечания к работе сети" no longer lights up for nothing.
