@@ -1,3 +1,26 @@
+shunt (2.32.10) stable; urgency=medium
+
+  * The watchdog notices a device that opens connections in a loop. On
+    2026-11-12 one PC behind the router opened 120 a second for four hours
+    -- forty addresses, each in turn, nothing sent -- and filled the exit's
+    connection table; every check here said the internet was unreachable
+    and not ours to fix, because nothing counted connections. The watchdog
+    now reads the last minutes of the access log each cycle and raises a
+    concern naming the source, the rate and sample addresses.
+  * Those addresses are closed for that source only (nft table inet
+    shunt_flood, SYNs dropped before interception); everything else in the
+    house is untouched. An entry lasts ten minutes and the kernel renews it
+    only while the address is still tried more than twenty times a minute.
+    FLOOD_QUARANTINE=off in network.conf keeps the report without blocking.
+  * No per-address rate limit, on measurement: ordinary traffic reached 770
+    connections a minute to one address (DNS over HTTPS), the flood 180 to
+    each of its own. The rule is breadth and persistence instead -- ten or
+    more addresses above sixty a minute from one source, three minutes
+    running. Replayed over four ordinary days: no minute qualifies. Over the
+    day of the flood: caught four minutes in, all forty addresses.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Thu, 12 Nov 2026 19:30:00 +0300
+
 shunt (2.32.9) stable; urgency=medium
 
   * The web interface answers at http://shunt.lan. The gateway's DNS points

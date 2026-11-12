@@ -21,6 +21,8 @@ case "$1" in
     # rules were left behind by a crash; the script is idempotent.
     [ -x /opt/shunt/scripts/iptables.sh ] && \
         /opt/shunt/scripts/iptables.sh down >/dev/null 2>&1 || true
+    # The flood quarantine is a table of its own (connflood.py).
+    nft delete table inet shunt_flood >/dev/null 2>&1 || true
     ;;
 esac
 exit 0

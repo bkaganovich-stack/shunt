@@ -17,6 +17,8 @@ What it guards (the failure modes seen in production):
   * disk filling up                            -> prune old backups/logs
   * a cascade egress's flow left un-NATed      -> drop it from conntrack
   * AmneziaWG sends but hears nothing          -> drop its flows, then restart it
+  * a device opening connections in a loop     -> say so, close those addresses
+    for that device only (connflood.py)
 
 It intentionally does NOTHING while a topology switch (xray-topology.service)
 is running, to avoid fighting it.
@@ -28,6 +30,7 @@ BASE        = Path("/opt/shunt")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import diagnose as dg  # noqa: E402
 import provider as pv  # noqa: E402
+import connflood as cf  # noqa: E402
 CFG         = BASE / "config"
 NET_CONF    = CFG / "network.conf"
 STATE_FILE  = CFG / "health-state.json"
@@ -600,6 +603,40 @@ def check_provider(state: dict, wan: str, lan: str) -> dict:
         clear_attention("assumption")
     return state
 
+def check_flood(state: dict, conf: dict) -> dict:
+    """
+    Name a connection flood and hold it off the tunnel.
+
+    FLOOD_QUARANTINE=off in network.conf keeps the report and drops the
+    blocking. The concern stays up while anything is still held, because a
+    held flood no longer reaches the log this reads -- silence there means the
+    quarantine works, not that the program was closed.
+    """
+    blocking = (conf.get("FLOOD_QUARANTINE", "on").strip().lower()
+                not in ("off", "0", "no", "false"))
+    v = cf.check()
+    held = cf.quarantined()
+    if held and not blocking:
+        cf.release()
+        held = []
+    if v and v["kind"] == "pattern" and blocking:
+        if cf.quarantine(v["source"], v["targets"]):
+            log("FLOOD: %s -> %d addresses, ~%d conn/min; held for that source"
+                % (v["source"], v["target_count"], v["per_minute"]))
+            held = cf.quarantined()
+    if v or held:
+        if v and not state.get("flood_active"):
+            log("FLOOD: %s opens ~%d connections a minute (%s)"
+                % (v["source"], v["per_minute"], v["kind"]))
+        state["flood_active"] = True
+        raise_attention("flood", *cf.describe(v, held, blocking))
+    elif state.get("flood_active"):
+        state["flood_active"] = False
+        log("FLOOD: over")
+        clear_attention("flood")
+    return state
+
+
 def cycle(state: dict) -> dict:
     if topo_switch_running():
         return state   # never interfere mid-switch
@@ -655,6 +692,12 @@ def cycle(state: dict) -> dict:
     # 4b) the own cascade's egresses
     fix_unnatted_flows()
     state = check_awg(state)
+
+    # 4c) a device opening connections in a loop
+    try:
+        state = check_flood(state, conf)
+    except Exception as e:
+        log(f"flood check error (non-fatal): {e}")
 
     # 5) rescue AP must stay up (survives reboots / accidental power cycles)
     # ap_up_check()  # disabled 2026-06-19: wlx repurposed as Home client
