@@ -179,6 +179,11 @@ def write_dnsmasq(t: dict) -> None:
                 f"no-resolv\n"
                 f"cache-size=1000\n"
                 f"server={t['router_ip']}\n")
+    # Same as the web side writes (main.web_name_lines): the interface by name,
+    # and the gateway's own /etc/hosts kept off the LAN.
+    conf += ("no-hosts\n"
+             f"address=/shunt.lan/{t['lan_ip']}\n"
+             f"address=/shunt/{t['lan_ip']}\n")
     DNSMASQ_CONF.write_text(conf)
 
 def rebind_singbox(iface: str) -> None:

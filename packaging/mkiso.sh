@@ -120,7 +120,7 @@ cat > "$TREE/shunt/issue" <<'EOF'
 Shunt -- transparent split-routing gateway
 
   host \n    address \4
-  web interface: http://\4/  or  http://\n.local/
+  web interface: http://shunt.lan/  or  http://\4/
 
 EOF
 

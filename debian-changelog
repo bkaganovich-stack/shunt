@@ -1,3 +1,24 @@
+shunt (2.32.9) stable; urgency=medium
+
+  * The web interface answers at http://shunt.lan. The gateway's DNS points
+    shunt.lan (and the bare name shunt, for clients that ask the gateway
+    directly) at its own LAN address; both dnsmasq writers emit it. A bare
+    word in the address bar is a search in every browser, and the ASUS in
+    front answers single-label names itself instead of forwarding them, so
+    the dotted name is the one to type -- after the first visit the browser
+    completes it from "shunt". A local DNS record of the user's own for
+    either name wins.
+  * The interface refuses public domain names in the Host header (421).
+    It used to answer to any, so a web page could point its own name at the
+    gateway's address and read the interface from the visitor's browser
+    (DNS rebinding). IP addresses, single-label names, .lan, .local,
+    .home.arpa, .internal and the user's local DNS records still pass;
+    captive-portal probes answer under any name.
+  * dnsmasq no longer serves the gateway's /etc/hosts to the LAN: every
+    client asking for "node" was told 127.0.1.1.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Thu, 12 Nov 2026 10:58:02 +0300
+
 shunt (2.32.8) stable; urgency=medium
 
   * The egress bridges no longer log each connection. Their xray configs set

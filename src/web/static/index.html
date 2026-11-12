@@ -626,7 +626,7 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         <div class="stat-card">
           <div class="stat-label">Адрес шлюза</div>
           <div id="s-gw" class="stat-value monospace" style="font-size:18px">—</div>
-          <div class="stat-sub">LAN IP устройства</div>
+          <div id="s-gw-sub" class="stat-sub">LAN IP устройства</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Профиль</div>
@@ -1956,6 +1956,7 @@ async function refreshStatus() {
     stateHtml += ` <span class="text-muted" style="font-size:12px">через ${escHtml(d.egress.label || 'AdGuard VPN')}${d.egress.location ? ' · ' + escHtml(d.egress.location) : ''}</span>`;
   document.getElementById('s-state').innerHTML = stateHtml;
   document.getElementById('s-gw').textContent = d.gateway_ip || '—';
+  if (d.web_name) { const sub = document.getElementById('s-gw-sub'); if (sub) sub.textContent = 'или http://' + d.web_name; }
   document.getElementById('s-profile').textContent = PROFILE_LABELS[d.profile] || d.profile;
   document.getElementById('s-geo').textContent = d.geo_updated || 'Никогда';
   const geoAbout = document.getElementById('about-geo-date');
@@ -1988,7 +1989,7 @@ async function refreshStatus() {
     _setTxt('router-open-url','http://192.168.50.1');
     _setTxt('router-ui-url', mgmt ? `http://${mgmt}` : '—');
     const desc=document.querySelector('#page-router .page-desc');
-    if(desc) desc.textContent='Режим INLINE: шлюз прозрачен — в роутере ничего прописывать не нужно. Веб-интерфейс шлюза: '+(mgmt?`http://${mgmt}`:'адрес в Home-сети');
+    if(desc) desc.textContent='Режим INLINE: шлюз прозрачен — в роутере ничего прописывать не нужно. Веб-интерфейс шлюза: '+(d.web_name?`http://${d.web_name}`+(mgmt?` или http://${mgmt}`:''):(mgmt?`http://${mgmt}`:'адрес в Home-сети'));
   } else {
     const gw = d.gateway_ip || '';
     if (gw && gw !== '?') {

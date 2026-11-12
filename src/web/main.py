@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.32.8"
+VERSION = "2.32.9"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -1202,6 +1202,26 @@ def validate_dns_settings(dns: dict) -> list[str]:
             errors.append(f"Invalid IP for record: {rec.get('ip')}")
     return errors
 
+# The web interface by name. A bare word in the address bar is a search in
+# every browser, and the downstream router does not forward single-label names
+# anyway (it answers NXDOMAIN itself; dotted ones it passes on) -- so the name
+# people type is shunt.lan, and after the first visit the browser completes it
+# from "shunt". The bare name is answered too, for clients that ask the
+# gateway directly.
+WEB_NAMES = ("shunt.lan", "shunt")
+
+def web_name_lines(lan_ip: str, taken: list) -> list:
+    """dnsmasq lines that point WEB_NAMES at the gateway, unless the user's
+    own records already say where those names go."""
+    if not lan_ip or lan_ip.startswith("127."):
+        return []
+    taken = {(t or "").lower().rstrip(".") for t in taken}
+    names = [n for n in WEB_NAMES if n not in taken]
+    if not names:
+        return []
+    return ["", "# The web interface: http://%s" % WEB_NAMES[0]] + \
+           ["address=/%s/%s" % (n, lan_ip) for n in names]
+
 def build_dnsmasq_conf(dns: dict, split: Optional[tuple[list, list]] = None) -> str:
     """
     The whole dnsmasq configuration, not only the DNS half.
@@ -1233,6 +1253,9 @@ def build_dnsmasq_conf(dns: dict, split: Optional[tuple[list, list]] = None) -> 
         "bind-dynamic",
         "port=5335",
         "no-resolv",
+        # The gateway's own /etc/hosts is not the LAN's business: without this
+        # every client asking for "node" was told 127.0.1.1 -- itself.
+        "no-hosts",
         f"cache-size={dns.get('cache_size', 1000)}",
         "",
     ]
@@ -1250,6 +1273,7 @@ def build_dnsmasq_conf(dns: dict, split: Optional[tuple[list, list]] = None) -> 
         lines += _dsplit.dnsmasq_lines(direct, back, dns["upstream_ru"])
     for rec in dns.get("local_records", []):
         lines.append(f"address=/{rec['hostname']}/{rec['ip']}")
+    lines += web_name_lines(lan_ip, [r.get("hostname", "") for r in dns.get("local_records", [])])
     # The DHCP half belongs to the topology, but it lives in this file, so it
     # has to be reproduced here or writing DNS settings would delete it.
     if lan_if and lan_ip and lan_ip != "127.0.0.1":
@@ -2458,6 +2482,68 @@ def _import_dest(arcname: str) -> Optional[Path]:
 # ─────────────────────────────────────────────────────────────────────────────
 app = FastAPI(docs_url=None, redoc_url=None)
 
+# Names that resolve through public DNS are the ones a stranger controls. Until
+# 2.32.9 the interface answered to any Host, so a web page could point its own
+# name at the gateway's address (DNS rebinding) and read the interface from the
+# visitor's browser as a same-origin page. Only such names are turned away:
+# IP addresses, single-label names (shunt, node, localhost) and the private
+# suffixes below cannot be registered by anyone, and names the user set up in
+# "Local DNS records" are theirs.
+_PRIVATE_SUFFIXES = (".lan", ".local", ".home.arpa", ".internal", ".localhost")
+# Captive-portal probes come in under the OS vendor's name by design.
+_ANY_HOST_PATHS = ("/generate_204", "/hotspot-detect.html", "/ncsi.txt")
+
+def host_allowed(host_header: str, local_names=()) -> bool:
+    h = (host_header or "").strip().lower()
+    if not h:
+        return True              # no Host at all: not a browser
+    if h.startswith("["):        # [v6]:port
+        h = h[1:h.find("]")] if "]" in h else h[1:]
+    elif h.count(":") == 1:      # name:port or v4:port
+        h = h.rsplit(":", 1)[0]
+    h = h.rstrip(".")
+    try:
+        ipaddress.ip_address(h)
+        return True
+    except ValueError:
+        pass
+    if "." not in h or h.endswith(_PRIVATE_SUFFIXES):
+        return True
+    return h in {(n or "").lower().rstrip(".") for n in local_names}
+
+def _local_record_names() -> list:
+    try:
+        return [r.get("hostname", "") for r in (load_settings().get("dns") or {}).get("local_records", [])]
+    except Exception:
+        return []
+
+class _HostGuard:
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket") and scope.get("path") not in _ANY_HOST_PATHS:
+            host = ""
+            for k, v in scope.get("headers") or []:
+                if k == b"host":
+                    host = v.decode("latin-1")
+                    break
+            # The settings are read only for a name the cheap test refused.
+            if not host_allowed(host) and not host_allowed(host, _local_record_names()):
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                    return
+                body = ("Shunt answers at http://%s or at the gateway's IP address, "
+                        "not under the name %s.\n" % (WEB_NAMES[0], host)).encode()
+                await send({"type": "http.response.start", "status": 421,
+                            "headers": [(b"content-type", b"text/plain; charset=utf-8"),
+                                        (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.inner(scope, receive, send)
+
+app.add_middleware(_HostGuard)
+
 async def _scheduler_loop() -> None:
     """Run enabled scheduled tasks."""
     await _idle(60)
@@ -2843,7 +2929,7 @@ async def get_status(u: str = Depends(auth_dep)):
             "fptn_enabled": bool((s.get("fptn") or {}).get("enabled")),
             "in_fallback": bool(s.get("fallback_saved_profile")),
             "fallback_saved_profile": s.get("fallback_saved_profile"),
-            "gateway_ip": gw, "profile": s.get("profile", "all_except_ru"),
+            "gateway_ip": gw, "web_name": WEB_NAMES[0], "profile": s.get("profile", "all_except_ru"),
             "topology": _net_conf().get("TOPOLOGY", "loop"), "mgmt_ip": _get_mgmt_ip(),
             "nav": _nav_flags(s),
             "vpn": vpn_meta, "geo_updated": s.get("geo_updated"), "speeds": speeds,
