@@ -78,6 +78,14 @@ class TestEnvironmentChanges:
         blank = dict(self.BEFORE, dhcp_server=None, gateway=None, prefix=None, lease_band=None)
         assert dg.environment_changes(blank, self.BEFORE) == []
 
+    def test_unknown_in_words_is_not_a_change(self):
+        # What the readers really return with no lease and no address
+        # (2026-11-13: "неизвестно → короткая" after networkd restarted).
+        blank = dict(self.BEFORE, lease_band=dg.lease_band(None),
+                     **{"class": dg.classify_address(None)})
+        assert dg.environment_changes(blank, self.BEFORE) == []
+        assert dg.environment_changes(self.BEFORE, blank) == []
+
     def test_unknown_now_is_not_a_change_either(self):
         blank = dict(self.BEFORE, dhcp_server=None, gateway=None)
         assert dg.environment_changes(self.BEFORE, blank) == []

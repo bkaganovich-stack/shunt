@@ -1,3 +1,16 @@
+shunt (2.32.11) stable; urgency=medium
+
+  * No more "DHCP lease band changed: unknown -> short" after networkd
+    restarts. With no lease file the lease band reads as the word
+    "неизвестно", which the October guard against blank readings took for
+    a value; it was also kept as the last known value. On 2026-11-13 an
+    unattended libc upgrade restarted networkd and the notice appeared
+    while the provider's lease (10 minutes) had not changed. "неизвестно"
+    and "нет адреса" now count as no reading, both for announcing a change
+    and for remembering the last value.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 13 Nov 2026 12:00:00 +0300
+
 shunt (2.32.10) stable; urgency=medium
 
   * The watchdog notices a device that opens connections in a loop. On

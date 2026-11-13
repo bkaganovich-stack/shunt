@@ -540,7 +540,8 @@ def run_diagnosis(state: dict, wan: str) -> dict:
     # Keep the last known value of anything this cycle could not read (no
     # lease yet): a change made across such a blank, A -> nothing -> B, is
     # still reported as A -> B.
-    state["environment"] = {**known, **{k: v for k, v in d["environment"].items() if v}}
+    state["environment"] = {**known, **{k: v for k, v in d["environment"].items()
+                                        if dg.known(v)}}
 
     if d["healthy"]:
         clear_attention("path")

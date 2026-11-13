@@ -143,6 +143,18 @@ def _duration(v: str) -> int | None:
     return total if seen else None
 
 
+# What a reading says when there was nothing to read. These are words, not
+# blanks, so a plain truth test took them for values: on 2026-11-13 an
+# unattended libc upgrade restarted networkd, the lease file was gone for a
+# second, "неизвестно" was kept as the lease band, and the next reading
+# announced "неизвестно → короткая" while the provider had not moved.
+UNKNOWN = {"неизвестно", "нет адреса"}
+
+
+def known(v) -> bool:
+    return bool(v) and v not in UNKNOWN
+
+
 def environment_changes(old: dict, new: dict) -> list[str]:
     """
     Plain sentences about what moved, in the order a person would want them.
@@ -159,7 +171,7 @@ def environment_changes(old: dict, new: dict) -> list[str]:
     # announced a new DHCP server nine times in a week while the provider sat
     # still (2026-10).
     def moved(k):
-        return bool(old.get(k)) and bool(new.get(k)) and old.get(k) != new.get(k)
+        return known(old.get(k)) and known(new.get(k)) and old.get(k) != new.get(k)
 
     out = []
     if moved("class"):
