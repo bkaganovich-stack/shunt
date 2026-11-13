@@ -22,6 +22,7 @@ The target spec (topology-target.json) is written by the API and looks like:
 """
 import json, re, shutil, socket, subprocess, sys, time
 from pathlib import Path
+from typing import Optional
 
 BASE         = Path("/opt/shunt")
 CFG          = BASE / "config"
