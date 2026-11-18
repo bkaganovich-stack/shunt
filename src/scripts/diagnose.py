@@ -283,6 +283,15 @@ RUNGS = [
 ]
 
 
+def _said(ok: bool, yes: str, no: str) -> tuple[bool, str]:
+    """
+    A rung's detail follows its result. These three used to carry the success
+    text either way, so a dead tunnel was summarised as "Туннель несёт трафик
+    — туннель отвечает" in the log and on the overview (2026-11-18).
+    """
+    return bool(ok), (yes if ok else no)
+
+
 def ladder(iface: str, socks: str = "127.0.0.1:1081") -> dict:
     """
     Walk the preconditions in order and stop at the first unmet one.
@@ -299,9 +308,12 @@ def ladder(iface: str, socks: str = "127.0.0.1:1081") -> dict:
         "address":  lambda: (bool(env["cidr"]),
                              env["cidr"] or "DHCP не дал адрес"),
         "gateway":  lambda: gateway_on_the_wire(env["gateway"]),
-        "internet": lambda: (reaches_internet(), "TCP наружу проходит"),
-        "dns":      lambda: (resolves(), "резолвер отвечает"),
-        "egress":   lambda: (egress_carries(socks), "туннель отвечает"),
+        "internet": lambda: _said(reaches_internet(), "TCP наружу проходит",
+                                  "TCP наружу не проходит"),
+        "dns":      lambda: _said(resolves(), "резолвер отвечает",
+                                  "резолвер не отвечает"),
+        "egress":   lambda: _said(egress_carries(socks), "туннель отвечает",
+                                  "туннель не отвечает"),
     }
     rungs, first = [], None
     for key, title, owner, fixable in RUNGS:
@@ -353,6 +365,14 @@ def remedy_allowed(state: dict, remedy: str, diagnosis: dict,
     rec = (state.get("remedies") or {}).get(remedy) or {}
     now = time.time()
     attempts = [t for t in rec.get("attempts", []) if now - t < window_sec]
+    # Giving up is final until the fault clears (clear_remedy). Counting only
+    # inside a sliding window let every attempt that aged out buy another one:
+    # on 2026-11-18 a five-hour AdGuard outage got 30 restarts, three every
+    # half hour, 27 of them logged as "attempt 3 of 3".
+    if rec.get("exhausted"):
+        return False, ("уже %d попытки не помогли — диагноз неверен, "
+                       "перезапуски остановлены до восстановления"
+                       % max_attempts)
     if len(attempts) >= max_attempts:
         return False, ("уже %d попытки за %d мин не помогли — диагноз неверен, "
                        "повторять бессмысленно"
@@ -360,12 +380,15 @@ def remedy_allowed(state: dict, remedy: str, diagnosis: dict,
     return True, "попытка %d из %d" % (len(attempts) + 1, max_attempts)
 
 
-def record_remedy(state: dict, remedy: str, window_sec: int = 1800) -> dict:
+def record_remedy(state: dict, remedy: str, window_sec: int = 1800,
+                  max_attempts: int = 3) -> dict:
     rec = (state.setdefault("remedies", {})).setdefault(remedy, {})
     now = time.time()
     rec["attempts"] = [t for t in rec.get("attempts", []) if now - t < window_sec]
     rec["attempts"].append(now)
     rec["last"] = now
+    if len(rec["attempts"]) >= max_attempts:
+        rec["exhausted"] = True
     return state
 
 

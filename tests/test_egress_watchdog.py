@@ -83,6 +83,48 @@ class TestWatchdogAttention:
         assert self._active() == ["assumption"]
 
 
+class TestRestartsStop:
+    """2026-11-18: five hours of a dead AdGuard, 30 restarts, house unaffected."""
+
+    def _setup(self, monkeypatch, tmp_path, active):
+        wd.ATTENTION = tmp_path / "attention.json"
+        wd.STATE = tmp_path / "state.json"
+        wd.LOG = tmp_path / "agwatch.log"
+        monkeypatch.setattr(wd, "wan_iface", lambda: "wan0")
+        monkeypatch.setattr(wd.dg, "ladder", lambda wan: TUNNEL_DOWN)
+        monkeypatch.setattr(wd, "active_egress", lambda: active)
+        restarts = []
+        monkeypatch.setattr(wd.subprocess, "run",
+                            lambda *a, **k: restarts.append(a))
+        clock = [1_000_000.0]
+        monkeypatch.setattr(wd.dg.time, "time", lambda: clock[0])
+        return restarts, clock
+
+    def test_a_five_hour_outage_gets_three_restarts(self, monkeypatch, tmp_path):
+        restarts, clock = self._setup(
+            monkeypatch, tmp_path, ("adguard", "AdGuard VPN", "127.0.0.1:1081"))
+        for _ in range(300):
+            assert wd.main() == 0
+            clock[0] += 60
+        assert len(restarts) == 3
+        item = json.loads(wd.ATTENTION.read_text())[0]
+        assert item["text"].startswith("Туннель не поднимается")
+
+    def test_a_dead_reserve_is_not_reported_as_the_house_cut_off(
+            self, monkeypatch, tmp_path):
+        restarts, clock = self._setup(
+            monkeypatch, tmp_path,
+            ("amnezia", "AmneziaWG (свой каскад)", "192.168.244.6:1083"))
+        for _ in range(5):
+            wd.main()
+            clock[0] += 60
+        items = json.loads(wd.ATTENTION.read_text())
+        assert [i["kind"] for i in items] == ["egress"]
+        assert items[0]["text"].startswith("Резервный выход AdGuard VPN не отвечает")
+        assert "Дом идёт через AmneziaWG" in items[0]["detail"]
+        assert "Туннель не поднимается" not in items[0]["text"]
+
+
 class TestSlowTunnel:
     """25 September: the ladder said healthy while the whole house got 1 Mbit/s."""
 

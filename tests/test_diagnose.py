@@ -7,6 +7,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "scripts"))
 
 import diagnose as dg  # noqa: E402
@@ -144,6 +146,23 @@ class TestLadder:
         assert d["first_unmet"] == "internet"
         assert d["fixable_here"] is False
 
+    @pytest.mark.parametrize("rung,said,ok_text", [
+        ("internet", "TCP наружу не проходит", "TCP наружу проходит"),
+        ("dns", "резолвер не отвечает", "резолвер отвечает"),
+        ("egress", "туннель не отвечает", "туннель отвечает"),
+    ])
+    def test_a_failed_rung_does_not_read_as_success(self, monkeypatch, rung,
+                                                    said, ok_text):
+        # 2026-11-18: a dead tunnel was summarised "Туннель несёт трафик —
+        # туннель отвечает" in the log and on the overview.
+        self._patch(monkeypatch, **{rung: False})
+        d = dg.ladder("enp1s0")
+        assert d["first_unmet"] == rung
+        assert d["summary"].endswith(" — " + said)
+        self._patch(monkeypatch)
+        row = next(r for r in dg.ladder("enp1s0")["rungs"] if r["key"] == rung)
+        assert row["detail"] == ok_text
+
     def test_no_address_comes_before_no_gateway(self, monkeypatch):
         self._patch(monkeypatch, cidr=None, gw_ok=False)
         assert dg.ladder("enp1s0")["first_unmet"] == "address"
@@ -189,6 +208,39 @@ class TestRemedyLimiting:
         ok, _ = dg.remedy_allowed(state, "restart-adguard", self._diag(),
                                   window_sec=1800)
         assert ok
+
+    def test_giving_up_outlives_the_window(self):
+        # 2026-11-18: every attempt that aged out of the window bought another
+        # restart, so a five-hour outage got three every half hour.
+        state = {}
+        for _ in range(3):
+            dg.record_remedy(state, "restart-adguard")
+        rec = state["remedies"]["restart-adguard"]
+        rec["attempts"] = [time.time() - 4000] * 3
+        ok, why = dg.remedy_allowed(state, "restart-adguard", self._diag(),
+                                    window_sec=1800)
+        assert not ok
+        assert "диагноз неверен" in why and "до восстановления" in why
+
+    def test_a_five_hour_outage_gets_three_restarts(self, monkeypatch):
+        clock = [1_000_000.0]
+        monkeypatch.setattr(dg.time, "time", lambda: clock[0])
+        state, restarts = {}, 0
+        for _ in range(300):                       # once a minute, five hours
+            ok, _ = dg.remedy_allowed(state, "restart-adguard", self._diag())
+            if ok:
+                dg.record_remedy(state, "restart-adguard")
+                restarts += 1
+            clock[0] += 60
+        assert restarts == 3
+
+    def test_recovery_ends_giving_up(self):
+        state = {}
+        for _ in range(3):
+            dg.record_remedy(state, "restart-adguard")
+        dg.clear_remedy(state, "restart-adguard")
+        ok, why = dg.remedy_allowed(state, "restart-adguard", self._diag())
+        assert ok and "1 из 3" in why
 
     def test_success_clears_the_count(self):
         state = {}
