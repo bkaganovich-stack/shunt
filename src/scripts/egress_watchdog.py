@@ -408,6 +408,23 @@ def check_services(state: dict) -> None:
     attention("services", "Через туннель не открываются: %s" % listed, detail)
 
 
+def egress_concern(d: dict, why: str) -> tuple[str, str]:
+    """
+    (text, detail) for the overview when AdGuard stays down after the restarts.
+
+    The ladder and the restarts are AdGuard's, but AdGuard is not always what
+    carries the house. On 2026-11-18 it was third in the order behind
+    AmneziaWG, the house was unaffected for five hours, and the overview said
+    "Туннель не поднимается" as if everything were cut off.
+    """
+    ident, label, _ = active_egress()
+    stopped = "Автоматические перезапуски прекращены — %s" % why
+    if ident == "adguard":
+        return "Туннель не поднимается: %s" % d["summary"], stopped
+    return ("Резервный выход AdGuard VPN не отвечает: %s" % d["summary"],
+            "Дом идёт через %s, на него это не влияет. %s" % (label, stopped))
+
+
 def main() -> int:
     wan = wan_iface()
     if not wan:
@@ -441,9 +458,8 @@ def main() -> int:
         # concern it no longer supports goes, so only the current one shows.
         if d.get("fixable_here"):
             clear_attention("uplink")
-            attention("egress",
-                      "Туннель не поднимается: %s" % d["summary"],
-                      "Автоматические перезапуски прекращены — %s" % why)
+            text, detail = egress_concern(d, why)
+            attention("egress", text, detail)
         else:
             clear_attention("egress")
             attention("uplink",
@@ -453,7 +469,8 @@ def main() -> int:
         return 0
 
     log("перезапускаю adguardvpn — %s | состояние: %s" % (why, d["summary"]))
-    dg.record_remedy(state, REMEDY, window_sec=WINDOW_SEC)
+    dg.record_remedy(state, REMEDY, window_sec=WINDOW_SEC,
+                     max_attempts=MAX_ATTEMPTS)
     save_state(state)
     subprocess.run(["systemctl", "restart", "adguardvpn"],
                    capture_output=True, timeout=60)

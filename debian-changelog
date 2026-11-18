@@ -1,3 +1,22 @@
+shunt (2.32.12) stable; urgency=medium
+
+  * The egress watchdog stops restarting AdGuard once three restarts have
+    not helped, and stays stopped until the egress works again. It counted
+    attempts in a sliding 30-minute window, so every attempt that aged out
+    bought another: on 2026-11-18 a five-hour AdGuard outage (its own
+    servers timing out) got 30 restarts, three every half hour, 27 of them
+    logged as "attempt 3 of 3". None helped; it came back on its own.
+  * A failed check no longer reads as a passed one. The internet, DNS and
+    tunnel rungs carried their success text either way, so the outage was
+    summarised as "Туннель несёт трафик — туннель отвечает" in the log and
+    on the overview. They now say "TCP наружу не проходит", "резолвер не
+    отвечает" and "туннель не отвечает".
+  * When AdGuard is not the egress carrying the house, its outage is
+    reported as a reserve that does not answer, naming the egress the house
+    is on, instead of "Туннель не поднимается".
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Wed, 18 Nov 2026 15:00:00 +0300
+
 shunt (2.32.11) stable; urgency=medium
 
   * No more "DHCP lease band changed: unknown -> short" after networkd
