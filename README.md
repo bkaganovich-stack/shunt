@@ -68,7 +68,7 @@ python3 3.10 or newer. Both are on the
 
 ```
 shasum -a 256 -c SHA256SUMS
-sudo apt install ./shunt_2.32.12_all.deb ./shunt-xray_*.deb
+sudo apt install ./shunt_2.32.13_all.deb ./shunt-xray_*.deb
 ```
 
 `apt` resolves the rest from the distribution archive. `sing-box` is not in the
