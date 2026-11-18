@@ -109,9 +109,15 @@ def netplan_inline(t: dict) -> str:
     # dhcp-identifier: mac → identify to the ISP by MAC (option 61), like the
     # router/dhcpcd do, so a MAC-keyed lease is recognised (DUID would look
     # like a new client). Proven: WAN leases 10.203.101.91 with the router MAC.
+    # optional: the house's network does not wait for the provider's. Without
+    # it boot waits for a WAN lease before dnsmasq and the routing start, and
+    # gives up after two minutes. On 2026-11-13 the WAN port got carrier 218 s
+    # into boot: for 120 s the LAN had no DHCP, no DNS and no interface, and
+    # systemd-networkd-wait-online stayed "failed" for the next five days.
     wan_block = f"""    {wan}:
       match: {{macaddress: {perm_mac_of(wan)}}}
       set-name: {wan}{wan_clone}
+      optional: true
       dhcp4: true
       dhcp-identifier: mac
       dhcp4-overrides: {{use-dns: false}}"""
