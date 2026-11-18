@@ -148,16 +148,32 @@ watchdog every minute. The watchdog's checks are AdGuard's: when AdGuard does
 not carry a request, it restarts `adguardvpn.service`, at most three times,
 and then stops until AdGuard works again (2.32.12). Before 2.32.12 a dead
 AdGuard was restarted three times every half hour for as long as it stayed
-dead.
+dead. It does not touch AdGuard while the service is starting or stopping, or
+for two minutes after it came up, and does not count that wait as an attempt
+(2.32.13).
 
 Version on the gateway as of 2026-11-18:
 
-    adguardvpn-cli 1.8.2   sha256 6f5f3f217a1f93f200bb23f5caa4a694e77c873be2825e7f4f46d5a991e2f6de
+    adguardvpn-cli 1.8.3   sha256 8a4e58f6a7231723f5e1ff83b535400329af5e7b7ce653cf955b8ad844eb2f1f
 
 A single statically linked binary at `/usr/local/bin/adguardvpn-cli`, the one
 place a package must not write. That is correct here: this is the
-administrator's software, not Shunt's. Install it from AdGuard's own
-distribution, then:
+administrator's software, not Shunt's. It comes from AdGuard's releases on
+GitHub, [AdguardTeam/AdGuardVPNCLI](https://github.com/AdguardTeam/AdGuardVPNCLI/releases),
+asset `adguardvpn-cli-<version>-linux-x86_64.tar.gz`. The archive carries the
+binary and a detached signature, `adguardvpn-cli.sig`, by AdGuard's key
+`28645AC9776EC4C00BCE2AFC0FE641E7235E2EC6` (the fingerprint AdGuard's own
+`install.sh` names). Updating by hand:
+
+```
+gpg --verify adguardvpn-cli.sig adguardvpn-cli
+sudo cp -p /usr/local/bin/adguardvpn-cli /usr/local/bin/adguardvpn-cli.previous
+sudo install -m 0755 adguardvpn-cli /usr/local/bin/adguardvpn-cli
+sudo systemctl restart adguardvpn
+```
+
+The client also has its own `adguardvpn-cli update`. It has not been tried on
+this gateway. A first install also needs the account and a login:
 
 ```
 sudo adduser --system --group --home /var/lib/agvpn \
@@ -209,7 +225,15 @@ Known on this gateway, none of it Shunt's to fix:
 - 1.8.2 sometimes aborts (SIGABRT, core dumped) on that SIGTERM, after it has
   already shut down cleanly. It happened five times between 2026-11-16 and
   2026-11-18, every time during a restart by the watchdog. It costs nothing:
-  the process was stopping anyway. 1.8.3 is available and untested here.
+  the process was stopping anyway. Replaced by 1.8.3 on 2026-11-18; whether
+  1.8.3 still does it is not yet known.
+- While AdGuard's servers are slow, a start takes longer than the
+  watchdog's minute: `location_request` times out after about twenty seconds
+  and the client connects only after that. During the 1.8.3 update the
+  watchdog took the unconnected client for a dead one and restarted it three
+  times in a row, at 16:33:56, 16:34:57 and 16:35:57 UTC. The third start
+  connected in two seconds; the house was on AmneziaWG throughout. Since
+  2.32.13 the watchdog gives a fresh start two minutes.
 - On 2026-11-17/18 AdGuard could not reach its own servers for five hours
   (`location_request failed: Timed out`, health check time-outs) and came back
   on its own. The house did not notice, because AmneziaWG carried it.
@@ -257,11 +281,13 @@ another egress carries the house.
 
 ## Where the hand-installed clients came from
 
-Still the open part, for AdGuard and FPTN. The cascade clients have their
-sources in `packaging/copyright.egress`; these two have no download URL
-written down anywhere on the gateway: no apt source for the FPTN package, no
-installer trace for AdGuard, nothing in the shell history. The AdGuard binary
-was 1.7.12 on 2026-09-12 and is 1.8.2 now, replaced on 2026-11-09; how is not
-recorded either. The hashes above are what is actually running, so a rebuild
-can at least verify that it got the same bytes. Write the source down here the
-next time either one is updated.
+**AdGuard** is settled. The 1.8.2 binary that ran here until 2026-11-18 is
+byte for byte the one in AdGuard's `v1.8.2` GitHub release, and its
+signature verifies against AdGuard's key, so the source above is where it came
+from, whatever installed it. 1.8.3 was taken from the same place.
+
+**FPTN** is still the open part. The cascade clients have their sources in
+`packaging/copyright.egress`; the FPTN package has no download URL written
+down anywhere on the gateway: no apt source, nothing in the shell history. The
+hash above is what is installed, so a rebuild can at least verify that it got
+the same bytes. Write the source down here the next time it is updated.
