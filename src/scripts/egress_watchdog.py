@@ -45,6 +45,12 @@ REMEDY = "restart-adguard"
 OWN_KINDS = ("egress", "uplink")
 MAX_ATTEMPTS = 3
 WINDOW_SEC = 1800
+# A client that has just started is not a dead one. While AdGuard's servers
+# are slow, its location request alone times out after about twenty seconds
+# before it connects. On 2026-11-18, right after the 1.8.3 update, the
+# watchdog checked 12, 21 and 20 seconds into three starts, called each one
+# dead, and spent all three attempts on a client that was still connecting.
+GRACE_SEC = 120
 
 # A tunnel can answer every check and still be useless. On Sep 25 one AdGuard
 # endpoint carried 0.1-0.6 Mbit/s for the whole house while the neighbouring
@@ -408,6 +414,40 @@ def check_services(state: dict) -> None:
     attention("services", "Через туннель не открываются: %s" % listed, detail)
 
 
+def adguard_settling(grace: float = GRACE_SEC) -> str | None:
+    """
+    Why AdGuard should be left alone for now, or None when nothing says so.
+
+    Starting or stopping, or up for less than `grace` seconds: a restart then
+    interrupts a start in progress. systemd's monotonic clock is compared with
+    ours rather than wall time, because the gateway's clock is wrong at boot
+    until NTP sets it. Anything unreadable gives None, so a broken systemctl
+    can only bring back the old behaviour, never stop the restarts.
+    """
+    try:
+        r = subprocess.run(["systemctl", "show", "adguardvpn", "-p", "ActiveState",
+                            "-p", "ActiveEnterTimestampMonotonic"],
+                           capture_output=True, text=True, timeout=10)
+        kv = dict(ln.split("=", 1) for ln in r.stdout.splitlines() if "=" in ln)
+    except Exception:
+        return None
+    state = kv.get("ActiveState", "")
+    if state in ("activating", "deactivating", "reloading"):
+        return "служба в состоянии %s" % state
+    if state != "active":
+        return None
+    try:
+        since = int(kv.get("ActiveEnterTimestampMonotonic", "0")) / 1e6
+    except ValueError:
+        return None
+    if since <= 0:
+        return None
+    age = time.monotonic() - since
+    if 0 <= age < grace:
+        return "запущен %d с назад, даю подключиться" % age
+    return None
+
+
 def egress_concern(d: dict, why: str) -> tuple[str, str]:
     """
     (text, detail) for the overview when AdGuard stays down after the restarts.
@@ -466,6 +506,12 @@ def main() -> int:
                       "Связь нарушена выше туннеля: %s" % d["summary"],
                       "Это не чинится на шлюзе (%s). Перезапуск туннеля "
                       "не поможет и не выполняется." % (d.get("owner") or "—"))
+        return 0
+
+    # Not an attempt: nothing was done, so nothing is counted.
+    settling = adguard_settling()
+    if settling:
+        log("пока не трогаю adguardvpn: %s | состояние: %s" % (settling, d["summary"]))
         return 0
 
     log("перезапускаю adguardvpn — %s | состояние: %s" % (why, d["summary"]))

@@ -98,7 +98,44 @@ class TestRestartsStop:
                             lambda *a, **k: restarts.append(a))
         clock = [1_000_000.0]
         monkeypatch.setattr(wd.dg.time, "time", lambda: clock[0])
+        monkeypatch.setattr(wd, "adguard_settling", lambda: None)
         return restarts, clock
+
+    def test_a_client_still_connecting_is_left_alone(self, monkeypatch, tmp_path):
+        # 2026-11-18, the 1.8.3 update: checked 12 s into a start, restarted.
+        restarts, clock = self._setup(
+            monkeypatch, tmp_path, ("amnezia", "AmneziaWG", "192.168.244.6:1083"))
+        monkeypatch.setattr(wd, "adguard_settling",
+                            lambda: "запущен 12 с назад, даю подключиться")
+        for _ in range(3):
+            assert wd.main() == 0
+        assert restarts == []
+        state = json.loads(wd.STATE.read_text()) if wd.STATE.exists() else {}
+        assert not state.get("remedies", {}).get(wd.REMEDY), "a wait was counted as an attempt"
+        assert "пока не трогаю adguardvpn" in wd.LOG.read_text()
+
+    def test_a_client_that_never_connects_still_gets_three_restarts_spaced_out(
+            self, monkeypatch, tmp_path):
+        restarts, clock = self._setup(
+            monkeypatch, tmp_path, ("adguard", "AdGuard VPN", "127.0.0.1:1081"))
+        started = [clock[0] - 3600]
+        times = []
+
+        def run(*a, **k):
+            restarts.append(a)
+            times.append(clock[0])
+            started[0] = clock[0]
+        monkeypatch.setattr(wd.subprocess, "run", run)
+        monkeypatch.setattr(wd, "adguard_settling",
+                            lambda: "молод" if clock[0] - started[0] < wd.GRACE_SEC else None)
+        for _ in range(300):
+            assert wd.main() == 0
+            clock[0] += 60
+        assert len(restarts) == 3
+        assert all(b - a >= wd.GRACE_SEC for a, b in zip(times, times[1:]))
+        item = json.loads(wd.ATTENTION.read_text())[0]
+        assert item["text"].startswith("Туннель не поднимается")
+
 
     def test_a_five_hour_outage_gets_three_restarts(self, monkeypatch, tmp_path):
         restarts, clock = self._setup(
@@ -123,6 +160,37 @@ class TestRestartsStop:
         assert items[0]["text"].startswith("Резервный выход AdGuard VPN не отвечает")
         assert "Дом идёт через AmneziaWG" in items[0]["detail"]
         assert "Туннель не поднимается" not in items[0]["text"]
+
+
+class TestSettling:
+    def _show(self, monkeypatch, out, now=1000.0):
+        class R:
+            stdout = out
+        monkeypatch.setattr(wd.subprocess, "run", lambda *a, **k: R)
+        monkeypatch.setattr(wd.time, "monotonic", lambda: now)
+        return wd.adguard_settling()
+
+    @pytest.mark.parametrize("state", ["activating", "deactivating"])
+    def test_a_start_or_stop_in_progress_is_settling(self, monkeypatch, state):
+        assert self._show(monkeypatch, "ActiveState=%s\nActiveEnterTimestampMonotonic=0\n" % state)
+
+    def test_up_for_twenty_seconds_is_settling(self, monkeypatch):
+        why = self._show(monkeypatch, "ActiveState=active\nActiveEnterTimestampMonotonic=980000000\n")
+        assert why and "20 с" in why
+
+    def test_up_for_five_minutes_is_not(self, monkeypatch):
+        assert self._show(monkeypatch, "ActiveState=active\nActiveEnterTimestampMonotonic=700000000\n") is None
+
+    @pytest.mark.parametrize("out", ["ActiveState=failed\n", "ActiveState=inactive\n",
+                                     "", "garbage", "ActiveState=active\nActiveEnterTimestampMonotonic=x\n"])
+    def test_dead_or_unreadable_does_not_hold_restarts_back(self, monkeypatch, out):
+        assert self._show(monkeypatch, out) is None
+
+    def test_systemctl_failing_does_not_hold_restarts_back(self, monkeypatch):
+        def boom(*a, **k):
+            raise OSError("no systemctl")
+        monkeypatch.setattr(wd.subprocess, "run", boom)
+        assert wd.adguard_settling() is None
 
 
 class TestSlowTunnel:

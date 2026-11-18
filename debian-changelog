@@ -1,3 +1,17 @@
+shunt (2.32.13) stable; urgency=medium
+
+  * The egress watchdog leaves AdGuard alone while it is starting or
+    stopping, and for two minutes after it comes up. While AdGuard's own
+    servers are slow its location request times out after about twenty
+    seconds before it connects, and the watchdog runs every minute: on
+    2026-11-18, right after AdGuard was updated to 1.8.3, it checked 12, 21
+    and 20 seconds into three starts and spent all three restart attempts
+    on a client that was still connecting. A wait is not counted as an
+    attempt. The service age is read on systemd's monotonic clock, because
+    the gateway's wall clock is wrong at boot.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Wed, 18 Nov 2026 20:30:00 +0300
+
 shunt (2.32.12) stable; urgency=medium
 
   * The egress watchdog stops restarting AdGuard once three restarts have
