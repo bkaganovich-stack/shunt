@@ -68,7 +68,7 @@ python3 3.10 or newer. Both are on the
 
 ```
 shasum -a 256 -c SHA256SUMS
-sudo apt install ./shunt_2.20.0_all.deb ./shunt-xray_*.deb
+sudo apt install ./shunt_2.32.12_all.deb ./shunt-xray_*.deb
 ```
 
 `apt` resolves the rest from the distribution archive. `sing-box` is not in the
@@ -119,10 +119,27 @@ The setup tool works out which of the two layouts applies.
 
 ## Egress and failover
 
-The tunnel provider is pluggable; today that means AdGuard VPN as primary and
-FPTN as backup. If the primary goes quiet for about three minutes, Shunt fails
-over; if both are down it routes directly and restores your profile once a
-tunnel answers again.
+The tunnel is not one VPN but an ordered list of egresses, each of them a SOCKS
+address to Shunt:
+
+- **AmneziaWG** and **TrustTunnel** to a cascade of your own servers (entry
+  and exit in different countries), each run in an isolated network
+  namespace. Their clients go in a separate `shunt-egress-bin` package, which
+  is not published: build it with `packaging/build-egress.sh` from the
+  upstream releases listed in `packaging/copyright.egress`.
+- **Cloudflare WARP** on the cascade's exit server, for services that place
+  the cascade's own address in the wrong country.
+- **AdGuard VPN** and **FPTN**, whose clients you install yourself.
+- **Shadowsocks, VLESS, VMess and Trojan keys**, served by xray itself.
+
+You choose the order. The first enabled egress carries the house; if it stays
+quiet for about three minutes, the first reserve that answers takes over, and
+the primary takes the house back once it answers again. If no egress answers,
+Shunt routes directly and restores your profile once one does. A profile rule
+can also pin a site to one egress, falling back to the house's when that
+egress is down. An egress inside a namespace fails closed: with its tunnel
+down, nothing leaves on the provider's address. Details, versions and what the
+packages do not install are in [docs/EGRESS.md](docs/EGRESS.md).
 
 ## Failing safe
 
