@@ -1,0 +1,36 @@
+[Unit]
+Description=Shunt — remote access to the gateway's sshd via a reverse ssh to the owner's server
+# Design and server-side setup: docs/REMOTE_ACCESS.md in the Shunt repository.
+After=network-online.target shunt.service
+Wants=network-online.target
+# Off unless switched on on the page, which enables this unit. Without the
+# key there is nothing to connect with, and Restart=always would only loop.
+ConditionPathExists=/var/lib/shunt-ra/id_ed25519
+
+[Service]
+Type=simple
+# The supervisor reads root-only settings; every ssh it starts runs as
+# shunt-ra (remote_access_runner.py). Nothing here routes or edits a firewall.
+ExecStart=/usr/bin/python3 -I /opt/shunt/scripts/remote_access_runner.py
+Restart=always
+RestartSec=30
+RuntimeDirectory=shunt-remote-access
+RuntimeDirectoryMode=0755
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_KILL
+ProtectSystem=strict
+ReadWritePaths=/run/shunt-remote-access
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryMax=64M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target
