@@ -2049,25 +2049,42 @@ function startUpdates() {
 
 // ─── About / version ─────────────────────────────────────────────────────────
 // ─── Удалённый доступ (docs/REMOTE_ACCESS.md) ────────────────────────────────
+// Fields the owner has typed into and not yet saved: a background refresh of
+// the status must not overwrite them.
+const _raDirty = new Set();
+let _raTimer = null;
 function renderRemoteAccess(d) {
-  if (!d) return;
+  if (!d || !d.roads) return;
   const st = document.getElementById('ra-status');
   const state = (d.status || {}).state;
   st.textContent = d.status_text || '—';
   st.style.color = state === 'up' ? 'var(--green)' : state === 'failing' ? 'var(--red)' : '';
   document.getElementById('ra-warn').style.display = d.password_auth_warning ? '' : 'none';
   document.getElementById('ra-enabled').checked = !!d.enabled;
-  const set = (id, v) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = v ?? ''; };
+  const set = (id, v) => { const el = document.getElementById(id); if (document.activeElement !== el && !_raDirty.has(id)) el.value = v ?? ''; };
   set('ra-host', d.host); set('ra-port', d.port); set('ra-user', d.user); set('ra-rport', d.remote_port);
   const via = document.getElementById('ra-via');
-  via.innerHTML = (d.roads || []).map(r =>
-    `<option value="${escH(r.id)}"${r.id === d.via ? ' selected' : ''}>${escH(r.label)}</option>`).join('');
+  if (!_raDirty.has('ra-via') && document.activeElement !== via)
+    via.innerHTML = (d.roads || []).map(r =>
+      `<option value="${escH(r.id)}"${r.id === d.via ? ' selected' : ''}>${escH(r.label)}</option>`).join('');
   document.getElementById('ra-authkeys').value = d.authorized_keys || '';
   document.getElementById('ra-key-btn').textContent = d.has_key ? 'Заменить ключ' : 'Создать ключ';
   document.getElementById('ra-hostfp').textContent = d.host_key_fingerprint || 'не задан';
 }
 async function loadRemoteAccess() {
+  ['ra-host', 'ra-port', 'ra-user', 'ra-rport', 'ra-via'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el._raWatch) { el._raWatch = true; el.addEventListener('input', () => _raDirty.add(id)); el.addEventListener('change', () => _raDirty.add(id)); }
+  });
   renderRemoteAccess(await apiJ('GET', '/api/remote-access'));
+  // The runner moves from "connecting" to "up" (or from "up" to failing) on
+  // its own; follow it while the card is on screen, and stop when it is not.
+  clearInterval(_raTimer);
+  _raTimer = setInterval(async () => {
+    const page = document.getElementById('page-settings');
+    if (!page || !page.classList.contains('active') || document.hidden) { clearInterval(_raTimer); _raTimer = null; return; }
+    renderRemoteAccess(await apiJ('GET', '/api/remote-access'));
+  }, 10000);
 }
 async function _raPost(path, body) {
   const r = await api('POST', path, body);
@@ -2082,6 +2099,7 @@ async function setRemoteAccess(body) {
 }
 function saveRemoteAccess() {
   const v = id => document.getElementById(id).value.trim();
+  _raDirty.clear();
   setRemoteAccess({host: v('ra-host'), port: +v('ra-port') || 22, user: v('ra-user'),
                    remote_port: +v('ra-rport') || 2222, via: v('ra-via')});
 }

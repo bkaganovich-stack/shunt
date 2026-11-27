@@ -78,7 +78,15 @@ def config(settings: dict) -> dict:
     return out
 
 
+_HOST_CHARS_RE = re.compile(r"^[A-Za-z0-9.:-]+$")
+
+
 def _valid_host(host: str) -> bool:
+    # Characters first: ipaddress accepts an IPv6 scope suffix ("fe80::1%x")
+    # with anything after the '%', newlines included, and that would reach
+    # ssh_config as a directive of its own. No scope, no whitespace, no '%'.
+    if not _HOST_CHARS_RE.match(host):
+        return False
     try:
         ipaddress.ip_address(host)
         return True

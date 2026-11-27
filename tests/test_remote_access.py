@@ -41,7 +41,8 @@ class TestValidate:
         assert errors == [] and clean["host"] == host
 
     @pytest.mark.parametrize("host", ["a b", "host\n    ProxyCommand sh", "x:22", "%h", "-oProxyCommand=x",
-                                      "user@host", "a..b"])
+                                      "user@host", "a..b", "fe80::1%h\n    ProxyCommand id",
+                                      "fe80::1%eth0", "203.0.113.7 22"])
     def test_refuses_anything_that_could_reach_the_ssh_config(self, host):
         clean, errors = ra.validate({"host": host})
         assert errors and "host" not in clean
