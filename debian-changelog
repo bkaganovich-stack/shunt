@@ -1,3 +1,21 @@
+shunt (2.33.1) stable; urgency=medium
+
+  * The SOCKS bridges in the egress namespaces can no longer open
+    connections to the gateway itself. Their firewall let the bridge (user
+    nobody) reach all of 192.168.244.0/28, and that range holds the host's
+    own veth addresses; the host accepts connections everywhere but on the
+    WAN. On 2026-11-27, with a temporary route on the Riga server,
+    "nc -X 5 -x 192.168.244.6:1083 192.168.244.5 22" returned the gateway's
+    sshd banner: anyone who could reach a bridge's port from the tunnel
+    side could reach the gateway's services. A bridge may now only answer
+    over the veth. The one new connection allowed across the range is
+    AmneziaWG's WARP port falling back to TrustTunnel's, 192.168.244.10:1086
+    over TCP. FPTN's bridge had the same gap through its own /30 and gets
+    the same rule. Fail-closed is unchanged: the bridge still cannot leave
+    through the veth when its tunnel is down.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 27 Nov 2026 18:00:00 +0300
+
 shunt (2.32.13) stable; urgency=medium
 
   * The egress watchdog leaves AdGuard alone while it is starting or

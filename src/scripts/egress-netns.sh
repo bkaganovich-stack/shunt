@@ -21,7 +21,7 @@ BIN=/opt/shunt/egress/bin
 CFG=/opt/shunt/config/egress/$NAME
 RUN=/run/shunt-egress/$NAME
 BRIDGE_UID=65534          # nobody
-EGRESS_NET=192.168.244.0/28   # every egress's /30; the bridges may talk across it
+EGRESS_NET=192.168.244.0/28   # every egress's /30, routed via the veth (setup)
 WAN=$(ip route show default | awk '/default/{print $5; exit}')
 
 # One /30 per egress inside 192.168.244.0/28, which iptables.sh excludes from
@@ -101,9 +101,21 @@ setup() {
     # A flow left over from before (a previous run, a WAN flap) may have been
     # recorded without NAT; it would keep its private source for good.
     command -v conntrack >/dev/null && conntrack -D -s "$NSIP" >/dev/null 2>&1
-    # Fail closed in the kernel: whatever runs as BRIDGE_UID may answer the
-    # host over the veth but never leave through it.
-    ip netns exec "$NS" iptables -A OUTPUT -o "$VETH_NS" -d "$EGRESS_NET" -j ACCEPT
+    # Fail closed in the kernel: whatever runs as BRIDGE_UID may answer over
+    # the veth but never start anything through it -- not to the internet,
+    # and not to the host either. Until 2.33.1 the bridge could open
+    # connections to all of EGRESS_NET, which holds the host's own veth
+    # addresses (.1 .5 .9), and the host accepts on every interface but the
+    # WAN: on 2026-11-27, with a route to 192.168.244.6 set up on Riga for an
+    # emergency login, "nc -X 5 -x 192.168.244.6:1083 192.168.244.5 22"
+    # answered with the gateway's sshd banner. So replies only, plus the one
+    # new connection a bridge needs across the /28: AmneziaWG's WARP port
+    # falling back to TrustTunnel's (run_amnezia).
+    ip netns exec "$NS" iptables -A OUTPUT -o "$VETH_NS" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    if [ "$NAME" = amnezia ]; then
+        ip netns exec "$NS" iptables -A OUTPUT -o "$VETH_NS" -d "$TT_NSIP" -p tcp --dport "$WARP_PORT" \
+            -m owner --uid-owner $BRIDGE_UID -j ACCEPT
+    fi
     ip netns exec "$NS" iptables -A OUTPUT -o "$VETH_NS" -m owner --uid-owner $BRIDGE_UID \
         -j REJECT --reject-with icmp-host-unreachable
 }

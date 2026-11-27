@@ -66,6 +66,15 @@ AmneziaWG, `.8` TrustTunnel), and `iptables.sh` excepts that whole `/28` from
 TPROXY. An exception narrower than that sends one egress's tunnel traffic into
 another.
 
+The bridge in each namespace runs as `nobody`, and `nobody` may not start a
+connection over the veth at all: it may only answer what the host sent it.
+The host's own veth addresses (`.1`, `.5`, `.9`) are inside the `/28`, and the
+host accepts connections on every interface but the WAN, so a bridge allowed
+to reach the `/28` hands the gateway's own services, sshd among them, to
+anyone who can reach its SOCKS port (shown on 2026-11-27 from Riga). The one
+exception is AmneziaWG's WARP port falling back to TrustTunnel's,
+`192.168.244.10:1086` over TCP (2.33.1).
+
 ## The own cascade: AmneziaWG, TrustTunnel and WARP
 
 A pair of servers rented by the household: the entry in Riga, the exit in
