@@ -459,3 +459,12 @@ class TestResolverRulesFollowTheLease:
         hm.sync_resolver_rules()
         assert [c for c in calls if c[:2] == ("ip", "rule") and c[2] in ("add", "del")] == []
         assert logged == []
+
+    def test_a_lease_naming_a_fixed_destination_converges(self, monkeypatch, tmp_path):
+        # A provider that hands out 1.1.1.1 must not get a fresh "missing rule"
+        # every cycle: that rule already exists, iptables.sh put it there.
+        calls, logged = self._env(monkeypatch, tmp_path, RULES_AFTER_EARLY_START,
+                                  lease="DNS=1.1.1.1 1.0.0.1\n")
+        hm.sync_resolver_rules()
+        assert [c for c in calls if c[:2] == ("ip", "rule") and c[2] in ("add", "del")] == []
+        assert logged == []

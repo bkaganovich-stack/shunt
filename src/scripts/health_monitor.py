@@ -343,11 +343,11 @@ def lease_resolvers() -> list[str]:
     return out[:4]
 
 def resolver_rules_present() -> set[str]:
-    """Destinations of the priority-50 'to X lookup main' rules, minus the fixed ones."""
+    """Destinations of the priority-50 'to X lookup main' rules, fixed ones included."""
     got = set()
     for ln in run("ip", "rule", "show").stdout.splitlines():
         m = re.match(r"50:\s+from all to (\d+\.\d+\.\d+\.\d+)(?:/32)? lookup main\s*$", ln)
-        if m and m.group(1) not in FIXED_DIRECT_DST:
+        if m:
             got.add(m.group(1))
     return got
 
@@ -368,7 +368,7 @@ def sync_resolver_rules() -> None:
         if a not in have:
             log(f"AUTO-FIX: ISP resolver {a} has no direct-route rule -> adding it")
             run("ip", "rule", "add", "to", f"{a}/32", "priority", "50", "lookup", "main")
-    for a in sorted(have - set(want)):
+    for a in sorted(have - set(want) - FIXED_DIRECT_DST):
         log(f"AUTO-FIX: {a} is no longer an ISP resolver in the lease -> removing its rule")
         run("ip", "rule", "del", "to", f"{a}/32", "priority", "50", "lookup", "main")
 
