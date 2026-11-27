@@ -5,7 +5,8 @@ set -e
 UNITS="shunt.service shunt-web.service shunt-dohproxy.service shunt-health.service
        shunt-agwatch.service shunt-agwatch.timer shunt-mgmt-ap.service
        shunt-fptn-egress.service shunt-geoupdate.timer shunt-first-boot.service
-       shunt-selfupdate.service shunt-selfupdate.timer"
+       shunt-selfupdate.service shunt-selfupdate.timer
+       shunt-remote-access.service"
 case "$1" in
   remove)
     for u in $(systemctl list-units --all --plain --no-legend 'shunt-egress@*' 2>/dev/null | awk '{print $1}'); do

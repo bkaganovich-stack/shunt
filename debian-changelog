@@ -1,3 +1,34 @@
+shunt (2.33.0) stable; urgency=medium
+
+  * Remote access to the gateway's own sshd, off unless switched on under
+    Система -> Настройки. On 2026-11-27 the owner was away, the house lost
+    direct access, and nothing could reach the gateway: the WAN is behind
+    CGNAT and the one address the cascade sees lives in AmneziaWG's
+    fail-closed namespace, which serves nothing. Now the gateway can keep
+    one outbound ssh to a server the owner keeps, with a reverse forward
+    bound to that server's loopback; the owner logs in with
+    "ssh -J <server> -p 2222 127.0.0.1". The ssh tries each enabled egress
+    in the house's order through its SOCKS port, then the house's own path.
+    The namespaces and the firewall are not touched.
+  * The status line says "Работает" only after an end-to-end check: the
+    gateway's own sshd banner read back through the server's end of the
+    forward. Failures name their cause (server key mismatch, key refused,
+    port taken, server unreachable on every road).
+  * The gateway's key is made on the gateway and its private half never
+    leaves it; the server's host key is pinned from the page, with no trust
+    on first use. The server-side account is restricted to that one
+    loopback port (docs/REMOTE_ACCESS.md has the authorized_keys line and
+    the sshd_config block). New dependency: openssh-client.
+  * The package installs the unit disabled, never enables or restarts it,
+    and the runner picks up new code between sessions, so an upgrade run
+    through this ssh is not cut in the middle.
+  * needrestart is told to leave the unit alone too
+    (/etc/needrestart/conf.d/shunt.conf). It runs from apt after dpkg
+    finishes and restarted the unit because the runner's script had
+    changed, which cut the session the upgrade ran in.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 27 Nov 2026 18:00:00 +0300
+
 shunt (2.32.13) stable; urgency=medium
 
   * The egress watchdog leaves AdGuard alone while it is starting or

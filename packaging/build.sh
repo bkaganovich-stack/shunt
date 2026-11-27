@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 P="$STAGE/shunt"
 install -d "$P/DEBIAN" "$P/opt/shunt/web/static" "$P/opt/shunt/scripts" \
            "$P/lib/systemd/system" "$P/usr/sbin" "$P/usr/share/doc/shunt" \
-           "$P/etc/sysctl.d" "$P/etc/systemd/journald.conf.d" "$P/etc/logrotate.d"
+           "$P/etc/sysctl.d" "$P/etc/systemd/journald.conf.d" "$P/etc/logrotate.d" "$P/etc/needrestart/conf.d"
 
 install -m 644 "$ROOT"/src/web/*.py            "$P/opt/shunt/web/"
 # main.py carries a shebang, so it gets the matching exec bit. The alternative
@@ -55,6 +55,7 @@ install -m 755 "$ROOT/packaging/shunt-nic-offload" "$ROOT/packaging/shunt-offloa
 install -m 644 "$ROOT/packaging/sysctl/90-shunt.conf" "$P/etc/sysctl.d/"
 install -m 644 "$ROOT/packaging/journald/90-shunt.conf" "$P/etc/systemd/journald.conf.d/"
 install -m 644 "$ROOT/packaging/logrotate/shunt" "$P/etc/logrotate.d/"
+install -m 644 "$ROOT/packaging/needrestart/shunt.conf" "$P/etc/needrestart/conf.d/"
 install -d "$P/usr/share/man/man8"
 gzip -9nc "$ROOT/packaging/shunt-setup.8" > "$P/usr/share/man/man8/shunt-setup.8.gz"
 install -m 644 "$ROOT/README.md"            "$P/usr/share/doc/shunt/"
@@ -72,7 +73,8 @@ find "$P/opt" \( -name '*.bak*' -o -name '._*' -o -name '.DS_Store' \) -delete 2
 # edited conffile would have been reported as a corrupted file.
 CONFFILES="/etc/sysctl.d/90-shunt.conf
 /etc/systemd/journald.conf.d/90-shunt.conf
-/etc/logrotate.d/shunt"
+/etc/logrotate.d/shunt
+/etc/needrestart/conf.d/shunt.conf"
 printf '%s\n' "$CONFFILES" > "$P/DEBIAN/conffiles"
 chmod 644 "$P/DEBIAN/conffiles"
 
