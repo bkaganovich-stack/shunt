@@ -276,8 +276,7 @@ class TestBootAndWarpFallback:
         setup = self.script[self.script.index("setup() {"):]
         assert setup.index("MASQUERADE") < setup.index('conntrack -D -s "$NSIP"')
 
-    def test_bridges_may_reach_each_other_but_not_the_internet(self):
-        assert '-o "$VETH_NS" -d "$EGRESS_NET" -j ACCEPT' in self.script
+    def test_the_other_bridges_stay_routed_through_the_veth(self):
         assert 'route add "$EGRESS_NET" via "$HOSTIP"' in self.script
         assert "EGRESS_NET=192.168.244.0/28" in self.script
 
@@ -359,3 +358,136 @@ class TestQuietAndCrashFree:
         rc = ec.main(["egress_config.py", "tt", str(tmp_path / "nope.toml"), str(tmp_path / "o"),
                       "127.0.0.1:1085", "http3"])
         assert rc == 1 and capsys.readouterr().err.startswith("egress_config: ")
+
+
+def _output_chain(script: str, name: str, env: dict) -> list:
+    """The namespace's OUTPUT rules as setup() appends them for egress `name`."""
+    import shlex
+    body = script[script.index("setup() {"):]
+    body = body[:body.index("\n}\n")].replace("\\\n", " ")
+    rules, guard = [], None
+    for line in body.splitlines():
+        line = line.strip()
+        m = re.match(r'if \[ "\$NAME" = (\w+) \]; then$', line)
+        if m:
+            guard = m.group(1)
+            continue
+        if line == "fi":
+            guard = None
+            continue
+        if "iptables -A OUTPUT" not in line or (guard and guard != name):
+            continue
+        line = re.sub(r"\$\{?([A-Z_]+)\}?", lambda m: env[m.group(1)], line)
+        argv = shlex.split(line)
+        argv = argv[argv.index("OUTPUT") + 1:]
+        rule = {}
+        for i, a in enumerate(argv):
+            if a in ("-o", "-d", "-p", "--dport", "--ctstate", "--ctdir", "--uid-owner", "-j"):
+                rule[a] = argv[i + 1]
+        rules.append(rule)
+    return rules
+
+
+def _verdict(rules: list, pkt: dict) -> str:
+    """First match wins; the chain's policy is ACCEPT."""
+    import ipaddress
+    for r in rules:
+        if "-o" in r and r["-o"] != pkt["dev"]:
+            continue
+        if "-d" in r and ipaddress.ip_address(pkt["dst"]) not in ipaddress.ip_network(r["-d"]):
+            continue
+        if "-p" in r and r["-p"] != pkt["proto"]:
+            continue
+        if "--dport" in r and int(r["--dport"]) != pkt["dport"]:
+            continue
+        if "--ctstate" in r and pkt["state"] not in r["--ctstate"].split(","):
+            continue
+        if "--ctdir" in r and r["--ctdir"] != pkt["dir"]:
+            continue
+        if "--uid-owner" in r and int(r["--uid-owner"]) != pkt["uid"]:
+            continue
+        return r["-j"]
+    return "ACCEPT"
+
+
+class TestBridgeCannotReachTheHost:
+    """2026-11-27: through AmneziaWG's bridge, Riga read the gateway's sshd banner."""
+    script = (ROOT / "src/scripts/egress-netns.sh").read_text()
+    fptn = (ROOT / "src/scripts/fptn-egress.sh").read_text()
+    NOBODY = 65534
+    HOST_SIDE = ["192.168.244.1", "192.168.244.5", "192.168.244.9"]
+
+    def chain(self, name):
+        if name == "fptn":
+            env = {"NS": "fptn", "SUB": "192.168.244.0/30", "BRIDGE_UID": "65534"}
+            return _output_chain(self.fptn, name, env), "veth-fptn-ns"
+        tag = {"amnezia": "am", "trusttunnel": "tt"}[name]
+        env = {"NS": name, "VETH_NS": f"veg-{tag}-ns", "EGRESS_NET": "192.168.244.0/28",
+               "BRIDGE_UID": "65534", "TT_NSIP": "192.168.244.10", "WARP_PORT": "1086"}
+        return _output_chain(self.script, name, env), env["VETH_NS"]
+
+    def pkt(self, dev, dst, state="NEW", proto="tcp", dport=22, uid=NOBODY, dir="ORIGINAL"):
+        return {"dev": dev, "dst": dst, "state": state, "proto": proto, "dport": dport, "uid": uid,
+                "dir": dir}
+
+    @pytest.mark.parametrize("name", ["amnezia", "trusttunnel", "fptn"])
+    def test_bridge_opens_nothing_on_the_host(self, name):
+        rules, veth = self.chain(name)
+        assert rules, "no OUTPUT rules found"
+        for dst in self.HOST_SIDE:
+            for proto, port in (("tcp", 22), ("tcp", 80), ("tcp", 53), ("udp", 53)):
+                v = _verdict(rules, self.pkt(veth, dst, proto=proto, dport=port))
+                assert v == "REJECT", (name, dst, proto, port)
+
+    @pytest.mark.parametrize("name", ["amnezia", "trusttunnel", "fptn"])
+    def test_bridge_still_answers_the_host(self, name):
+        rules, veth = self.chain(name)
+        for dst in self.HOST_SIDE:
+            for proto in ("tcp", "udp"):
+                pkt = self.pkt(veth, dst, state="ESTABLISHED", dir="REPLY", proto=proto, dport=40000)
+                assert _verdict(rules, pkt) == "ACCEPT", (name, dst, proto)
+
+    @pytest.mark.parametrize("name", ["amnezia", "trusttunnel", "fptn"])
+    def test_a_flow_the_bridge_opened_cannot_continue_over_the_veth(self, name):
+        # Opened through the tunnel, then the tunnel's route went and the veth
+        # took over (FPTN's default route falls back): ESTABLISHED, but ours.
+        rules, veth = self.chain(name)
+        for dst in ["1.1.1.1", "203.0.113.52"] + self.HOST_SIDE:
+            for state in ("ESTABLISHED", "RELATED"):
+                pkt = self.pkt(veth, dst, state=state, dport=443)
+                assert _verdict(rules, pkt) == "REJECT", (name, dst, state)
+
+    @pytest.mark.parametrize("name", ["amnezia", "trusttunnel", "fptn"])
+    def test_still_fail_closed_to_the_internet(self, name):
+        rules, veth = self.chain(name)
+        for dst in ("1.1.1.1", "203.0.113.52", "172.20.0.1", "10.99.0.2"):
+            assert _verdict(rules, self.pkt(veth, dst, dport=443)) == "REJECT", (name, dst)
+
+    def test_warp_fallback_reaches_trusttunnel_and_nothing_else(self):
+        rules, veth = self.chain("amnezia")
+        assert _verdict(rules, self.pkt(veth, "192.168.244.10", dport=1086)) == "ACCEPT"
+        for dst, port in (("192.168.244.10", 1084), ("192.168.244.10", 22), ("192.168.244.2", 1082),
+                          ("192.168.244.9", 1086)):
+            assert _verdict(rules, self.pkt(veth, dst, dport=port)) == "REJECT", (dst, port)
+        assert _verdict(rules, self.pkt(veth, "192.168.244.10", proto="udp", dport=1086)) == "REJECT"
+
+    def test_trusttunnel_needs_no_new_connections_across_the_range(self):
+        rules, veth = self.chain("trusttunnel")
+        for dst in ("192.168.244.6", "192.168.244.2", "192.168.244.10"):
+            assert _verdict(rules, self.pkt(veth, dst, dport=1083)) == "REJECT", dst
+
+    @pytest.mark.parametrize("name", ["amnezia", "trusttunnel", "fptn"])
+    def test_root_run_clients_are_not_touched(self, name):
+        # The tunnel clients run as root and reach their endpoints over the veth.
+        rules, veth = self.chain(name)
+        assert _verdict(rules, self.pkt(veth, "203.0.113.52", uid=0, dport=443)) == "ACCEPT"
+        assert _verdict(rules, self.pkt(veth, "192.168.244.1", uid=0, proto="udp", dport=53)) == "ACCEPT"
+
+    def test_no_accept_rule_spans_the_host_side_addresses(self):
+        import ipaddress
+        for name in ("amnezia", "trusttunnel", "fptn"):
+            for r in self.chain(name)[0]:
+                if r.get("-j") != "ACCEPT" or r.get("--ctdir") == "REPLY":
+                    continue
+                net = ipaddress.ip_network(r.get("-d", "0.0.0.0/0"))
+                assert not any(ipaddress.ip_address(h) in net for h in self.HOST_SIDE), (name, r)
