@@ -369,6 +369,16 @@ class TestPackaging:
         assert "restart shunt-remote-access" not in postinst
         assert "shunt-remote-access.service" in (ROOT / "packaging/templates/prerm").read_text()
 
+    def test_needrestart_leaves_it_alone(self):
+        # 2026-11-27: the 2.33.3 upgrade ran through this very session. dpkg
+        # finished, then apt's needrestart hook saw the runner's script had
+        # changed and restarted the unit, cutting the session apt ran in.
+        conf = (ROOT / "packaging/needrestart/shunt.conf").read_text()
+        assert "$nrconf{override_rc}{qr(^shunt-remote-access\\.service$)} = 0;" in conf
+        build = (ROOT / "packaging/build.sh").read_text()
+        assert "packaging/needrestart/shunt.conf" in build
+        assert "/etc/needrestart/conf.d/shunt.conf" in build.split("CONFFILES=", 1)[1].split('"', 2)[1]
+
     def test_fail_closed_plumbing_untouched(self):
         for f in ("src/scripts/egress-netns.sh", "src/scripts/iptables.sh"):
             text = (ROOT / f).read_text()

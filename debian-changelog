@@ -22,6 +22,10 @@ shunt (2.33.0) stable; urgency=medium
   * The package installs the unit disabled, never enables or restarts it,
     and the runner picks up new code between sessions, so an upgrade run
     through this ssh is not cut in the middle.
+  * needrestart is told to leave the unit alone too
+    (/etc/needrestart/conf.d/shunt.conf). It runs from apt after dpkg
+    finishes and restarted the unit because the runner's script had
+    changed, which cut the session the upgrade ran in.
 
  -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 27 Nov 2026 18:00:00 +0300
 
