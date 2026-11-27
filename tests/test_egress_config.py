@@ -382,7 +382,7 @@ def _output_chain(script: str, name: str, env: dict) -> list:
         argv = argv[argv.index("OUTPUT") + 1:]
         rule = {}
         for i, a in enumerate(argv):
-            if a in ("-o", "-d", "-p", "--dport", "--ctstate", "--uid-owner", "-j"):
+            if a in ("-o", "-d", "-p", "--dport", "--ctstate", "--ctdir", "--uid-owner", "-j"):
                 rule[a] = argv[i + 1]
         rules.append(rule)
     return rules
@@ -401,6 +401,8 @@ def _verdict(rules: list, pkt: dict) -> str:
         if "--dport" in r and int(r["--dport"]) != pkt["dport"]:
             continue
         if "--ctstate" in r and pkt["state"] not in r["--ctstate"].split(","):
+            continue
+        if "--ctdir" in r and r["--ctdir"] != pkt["dir"]:
             continue
         if "--uid-owner" in r and int(r["--uid-owner"]) != pkt["uid"]:
             continue
@@ -424,8 +426,9 @@ class TestBridgeCannotReachTheHost:
                "BRIDGE_UID": "65534", "TT_NSIP": "192.168.244.10", "WARP_PORT": "1086"}
         return _output_chain(self.script, name, env), env["VETH_NS"]
 
-    def pkt(self, dev, dst, state="NEW", proto="tcp", dport=22, uid=NOBODY):
-        return {"dev": dev, "dst": dst, "state": state, "proto": proto, "dport": dport, "uid": uid}
+    def pkt(self, dev, dst, state="NEW", proto="tcp", dport=22, uid=NOBODY, dir="ORIGINAL"):
+        return {"dev": dev, "dst": dst, "state": state, "proto": proto, "dport": dport, "uid": uid,
+                "dir": dir}
 
     @pytest.mark.parametrize("name", ["amnezia", "trusttunnel", "fptn"])
     def test_bridge_opens_nothing_on_the_host(self, name):
@@ -440,8 +443,19 @@ class TestBridgeCannotReachTheHost:
     def test_bridge_still_answers_the_host(self, name):
         rules, veth = self.chain(name)
         for dst in self.HOST_SIDE:
+            for proto in ("tcp", "udp"):
+                pkt = self.pkt(veth, dst, state="ESTABLISHED", dir="REPLY", proto=proto, dport=40000)
+                assert _verdict(rules, pkt) == "ACCEPT", (name, dst, proto)
+
+    @pytest.mark.parametrize("name", ["amnezia", "trusttunnel", "fptn"])
+    def test_a_flow_the_bridge_opened_cannot_continue_over_the_veth(self, name):
+        # Opened through the tunnel, then the tunnel's route went and the veth
+        # took over (FPTN's default route falls back): ESTABLISHED, but ours.
+        rules, veth = self.chain(name)
+        for dst in ["1.1.1.1", "203.0.113.52"] + self.HOST_SIDE:
             for state in ("ESTABLISHED", "RELATED"):
-                assert _verdict(rules, self.pkt(veth, dst, state=state, dport=40000)) == "ACCEPT"
+                pkt = self.pkt(veth, dst, state=state, dport=443)
+                assert _verdict(rules, pkt) == "REJECT", (name, dst, state)
 
     @pytest.mark.parametrize("name", ["amnezia", "trusttunnel", "fptn"])
     def test_still_fail_closed_to_the_internet(self, name):
@@ -473,7 +487,7 @@ class TestBridgeCannotReachTheHost:
         import ipaddress
         for name in ("amnezia", "trusttunnel", "fptn"):
             for r in self.chain(name)[0]:
-                if r.get("-j") != "ACCEPT" or "--ctstate" in r:
+                if r.get("-j") != "ACCEPT" or r.get("--ctdir") == "REPLY":
                     continue
                 net = ipaddress.ip_network(r.get("-d", "0.0.0.0/0"))
                 assert not any(ipaddress.ip_address(h) in net for h in self.HOST_SIDE), (name, r)

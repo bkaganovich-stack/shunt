@@ -110,8 +110,11 @@ setup() {
     # emergency login, "nc -X 5 -x 192.168.244.6:1083 192.168.244.5 22"
     # answered with the gateway's sshd banner. So replies only, plus the one
     # new connection a bridge needs across the /28: AmneziaWG's WARP port
-    # falling back to TrustTunnel's (run_amnezia).
-    ip netns exec "$NS" iptables -A OUTPUT -o "$VETH_NS" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    # falling back to TrustTunnel's (run_amnezia). Replies means the reply
+    # direction: a flow the bridge opened through the tunnel is ESTABLISHED
+    # too, and if the tunnel's route goes and the veth takes over, its next
+    # packets must be rejected, not let out.
+    ip netns exec "$NS" iptables -A OUTPUT -o "$VETH_NS" -m conntrack --ctstate ESTABLISHED --ctdir REPLY -j ACCEPT
     if [ "$NAME" = amnezia ]; then
         ip netns exec "$NS" iptables -A OUTPUT -o "$VETH_NS" -d "$TT_NSIP" -p tcp --dport "$WARP_PORT" \
             -m owner --uid-owner $BRIDGE_UID -j ACCEPT

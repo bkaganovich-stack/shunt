@@ -58,8 +58,11 @@ setup() {
     # holds the host's own $HOSTIP, so the bridge could open connections to
     # the host's services (sshd among them) for anyone who could reach its
     # SOCKS port. The bridge's resolver is 172.20.0.1, through the tunnel;
-    # the host's resolver on $HOSTIP is for the root-run client.
-    ip netns exec $NS iptables -A OUTPUT -o veth-fptn-ns -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    # the host's resolver on $HOSTIP is for the root-run client. Only the
+    # reply direction: a flow the bridge opened through the tunnel is also
+    # ESTABLISHED, and when the tunnel dies and the default route falls back
+    # to the veth, its next packets must hit the REJECT below.
+    ip netns exec $NS iptables -A OUTPUT -o veth-fptn-ns -m conntrack --ctstate ESTABLISHED --ctdir REPLY -j ACCEPT
     ip netns exec $NS iptables -A OUTPUT -o veth-fptn-ns -m owner --uid-owner $BRIDGE_UID \
         -j REJECT --reject-with icmp-host-unreachable
     mkdir -p /etc/netns/$NS && echo "nameserver $HOSTIP" > /etc/netns/$NS/resolv.conf
