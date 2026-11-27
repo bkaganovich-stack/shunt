@@ -364,3 +364,107 @@ class TestEnvironmentMemory:
         assert raised == [] and st["environment"]["dhcp_server"] == "100.116.0.1"
         hm.run_diagnosis(st, "enp1s0")
         assert raised == ["DHCP-сервер изменился: 100.116.0.1 → 100.200.0.1. Причина смены сервера не установлена."]
+
+
+RULES_AFTER_EARLY_START = """\
+0:	from all lookup local
+40:	from all fwmark 0xff lookup main
+50:	from all to 1.1.1.1 lookup main
+50:	from all to 1.0.0.1 lookup main
+50:	from all uidrange 994-994 lookup main
+100:	from all fwmark 0x1 lookup 100
+32766:	from all lookup main
+"""
+
+LEASE = """\
+# This is private data. Do not parse.
+ADDRESS=100.111.202.136
+ROUTER=100.111.192.1
+SERVER_ADDRESS=100.111.192.1
+DNS=213.234.193.1 85.21.2.1
+LIFETIME=10min
+"""
+
+
+class TestResolverRulesFollowTheLease:
+    """The 27 Nov outage: shunt.service started before the WAN lease arrived,
+    iptables.sh found no DNS= in it and added no priority-50 rules, so every
+    .ru query went into the tunnel, where the ISP resolvers do not answer."""
+
+    def _env(self, monkeypatch, tmp_path, rules, lease=LEASE):
+        leases = tmp_path / "leases"
+        leases.mkdir()
+        if lease is not None:
+            (leases / "2").write_text(lease)
+        monkeypatch.setattr(hm, "NETIF_LEASES", leases)
+        calls = []
+
+        def run(*cmd, timeout=20):
+            calls.append(cmd)
+            class R: returncode = 0; stdout = rules if cmd == ("ip", "rule", "show") else ""; stderr = ""
+            return R()
+        monkeypatch.setattr(hm, "run", run)
+        logged = []
+        monkeypatch.setattr(hm, "log", logged.append)
+        return calls, logged
+
+    def test_reads_the_resolvers_the_lease_names(self, monkeypatch, tmp_path):
+        self._env(monkeypatch, tmp_path, "")
+        assert hm.lease_resolvers() == ["213.234.193.1", "85.21.2.1"]
+
+    def test_ipv6_and_junk_are_not_resolvers(self, monkeypatch, tmp_path):
+        self._env(monkeypatch, tmp_path, "", lease="DNS=2a00:1::1 10.0.0.53 x.y\n")
+        assert hm.lease_resolvers() == ["10.0.0.53"]
+
+    def test_adds_the_rules_a_late_lease_brought(self, monkeypatch, tmp_path):
+        calls, logged = self._env(monkeypatch, tmp_path, RULES_AFTER_EARLY_START)
+        hm.sync_resolver_rules()
+        adds = [c for c in calls if c[:3] == ("ip", "rule", "add")]
+        assert adds == [
+            ("ip", "rule", "add", "to", "213.234.193.1/32", "priority", "50", "lookup", "main"),
+            ("ip", "rule", "add", "to", "85.21.2.1/32", "priority", "50", "lookup", "main"),
+        ]
+        assert any("AUTO-FIX" in m and "213.234.193.1" in m for m in logged)
+
+    def test_nothing_to_do_when_rules_match(self, monkeypatch, tmp_path):
+        rules = RULES_AFTER_EARLY_START + (
+            "50:\tfrom all to 213.234.193.1 lookup main\n"
+            "50:\tfrom all to 85.21.2.1 lookup main\n")
+        calls, logged = self._env(monkeypatch, tmp_path, rules)
+        hm.sync_resolver_rules()
+        assert [c for c in calls if c[:3] in (("ip", "rule", "add"), ("ip", "rule", "del"))] == []
+        assert logged == []
+
+    def test_resolvers_the_provider_dropped_are_removed(self, monkeypatch, tmp_path):
+        rules = RULES_AFTER_EARLY_START + (
+            "50:\tfrom all to 213.234.193.1 lookup main\n"
+            "50:\tfrom all to 85.21.2.1 lookup main\n"
+            "50:\tfrom all to 10.9.9.9 lookup main\n")
+        calls, _ = self._env(monkeypatch, tmp_path, rules)
+        hm.sync_resolver_rules()
+        dels = [c for c in calls if c[:3] == ("ip", "rule", "del")]
+        assert dels == [("ip", "rule", "del", "to", "10.9.9.9/32", "priority", "50", "lookup", "main")]
+
+    def test_fixed_rules_are_never_touched(self, monkeypatch, tmp_path):
+        calls, _ = self._env(monkeypatch, tmp_path, RULES_AFTER_EARLY_START)
+        hm.sync_resolver_rules()
+        dels = [c for c in calls if c[:3] == ("ip", "rule", "del")]
+        assert dels == []   # 1.1.1.1, 1.0.0.1 and the uidrange rules stay
+
+    def test_no_lease_means_hands_off(self, monkeypatch, tmp_path):
+        # Without a lease we cannot tell a stale resolver from a current one,
+        # so nothing is added and nothing is removed.
+        rules = RULES_AFTER_EARLY_START + "50:\tfrom all to 213.234.193.1 lookup main\n"
+        calls, logged = self._env(monkeypatch, tmp_path, rules, lease=None)
+        hm.sync_resolver_rules()
+        assert [c for c in calls if c[:2] == ("ip", "rule") and c[2] in ("add", "del")] == []
+        assert logged == []
+
+    def test_a_lease_naming_a_fixed_destination_converges(self, monkeypatch, tmp_path):
+        # A provider that hands out 1.1.1.1 must not get a fresh "missing rule"
+        # every cycle: that rule already exists, iptables.sh put it there.
+        calls, logged = self._env(monkeypatch, tmp_path, RULES_AFTER_EARLY_START,
+                                  lease="DNS=1.1.1.1 1.0.0.1\n")
+        hm.sync_resolver_rules()
+        assert [c for c in calls if c[:2] == ("ip", "rule") and c[2] in ("add", "del")] == []
+        assert logged == []

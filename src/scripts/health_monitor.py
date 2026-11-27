@@ -10,6 +10,8 @@ What it guards (the failure modes seen in production):
   * a core service died                       -> restart it
   * TPROXY fwmark rule / chain vanished        -> re-run iptables.sh up
     (the 2026-06-10 networkd incident class)
+  * ISP-resolver rules out of step with the lease -> add/remove them
+    (2026-11-27: shunt started before the WAN lease, .ru DNS went dark)
   * sing-box policy rules (table 2022) gone    -> restart sing-box
   * LAN interface lost its IP / default route  -> netplan apply
   * INLINE WAN went dead after a switch        -> auto-revert to known-good loop
@@ -316,6 +318,59 @@ def note_wan_address(state: dict, wan: str) -> dict:
 
 def has_fwmark_rule() -> bool:
     return "fwmark 0x1 lookup 100" in run("ip", "rule", "show").stdout
+
+# Priority-50 "to X lookup main" rules iptables.sh adds that do not come from
+# the lease. Never removed here.
+FIXED_DIRECT_DST = {"1.1.1.1", "1.0.0.1"}
+
+def lease_resolvers() -> list[str]:
+    """The IPv4 resolvers the DHCP leases name, as iptables.sh reads them."""
+    out = []
+    try:
+        files = sorted(NETIF_LEASES.iterdir())
+    except OSError:
+        return out
+    for f in files:
+        try:
+            lines = f.read_text().splitlines()
+        except OSError:
+            continue
+        for ln in lines:
+            if ln.startswith("DNS="):
+                for a in ln.split("=", 1)[1].split():
+                    if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", a) and a not in out:
+                        out.append(a)
+    return out[:4]
+
+def resolver_rules_present() -> set[str]:
+    """Destinations of the priority-50 'to X lookup main' rules, fixed ones included."""
+    got = set()
+    for ln in run("ip", "rule", "show").stdout.splitlines():
+        m = re.match(r"50:\s+from all to (\d+\.\d+\.\d+\.\d+)(?:/32)? lookup main\s*$", ln)
+        if m:
+            got.add(m.group(1))
+    return got
+
+def sync_resolver_rules() -> None:
+    """
+    Keep the ISP resolvers reachable outside the tunnel for as long as the lease
+    names them. iptables.sh adds these rules once, from whatever lease exists at
+    that moment; with the WAN optional for boot, shunt can start before the lease
+    arrives, and then .ru DNS goes into the tunnel, where those resolvers do not
+    answer. With no lease at all, leave everything as it is: a stale resolver
+    cannot be told from a current one.
+    """
+    want = lease_resolvers()
+    if not want:
+        return
+    have = resolver_rules_present()
+    for a in want:
+        if a not in have:
+            log(f"AUTO-FIX: ISP resolver {a} has no direct-route rule -> adding it")
+            run("ip", "rule", "add", "to", f"{a}/32", "priority", "50", "lookup", "main")
+    for a in sorted(have - set(want) - FIXED_DIRECT_DST):
+        log(f"AUTO-FIX: {a} is no longer an ISP resolver in the lease -> removing its rule")
+        run("ip", "rule", "del", "to", f"{a}/32", "priority", "50", "lookup", "main")
 
 def has_singbox_rules() -> bool:
     return "lookup 2022" in run("ip", "rule", "show").stdout
@@ -655,6 +710,7 @@ def cycle(state: dict) -> dict:
     # 2) datapath rules (covers the networkd-incident class)
     if not has_fwmark_rule():
         fix_iptables()
+    sync_resolver_rules()
     if not has_singbox_rules():
         fix_singbox()
 

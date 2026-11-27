@@ -1,3 +1,18 @@
+shunt (2.33.3) stable; urgency=medium
+
+  * The health monitor keeps the rules that send the provider's DNS
+    resolvers outside the tunnel in step with the WAN lease, every cycle.
+    iptables.sh adds them once, from the lease that exists when shunt
+    starts. On 2026-11-27 the gateway rebooted, shunt came up about five
+    seconds before the lease arrived, no rule was added, and every .ru
+    lookup went into the tunnel, where the provider's resolvers do not
+    answer: direct access was gone for five hours until shunt restarted.
+    A missing rule is now added within a minute and logged as AUTO-FIX; a
+    resolver the lease stops naming loses its rule. 1.1.1.1, 1.0.0.1 and
+    the per-user rules are never touched, and with no lease nothing changes.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 27 Nov 2026 21:30:00 +0300
+
 shunt (2.33.2) stable; urgency=medium
 
   * Remote access can dial the server at a different address per road:
