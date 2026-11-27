@@ -1,6 +1,7 @@
-# Remote access to the gateway's own sshd (design, awaiting approval)
+# Remote access to the gateway's own sshd
 
-Status: **proposal**. Nothing here is implemented yet.
+Since 2.33.0. Off unless switched on under **Система → Настройки →
+Удалённый доступ к шлюзу**. Design approved by the owner on 2026-11-27.
 
 ## Why
 
@@ -29,8 +30,8 @@ They are the natural rendezvous point.
                                                └───────────────────────────────┘
 ```
 
-- A new unit, `shunt-remote-access.service`, runs `remote_access.py`, which
-  keeps one `ssh -N -R 127.0.0.1:<rport>:127.0.0.1:22` session open to a
+- `shunt-remote-access.service` runs `scripts/remote_access_runner.py`,
+  which keeps one `ssh -N -R 127.0.0.1:<rport>:127.0.0.1:22` session open to a
   server the owner configures (host, port, user, the server's host key).
 - The forwarded port is bound to the **server's loopback only**. The owner
   reaches it with `ProxyJump` through their own account on that server:
@@ -79,11 +80,14 @@ is down the connect fails, as it should, and the next rung is tried.
 ## The health check is end to end
 
 "ssh is running" says nothing about whether the owner can get in. Every 60 s
-the runner opens a second channel over the same connection
-(`ssh -S <control socket> -W 127.0.0.1:<rport>`): server loopback → back
+the runner opens a second channel over the same connection's control socket
+(`ssh -o ControlMaster=no -W 127.0.0.1:<rport>`): server loopback → back
 down the reverse forward → the gateway's own sshd. It passes only when the
-gateway's own `SSH-2.0-` banner comes back. Two misses in a row kill the
-session and go back to the ladder.
+banner that comes back is byte for byte the one the gateway's sshd gives on
+`127.0.0.1:22`, so another sshd answering on that port does not count. The
+probe is not run until the control socket exists, so it can never open a
+second connection of its own. A new session has 45 s to pass its first
+check; two misses in a row later kill the session and go back to the ladder.
 
 That is why the server-side key carries `permitopen` as well as
 `permitlisten`: the probe needs to open exactly that one loopback port, and
@@ -109,10 +113,16 @@ on every road, port already taken on the server, probe got no banner. The
 
 - `settings.json`: `remote_access: {enabled: false, host: "", port: 22,
   user: "shunt-gw", remote_port: 2222, via: "auto"}`. The unit is
-  installed **disabled** and `ConditionPathExists=` on the key, so even an
-  enabled unit with no key does nothing.
-- The switch is on a card under **Система** (or wherever the owner prefers).
-  On: `systemctl enable --now`; off: `disable --now`. It survives reboots.
+  installed **disabled** and has `ConditionPathExists=` on the key, so even an
+  enabled unit with no key does nothing. The page refuses to switch it on
+  until the server, the gateway's key and the server's host key are all set.
+- The switch is on a card under **Система → Настройки**. On: `systemctl
+  enable` and a restart; off: `disable --now`. It survives reboots. Saving
+  the same values again does not restart it, so a session in use is not cut.
+- The package never enables it and never restarts it. An upgrade may be run
+  through this very ssh, and restarting the unit would cut it mid-dpkg (the
+  same trap as the web terminal). Instead the runner notices that its code
+  changed on disk and re-executes itself between sessions.
   There is deliberately no auto-expiry: the case it exists for is "the owner
   is away and cannot turn it on", so it must be switched on *before* leaving
   and stay on.
@@ -121,25 +131,36 @@ on every road, port already taken on the server, probe got no banner. The
 
 ## Keys and pinning
 
-- A system account `shunt-ra` (no shell, home `/var/lib/shunt-ra`) runs
-  the ssh. Its ed25519 key is generated **on the gateway**, by the page's
+- The supervisor runs as root, because it reads `settings.json` and the
+  egress configuration, both root-only. Every ssh it starts runs as the
+  system account `shunt-ra` (no shell, home `/var/lib/shunt-ra`, 0700),
+  created by `postinst`. Its ed25519 key is generated **on the gateway**, by the page's
   "Создать ключ" button; the private half never leaves the box and never
   goes back to the page. The page shows the public half as a ready
   `authorized_keys` line.
 - The server's host key must be pasted on the page (one `known_hosts`
-  line, e.g. from `ssh-keyscan` run on the Mac). The ssh runs with
+  line, e.g. from `ssh-keyscan` run on the Mac). It is stored under the
+  name `shunt-rendezvous`, which ssh asks for with `HostKeyAlias`, so it
+  matches whatever road the ssh takes. The ssh runs with
   `StrictHostKeyChecking=yes` and its own `UserKnownHostsFile`; there is
-  no trust-on-first-use. A mismatch is a status line, not a reconnect loop.
-- The ssh runs with `-F` pointing at a generated config (the system
+  no trust-on-first-use. A mismatch on one road moves to the next road (one
+  intercepted road should not block an honest one) and ends as a status line.
+  A refused key or a refused port stops the walk at once: every road would
+  say the same.
+- The ssh runs with `-F` pointing at a config generated for each road in
+  `/run/shunt-remote-access/ssh/` (the system
   `/etc/ssh/ssh_config` is not read), `BatchMode=yes`,
   `IdentitiesOnly=yes`, `ExitOnForwardFailure=yes`,
   `ServerAliveInterval=15`, `ServerAliveCountMax=3`,
   `ConnectTimeout=20`, `PermitLocalCommand=no`, no agent or X11.
 - Backoff between failed attempts: 10 s doubling to 10 min, so a dead
   server is not hammered (and fail2ban on the cascade is not provoked).
-- Unit hardening: `User=shunt-ra`, `NoNewPrivileges`,
-  `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`,
+- Unit hardening: `NoNewPrivileges`, a capability set of only what
+  dropping to `shunt-ra` needs, `ProtectSystem=strict` with only
+  `/run/shunt-remote-access` writable, `ProtectHome`, `PrivateTmp`,
   `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`, `MemoryMax=64M`.
+  No namespace option: the unit lives in the host namespace and never
+  enters an egress's.
 
 No server address, key or token goes into the repository; they live only in
 `settings.json` and `/var/lib/shunt-ra/` on the gateway.
@@ -169,7 +190,9 @@ Match User shunt-gw
 ```
 
 (`permitlisten` governs `-R`; `permitopen` alone would not restrict it.
-Both need OpenSSH ≥ 7.8.) With `GatewayPorts no`, the port is on the
+Both need OpenSSH ≥ 7.8.) To get the server's host key for the page, on the
+Mac: `ssh-keyscan -t ed25519 <server>`, and compare its fingerprint with the
+one `ssh cascade-lv` already trusts. With `GatewayPorts no`, the port is on the
 server's loopback whatever the client asks for.
 
 ## Threat notes
@@ -180,21 +203,33 @@ server's loopback whatever the client asks for.
 - If the `shunt-ra` key leaks, it can only hold port 2222 on the server's
   loopback and open that same port: no shell, no other forwards.
 - An sshd rule that trusts `127.0.0.1` (e.g. a `Match Address 127.0.0.1`
-  with weaker auth) would be widened by this. The page will warn if
-  `sshd -T` shows password auth enabled.
+  with weaker auth) would be widened by this. The page warns when
+  `sshd -T` shows password or keyboard-interactive login enabled.
 - It does not help when the gateway itself has no internet at all. It helps
   when any one road (any egress, or direct) still leaves the house.
 
-## What gets built
+## Where it lives
 
-- `src/scripts/remote_access.py`: the runner (ladder, ssh, probe, backoff,
-  status file), with the pure parts (argument building, ladder order, status
-  text, settings validation) testable without ssh.
-- `src/scripts/socks_connect.py`: the SOCKS5 `ProxyCommand`.
+- `src/web/remote_access.py`: the pure part both sides use (settings,
+  validation, the generated ssh_config, the order of roads, reading ssh's
+  errors, the status line).
+- `src/scripts/remote_access_runner.py`: the supervisor (ladder, ssh,
+  probe, backoff, status file, re-exec on upgrade).
+- `src/scripts/socks_connect.py`: the SOCKS5 `ProxyCommand`, standard
+  library only.
 - `systemd/shunt-remote-access.service`, shipped disabled.
-- `src/web`: `GET/POST /api/remote-access`, key generation, host-key
-  upload, the card and its status line.
-- `packaging`: the `shunt-ra` account in `postinst`, `openssh-client` in
-  `Depends`, the files in `build.sh` / `verify_package.py`.
-- `tests/test_remote_access.py`, a `debian-changelog` entry, and this file
-  rewritten from "proposal" to "how it works".
+- `src/web/main.py`: `GET/POST /api/remote-access`,
+  `POST /api/remote-access/key`, `POST /api/remote-access/host-key`; the
+  card in `index.html`.
+- `packaging`: the `shunt-ra` account and `/var/lib/shunt-ra` in
+  `postinst`, the unit in `prerm` (stopped and disabled on removal),
+  `openssh-client` in `Depends`.
+- `tests/test_remote_access.py`.
+
+## Not yet verified on the gateway
+
+Everything above is tested with ssh and the network replaced. It has not run
+on the gateway or against a real server: the first switch-on should be done
+while at home, with the status line read and one login through
+`ssh shunt-remote` made from outside (e.g. the phone's hotspot) before
+relying on it.

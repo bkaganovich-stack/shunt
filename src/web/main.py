@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.32.13"
+VERSION = "2.33.0"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -28,6 +28,7 @@ import freezewatch as _fw
 import egresses as _eg
 import dnsnames as _dnames
 import profiles as _profiles
+import remote_access as _ra
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -3286,6 +3287,194 @@ async def set_fptn_token(req: FptnTokenReq, u: str = Depends(auth_dep)):
         subprocess.run(["systemctl", "restart", FPTN_UNIT], capture_output=True)
         restarted = True
     return {"ok": True, "restarted": restarted}
+
+
+# ── Remote access (docs/REMOTE_ACCESS.md) ─────────────────────────────────────
+# A reverse ssh from the host to a server the owner keeps, so the gateway's own
+# sshd can be reached while the owner is away. Off unless switched on here.
+# The private key is made on the gateway and never comes back to the page.
+
+_ra_sshd_warn: dict = {"at": 0.0, "on": False}
+
+
+def _ra_chown(path: Path) -> None:
+    import pwd
+    try:
+        pw = pwd.getpwnam(_ra.ACCOUNT)
+        os.chown(path, pw.pw_uid, pw.pw_gid)
+    except (KeyError, OSError):
+        pass
+
+
+def _ra_fingerprint(path: Path) -> Optional[str]:
+    try:
+        r = subprocess.run(["ssh-keygen", "-l", "-f", str(path)],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    parts = r.stdout.split()
+    return parts[1] if len(parts) > 1 else None
+
+
+def _ra_password_auth() -> bool:
+    """Cached for ten minutes: `sshd -T` is not free and the answer rarely moves."""
+    now = time.time()
+    if now - _ra_sshd_warn["at"] > 600:
+        try:
+            r = subprocess.run(["sshd", "-T"], capture_output=True, text=True, timeout=10)
+            _ra_sshd_warn["on"] = _ra.password_auth_on(r.stdout)
+        except (OSError, subprocess.TimeoutExpired):
+            _ra_sshd_warn["on"] = False
+        _ra_sshd_warn["at"] = now
+    return _ra_sshd_warn["on"]
+
+
+def _ra_unit(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["systemctl", *args, _ra.UNIT], capture_output=True, text=True)
+
+
+def _ra_state(s: dict) -> dict:
+    cfg = _ra.config(s)
+    try:
+        pub = _ra.KEY.with_suffix(".pub").read_text().strip()
+    except OSError:
+        pub = ""
+    has_key = bool(pub) and _ra.KEY.exists()
+    host_fp = _ra_fingerprint(_ra.KNOWN_HOSTS) if _ra.KNOWN_HOSTS.exists() else None
+    active = _ra_unit("is-active").stdout.strip()
+    try:
+        st = json.loads(_ra.STATUS.read_text())
+    except (OSError, ValueError):
+        st = {}
+    if not cfg["enabled"]:
+        st = {"state": "off"}
+    elif active != "active":
+        # Switched on but not running: say so rather than show a stale line.
+        miss = _ra.missing(cfg, has_key, bool(host_fp))
+        st = ({"state": "no_config", "missing": miss} if miss
+              else {"state": "failing", "reason": "unknown"})
+    labels = {e: _eg.label(s, e) for e in _eg.order(s)}
+    return {
+        **cfg,
+        "has_key": has_key,
+        "public_key": pub,
+        "authorized_keys": _ra.authorized_keys_line(pub, cfg["remote_port"]) if pub else "",
+        "host_key_fingerprint": host_fp,
+        "missing": _ra.missing(cfg, has_key, bool(host_fp)),
+        "service": active,
+        "status": st,
+        "status_text": _ra.status_text(st, time.time(), labels),
+        "roads": [{"id": _ra.AUTO, "label": "автоматически (выходы по порядку, затем путь дома)"},
+                  {"id": _ra.HOUSE, "label": _ra.road_label(_ra.HOUSE)}]
+                 + [{"id": e, "label": labels[e]} for e in _eg.order(s)],
+        "password_auth_warning": _ra_password_auth(),
+    }
+
+
+@app.get("/api/remote-access")
+async def get_remote_access(u: str = Depends(auth_dep)):
+    return _ra_state(load_settings())
+
+
+class RemoteAccessReq(BaseModel):
+    enabled: Optional[bool] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    user: Optional[str] = None
+    remote_port: Optional[int] = None
+    via: Optional[str] = None
+
+
+@app.post("/api/remote-access")
+async def set_remote_access(req: RemoteAccessReq, u: str = Depends(auth_dep)):
+    s = load_settings()
+    before = _ra.config(s)
+    raw = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+    data = {k: v for k, v in raw.items() if v is not None}
+    clean, errors = _ra.validate(data)
+    if "via" in clean and clean["via"] not in (_ra.AUTO, _ra.HOUSE, *_eg.order(s)):
+        errors.append("Неизвестный путь")
+    if errors:
+        raise HTTPException(400, "; ".join(errors))
+    cfg = {**before, **clean}
+    if cfg["enabled"]:
+        miss = _ra.missing(cfg, _ra.KEY.exists(), _ra.KNOWN_HOSTS.exists())
+        if miss:
+            raise HTTPException(400, "Чтобы включить, нужны: " + ", ".join(miss))
+    s["remote_access"] = cfg
+    save_settings(s)
+    if cfg["enabled"]:
+        _ra_unit("enable")
+        # A change of server, port or road needs a new session; a save that
+        # changes nothing must not cut the session the owner may be using.
+        if not before["enabled"] or any(before[k] != cfg[k] for k in
+                                        ("host", "port", "user", "remote_port", "via")):
+            _ra_unit("restart")
+    else:
+        _ra_unit("disable", "--now")
+    return _ra_state(load_settings())
+
+
+class RemoteAccessKeyReq(BaseModel):
+    replace: bool = False
+
+
+@app.post("/api/remote-access/key")
+async def make_remote_access_key(req: RemoteAccessKeyReq, u: str = Depends(auth_dep)):
+    """Make the gateway's key. The private half stays in /var/lib/shunt-ra;
+    only the public half and the authorized_keys line go back."""
+    if _ra.KEY.exists() and not req.replace:
+        raise HTTPException(409, "Ключ уже есть; замена отключит шлюз от сервера, "
+                                 "пока новый ключ не добавлен в authorized_keys")
+    _ra.HOME.mkdir(parents=True, exist_ok=True)
+    os.chmod(_ra.HOME, 0o700)
+    _ra_chown(_ra.HOME)
+    for p in (_ra.KEY, _ra.KEY.with_suffix(".pub")):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    r = subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "",
+                        "-C", f"{_ra.ACCOUNT}@{socket.gethostname()}", "-f", str(_ra.KEY)],
+                       capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise HTTPException(500, "ssh-keygen: " + (r.stderr.strip() or "ошибка"))
+    os.chmod(_ra.KEY, 0o600)
+    for p in (_ra.KEY, _ra.KEY.with_suffix(".pub")):
+        _ra_chown(p)
+    s = load_settings()
+    if _ra.config(s)["enabled"]:
+        _ra_unit("restart")
+    return _ra_state(s)
+
+
+class RemoteAccessHostKeyReq(BaseModel):
+    text: str
+
+
+@app.post("/api/remote-access/host-key")
+async def set_remote_access_host_key(req: RemoteAccessHostKeyReq, u: str = Depends(auth_dep)):
+    """Pin the server's host key. There is no trust on first use: the ssh
+    refuses any server whose key is not this one."""
+    line = _ra.normalize_host_key(req.text)
+    if not line:
+        raise HTTPException(400, "Это не похоже на ключ сервера: нужна строка вида "
+                                 "«ssh-ed25519 AAAA…», например из ssh-keyscan")
+    _ra.HOME.mkdir(parents=True, exist_ok=True)
+    tmp = _ra.KNOWN_HOSTS.with_name("known_hosts.new")
+    tmp.write_text(line + "\n")
+    if not _ra_fingerprint(tmp):
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(400, "ssh-keygen не принял этот ключ")
+    os.chmod(tmp, 0o644)
+    _ra_chown(tmp)
+    os.replace(tmp, _ra.KNOWN_HOSTS)
+    s = load_settings()
+    if _ra.config(s)["enabled"]:
+        _ra_unit("restart")
+    return _ra_state(s)
 
 
 class AutoFallbackReq(BaseModel):

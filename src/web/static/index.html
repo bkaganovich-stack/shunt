@@ -1181,6 +1181,45 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
         </div>
       </div>
 
+      <!-- Remote access (docs/REMOTE_ACCESS.md): a reverse ssh to the owner's
+           own server, so the gateway's sshd can be reached from outside. -->
+      <div class="card" id="ra-card">
+        <div class="card-title">Удалённый доступ к шлюзу</div>
+        <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+          Шлюз держит исходящее SSH-соединение к вашему серверу и открывает на нём порт
+          только на 127.0.0.1. Зайти: <span class="monospace">ssh -J &lt;сервер&gt; -p &lt;порт&gt; 127.0.0.1</span>.
+          Включайте до отъезда: издалека его не включить.</p>
+        <div id="ra-status" style="font-size:13px;margin-bottom:10px">Загрузка…</div>
+        <div id="ra-warn" class="text-muted" style="display:none;font-size:12px;margin-bottom:10px;color:var(--yellow,#d29922)">
+          На шлюзе включён вход по паролю. Через этот доступ sshd шлюза виден с сервера в интернете: оставьте только ключи.</div>
+        <div class="override-row">
+          <div class="override-label">Включён</div>
+          <label class="toggle"><input type="checkbox" id="ra-enabled" onchange="setRemoteAccess({enabled:this.checked})"><span class="slider"></span></label>
+        </div>
+        <div class="rule-add-row" style="margin-top:10px;flex-wrap:wrap">
+          <input id="ra-host" type="text" placeholder="адрес сервера" autocomplete="off" spellcheck="false" style="min-width:200px">
+          <input id="ra-port" type="text" placeholder="порт SSH" style="max-width:100px">
+          <input id="ra-user" type="text" placeholder="пользователь" style="max-width:140px" autocomplete="off" spellcheck="false">
+          <input id="ra-rport" type="text" placeholder="порт на сервере" style="max-width:140px">
+          <select id="ra-via" style="max-width:260px"></select>
+          <button class="btn btn-secondary btn-sm" onclick="saveRemoteAccess()">Сохранить</button>
+        </div>
+        <div style="margin-top:14px;font-size:12.5px">
+          <div class="text-muted" style="margin-bottom:4px">Ключ шлюза — строка для ~/.ssh/authorized_keys пользователя на сервере:</div>
+          <textarea id="ra-authkeys" rows="3" readonly spellcheck="false" class="monospace" style="width:100%"></textarea>
+          <div class="btn-row" style="margin-top:6px">
+            <button class="btn btn-secondary btn-sm" id="ra-key-btn" onclick="makeRemoteAccessKey()">Создать ключ</button>
+          </div>
+        </div>
+        <div style="margin-top:14px;font-size:12.5px">
+          <div class="text-muted" style="margin-bottom:4px">Ключ сервера (вывод <span class="monospace">ssh-keyscan -t ed25519 &lt;сервер&gt;</span>): <span id="ra-hostfp" class="monospace"></span></div>
+          <textarea id="ra-hostkey" rows="2" spellcheck="false" class="monospace" style="width:100%" placeholder="ssh-ed25519 AAAA…"></textarea>
+          <div class="btn-row" style="margin-top:6px">
+            <button class="btn btn-secondary btn-sm" onclick="setRemoteAccessHostKey()">Сохранить ключ сервера</button>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-title">Топология сети</div>
         <p class="text-muted" style="font-size:12px;margin-bottom:12px">
@@ -1904,7 +1943,7 @@ function legacyShowPage(name, linkEl) {
   if (name === 'geo') loadGeoInfo();
   if (name === 'servers') loadConnections();
   if (name === 'discovered') loadDiscovered();
-  if (name === 'settings') { loadAbout(); loadSnapshots(); loadTopology(); loadNetIfaces(); }
+  if (name === 'settings') { loadAbout(); loadSnapshots(); loadTopology(); loadNetIfaces(); loadRemoteAccess(); }
   if (name === 'rules' && !window.shuntUI?.rulesDirty) loadRules();
   if (name === 'devices') loadDevices();
   if (name === 'vpn') loadLadder();
@@ -2009,6 +2048,56 @@ function startUpdates() {
 }
 
 // ─── About / version ─────────────────────────────────────────────────────────
+// ─── Удалённый доступ (docs/REMOTE_ACCESS.md) ────────────────────────────────
+function renderRemoteAccess(d) {
+  if (!d) return;
+  const st = document.getElementById('ra-status');
+  const state = (d.status || {}).state;
+  st.textContent = d.status_text || '—';
+  st.style.color = state === 'up' ? 'var(--green)' : state === 'failing' ? 'var(--red)' : '';
+  document.getElementById('ra-warn').style.display = d.password_auth_warning ? '' : 'none';
+  document.getElementById('ra-enabled').checked = !!d.enabled;
+  const set = (id, v) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = v ?? ''; };
+  set('ra-host', d.host); set('ra-port', d.port); set('ra-user', d.user); set('ra-rport', d.remote_port);
+  const via = document.getElementById('ra-via');
+  via.innerHTML = (d.roads || []).map(r =>
+    `<option value="${escH(r.id)}"${r.id === d.via ? ' selected' : ''}>${escH(r.label)}</option>`).join('');
+  document.getElementById('ra-authkeys').value = d.authorized_keys || '';
+  document.getElementById('ra-key-btn').textContent = d.has_key ? 'Заменить ключ' : 'Создать ключ';
+  document.getElementById('ra-hostfp').textContent = d.host_key_fingerprint || 'не задан';
+}
+async function loadRemoteAccess() {
+  renderRemoteAccess(await apiJ('GET', '/api/remote-access'));
+}
+async function _raPost(path, body) {
+  const r = await api('POST', path, body);
+  if (!r) return null;
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { toast(d.detail || 'Ошибка', false); loadRemoteAccess(); return null; }
+  renderRemoteAccess(d);
+  return d;
+}
+async function setRemoteAccess(body) {
+  if (await _raPost('/api/remote-access', body)) toast(body.enabled === false ? 'Удалённый доступ выключен' : 'Сохранено');
+}
+function saveRemoteAccess() {
+  const v = id => document.getElementById(id).value.trim();
+  setRemoteAccess({host: v('ra-host'), port: +v('ra-port') || 22, user: v('ra-user'),
+                   remote_port: +v('ra-rport') || 2222, via: v('ra-via')});
+}
+async function makeRemoteAccessKey() {
+  const replace = document.getElementById('ra-key-btn').textContent.startsWith('Заменить');
+  if (replace && !confirm('Заменить ключ шлюза? Пока новая строка не добавлена на сервер, шлюз к нему не подключится.')) return;
+  if (await _raPost('/api/remote-access/key', {replace})) toast('Ключ создан: добавьте строку на сервер');
+}
+async function setRemoteAccessHostKey() {
+  const text = document.getElementById('ra-hostkey').value;
+  if (await _raPost('/api/remote-access/host-key', {text})) {
+    document.getElementById('ra-hostkey').value = '';
+    toast('Ключ сервера сохранён');
+  }
+}
+
 async function loadAbout() {
   const r = await apiJ('GET', '/api/version');
   if (!r) return;

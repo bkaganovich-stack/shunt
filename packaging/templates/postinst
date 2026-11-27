@@ -99,6 +99,18 @@ case "$1" in
                 --shell /usr/sbin/nologin sing-box >/dev/null 2>&1 || true
     fi
 
+    # Remote access (docs/REMOTE_ACCESS.md): its ssh runs as an account that
+    # owns the key and nothing else. The unit itself is left as the page set
+    # it -- installed disabled, enabled only by the switch -- and is never
+    # restarted here: the owner may be running this very upgrade through it.
+    if ! getent passwd shunt-ra >/dev/null 2>&1; then
+        adduser --system --group --no-create-home --home /var/lib/shunt-ra \
+                --shell /usr/sbin/nologin shunt-ra >/dev/null 2>&1 || true
+    fi
+    if getent passwd shunt-ra >/dev/null 2>&1; then
+        install -d -m 700 -o shunt-ra -g shunt-ra /var/lib/shunt-ra
+    fi
+
     # The offload units were hand-placed in /etc before the package carried
     # them, and they point at /usr/local/sbin. They are not "locally modified"
     # in any sense worth preserving -- they are this package's own files,
