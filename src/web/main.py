@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-VERSION = "2.33.0"
+VERSION = "2.33.2"
 
 # ── Bootstrap db + features (import before app creation) ─────────────────────
 import db as _db
@@ -3385,6 +3385,7 @@ class RemoteAccessReq(BaseModel):
     user: Optional[str] = None
     remote_port: Optional[int] = None
     via: Optional[str] = None
+    hosts: Optional[dict] = None
 
 
 @app.post("/api/remote-access")
@@ -3396,6 +3397,9 @@ async def set_remote_access(req: RemoteAccessReq, u: str = Depends(auth_dep)):
     clean, errors = _ra.validate(data)
     if "via" in clean and clean["via"] not in (_ra.AUTO, _ra.HOUSE, *_eg.order(s)):
         errors.append("Неизвестный путь")
+    known_roads = (_ra.HOUSE, *_eg.order(s))
+    if any(r not in known_roads for r in clean.get("hosts", {})):
+        errors.append("Адрес для пути: неизвестный путь")
     if errors:
         raise HTTPException(400, "; ".join(errors))
     cfg = {**before, **clean}
@@ -3410,7 +3414,7 @@ async def set_remote_access(req: RemoteAccessReq, u: str = Depends(auth_dep)):
         # A change of server, port or road needs a new session; a save that
         # changes nothing must not cut the session the owner may be using.
         if not before["enabled"] or any(before[k] != cfg[k] for k in
-                                        ("host", "port", "user", "remote_port", "via")):
+                                        ("host", "port", "user", "remote_port", "via", "hosts")):
             _ra_unit("restart")
     else:
         _ra_unit("disable", "--now")

@@ -68,6 +68,28 @@ and when the house's tunnel does not:
    direct when no egress answers.
 
 A setting can pin one road instead (`via: "amnezia"`, `via: "house"`).
+
+**A road can dial the server at another address** (since 2.33.2). When the
+server is the entry of a cascade the house also tunnels through, its public
+address is that tunnel's own endpoint: inside the `amnezia` (or
+`trusttunnel`) namespace that address is routed out of the namespace and the
+fail-closed rule rejects it, so through those egresses the ssh never gets
+out. Its address *inside* the tunnel does answer. Set it per road:
+
+```json
+"remote_access": {"host": "31.58.46.52", "hosts": {"amnezia": "10.8.0.1"}}
+```
+
+Keys are road ids (an egress id or `house`; not `auto`), values are checked
+exactly like `host` (no port, whitespace or `%`), an empty value means "use
+`host`", and one bad entry refuses the whole save. On the page it is the
+collapsed "Другой адрес сервера для отдельных путей" block under the server
+fields. Only where the ssh dials changes: the pinned host key is filed under
+`HostKeyAlias`, so the server still has to prove it is the same server. An
+override that does not validate (a hand-edited `settings.json`) is ignored
+and the road uses `host`; it never reaches `ssh_config`. The server's sshd
+must listen on the tunnel address (the default `ListenAddress 0.0.0.0` does),
+and its firewall must let the tunnel's peers reach port 22.
 The first road that gives a working forward is kept until it breaks; then the
 ladder starts again from the top.
 

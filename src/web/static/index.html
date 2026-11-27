@@ -1204,6 +1204,14 @@ code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-family
           <select id="ra-via" style="max-width:260px"></select>
           <button class="btn btn-secondary btn-sm" onclick="saveRemoteAccess()">Сохранить</button>
         </div>
+        <details id="ra-hosts-box" style="margin-top:10px;font-size:12.5px">
+          <summary class="text-muted" style="cursor:pointer">Другой адрес сервера для отдельных путей</summary>
+          <div class="text-muted" style="margin:6px 0">
+            Если сервер — это вход каскада, через этот же каскад его публичный адрес недоступен:
+            укажите его адрес внутри туннеля (например, 10.8.0.1 для AmneziaWG). Пусто — общий адрес.
+            Ключ сервера проверяется тот же.</div>
+          <div id="ra-hosts"></div>
+        </details>
         <div style="margin-top:14px;font-size:12.5px">
           <div class="text-muted" style="margin-bottom:4px">Ключ шлюза — строка для ~/.ssh/authorized_keys пользователя на сервере:</div>
           <textarea id="ra-authkeys" rows="3" readonly spellcheck="false" class="monospace" style="width:100%"></textarea>
@@ -2067,6 +2075,16 @@ function renderRemoteAccess(d) {
   if (!_raDirty.has('ra-via') && document.activeElement !== via)
     via.innerHTML = (d.roads || []).map(r =>
       `<option value="${escH(r.id)}"${r.id === d.via ? ' selected' : ''}>${escH(r.label)}</option>`).join('');
+  const hostsBox = document.getElementById('ra-hosts');
+  if (!_raDirty.has('ra-hosts') && !hostsBox.contains(document.activeElement)) {
+    const hosts = d.hosts || {};
+    const rows = (d.roads || []).filter(r => r.id !== 'auto');
+    hostsBox.innerHTML = rows.map(r =>
+      `<div class="rule-add-row" style="margin-bottom:6px"><span style="min-width:200px">${escH(r.label)}</span>` +
+      `<input type="text" data-road="${escH(r.id)}" value="${escH(hosts[r.id] || '')}" placeholder="${escH(d.host || 'общий адрес')}"` +
+      ` autocomplete="off" spellcheck="false" style="min-width:200px"></div>`).join('');
+    if (Object.keys(hosts).length) document.getElementById('ra-hosts-box').open = true;
+  }
   document.getElementById('ra-authkeys').value = d.authorized_keys || '';
   document.getElementById('ra-key-btn').textContent = d.has_key ? 'Заменить ключ' : 'Создать ключ';
   document.getElementById('ra-hostfp').textContent = d.host_key_fingerprint || 'не задан';
@@ -2076,6 +2094,8 @@ async function loadRemoteAccess() {
     const el = document.getElementById(id);
     if (!el._raWatch) { el._raWatch = true; el.addEventListener('input', () => _raDirty.add(id)); el.addEventListener('change', () => _raDirty.add(id)); }
   });
+  const hostsBox = document.getElementById('ra-hosts');
+  if (!hostsBox._raWatch) { hostsBox._raWatch = true; hostsBox.addEventListener('input', () => _raDirty.add('ra-hosts')); }
   renderRemoteAccess(await apiJ('GET', '/api/remote-access'));
   // The runner moves from "connecting" to "up" (or from "up" to failing) on
   // its own; follow it while the card is on screen, and stop when it is not.
@@ -2099,9 +2119,13 @@ async function setRemoteAccess(body) {
 }
 function saveRemoteAccess() {
   const v = id => document.getElementById(id).value.trim();
+  const hosts = {};
+  document.querySelectorAll('#ra-hosts input[data-road]').forEach(el => {
+    if (el.value.trim()) hosts[el.dataset.road] = el.value.trim();
+  });
   _raDirty.clear();
   setRemoteAccess({host: v('ra-host'), port: +v('ra-port') || 22, user: v('ra-user'),
-                   remote_port: +v('ra-rport') || 2222, via: v('ra-via')});
+                   remote_port: +v('ra-rport') || 2222, via: v('ra-via'), hosts});
 }
 async function makeRemoteAccessKey() {
   const replace = document.getElementById('ra-key-btn').textContent.startsWith('Заменить');
