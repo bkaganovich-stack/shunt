@@ -56,6 +56,23 @@ class TestValidate:
         assert ra.validate({"user": "shunt-gw"})[0]["user"] == "shunt-gw"
         assert ra.validate({"via": "a b"})[1]
 
+    def test_per_road_hosts(self):
+        clean, errors = ra.validate({"hosts": {"amnezia": " 10.8.0.1 ", "trusttunnel": "",
+                                               "house": "riga.example"}})
+        assert errors == []
+        # Empty means "use the shared address" and is not stored.
+        assert clean["hosts"] == {"amnezia": "10.8.0.1", "house": "riga.example"}
+        assert ra.validate({"hosts": None})[0]["hosts"] == {}
+
+    @pytest.mark.parametrize("hosts", [{"amnezia": "10.8.0.1\n    ProxyCommand sh"},
+                                       {"amnezia": "fe80::1%eth0"}, {"amnezia": "10.8.0.1:22"},
+                                       {"amnezia": "a b"}, {"a b": "10.8.0.1"},
+                                       {"auto": "10.8.0.1"}, {"x\nHost *": "10.8.0.1"},
+                                       ["amnezia", "10.8.0.1"], "10.8.0.1"])
+    def test_per_road_hosts_refused_like_the_shared_one(self, hosts):
+        clean, errors = ra.validate({"hosts": hosts})
+        assert errors and "hosts" not in clean
+
     def test_missing_lists_every_gap(self):
         assert ra.missing({"host": ""}, False, False) == ["адрес сервера", "ключ шлюза", "ключ сервера"]
         assert ra.missing({"host": "x"}, True, True) == []
@@ -88,6 +105,27 @@ class TestSshSide:
         line = [l for l in text.splitlines() if "ProxyCommand" in l][0]
         assert line.endswith("socks_connect.py 192.168.244.6 1083 %h %p")
         assert "/usr/bin/python3 -I" in line
+
+    def test_road_override_changes_the_address_not_the_trust(self):
+        cfg = {**CFG, "hosts": {"amnezia": "10.8.0.1"}}
+        text = ra.ssh_config(ra.for_road(cfg, "amnezia"), ("192.168.244.6", 1083))
+        assert "    HostName 10.8.0.1\n" in text
+        assert f"    HostKeyAlias {ra.HOST_ALIAS}\n" in text
+        assert "StrictHostKeyChecking yes" in text
+        # Other roads keep the shared address; cfg itself is not changed.
+        assert "HostName rendezvous.example" in ra.ssh_config(ra.for_road(cfg, "trusttunnel"), None)
+        assert "HostName rendezvous.example" in ra.ssh_config(ra.for_road(cfg, ra.HOUSE), None)
+        assert cfg["host"] == "rendezvous.example"
+
+    def test_hand_edited_bad_override_is_never_written(self):
+        cfg = {**CFG, "hosts": {"amnezia": "10.8.0.1\n    ProxyCommand sh", "trusttunnel": 7}}
+        assert ra.host_for(cfg, "amnezia") == "rendezvous.example"
+        assert ra.host_for(cfg, "trusttunnel") == "rendezvous.example"
+        assert ra.config({"remote_access": {"hosts": "junk"}})["hosts"] == {}
+
+    def test_config_hosts_are_not_shared_with_defaults(self):
+        ra.config({})["hosts"]["x"] = "y"
+        assert ra.DEFAULTS["hosts"] == {} and ra.config({})["hosts"] == {}
 
     def test_forward_binds_loopback_at_both_ends(self):
         argv = ra.master_argv(CFG)
@@ -271,6 +309,7 @@ class FakeRunner(rr.Runner):
         self._settings, self.plan, self.probes = settings, list(plan), list(probes)
         self._has = (has_key, has_host_key)
         self.statuses, self.spawned, self.procs, self.t = [], [], [], 1000.0
+        self.dialled = []
 
     def now(self): return self.t
     def sleep(self, s): self.t += s
@@ -278,7 +317,9 @@ class FakeRunner(rr.Runner):
     def has_key(self): return self._has[0]
     def has_host_key(self): return self._has[1]
     def write_status(self, st): self.statuses.append(st)
-    def prepare(self, cfg, proxy): self.spawned.append(proxy)
+    def prepare(self, cfg, proxy):
+        self.spawned.append(proxy)
+        self.dialled.append(cfg["host"])
 
     def spawn_master(self, cfg):
         p = self.plan.pop(0)
@@ -320,6 +361,14 @@ class TestRunner:
         # A second failed walk waits longer.
         r.plan = [FakeProc(0, b"x timed out")] * 3
         assert r.cycle() == 2 * ra.BACKOFF_MIN
+
+    def test_each_road_dials_its_own_address(self):
+        settings = {"remote_access": {**CFG, "hosts": {"amnezia": "10.8.0.1",
+                                                        "trusttunnel": "10.9.0.1"}}}
+        r = FakeRunner(settings, [FakeProc(0, b"timed out")] * 3)
+        r.cycle()
+        assert r.dialled == ["10.8.0.1", "10.9.0.1", "rendezvous.example"]
+        assert r.spawned == [("192.168.244.6", 1083), ("192.168.244.10", 1084), None]
 
     def test_a_refused_key_stops_the_walk(self):
         r = FakeRunner(ON, [FakeProc(0, b"Permission denied (publickey).")])
@@ -438,6 +487,26 @@ class TestApi:
         assert client.post("/api/remote-access", json={"host": "a\nb"}).status_code == 400
         assert client.post("/api/remote-access", json={"via": "nonesuch"}).status_code == 400
 
+    def test_hosts_for_unknown_roads_are_refused(self, api):
+        client, state, _ = api
+        r = client.post("/api/remote-access", json={"hosts": {"nonesuch": "10.8.0.1"}})
+        assert r.status_code == 400 and "remote_access" not in state
+        assert client.post("/api/remote-access",
+                           json={"hosts": {"amnezia": "a\nb"}}).status_code == 400
+
+    def test_hosts_are_saved_and_shown(self, api):
+        client, state, _ = api
+        r = client.post("/api/remote-access", json={"host": "riga.example",
+                                                    "hosts": {"amnezia": "10.8.0.1", "house": ""}})
+        assert r.status_code == 200, r.text
+        assert state["remote_access"]["hosts"] == {"amnezia": "10.8.0.1"}
+        assert client.get("/api/remote-access").json()["hosts"] == {"amnezia": "10.8.0.1"}
+        # Leaving hosts out of a save keeps them; an empty map clears them.
+        client.post("/api/remote-access", json={"port": 22})
+        assert state["remote_access"]["hosts"] == {"amnezia": "10.8.0.1"}
+        client.post("/api/remote-access", json={"hosts": {}})
+        assert state["remote_access"]["hosts"] == {}
+
     @needs_keygen
     def test_key_is_made_here_and_only_the_public_half_comes_back(self, api):
         client, *_ = api
@@ -466,6 +535,10 @@ class TestApi:
         runs.clear()
         client.post("/api/remote-access", json={"host": "riga.example", "port": 22})
         assert ["systemctl", "restart", ra.UNIT] not in runs
+        # A new address for one road needs a new session.
+        client.post("/api/remote-access", json={"hosts": {"amnezia": "10.8.0.1"}})
+        assert ["systemctl", "restart", ra.UNIT] in runs
+        runs.clear()
         # Switched on but the unit is not running: never "Работает".
         assert "Работает" not in client.get("/api/remote-access").json()["status_text"]
         client.post("/api/remote-access", json={"enabled": False})

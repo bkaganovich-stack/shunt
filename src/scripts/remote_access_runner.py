@@ -166,6 +166,7 @@ class Runner:
         """Run one session on one road until it breaks.
         Returns (passed at least one check, reason it ended)."""
         self.write_status({"state": "connecting", "road": road})
+        cfg = ra.for_road(cfg, road)
         self.prepare(cfg, proxy)
         proc = self.spawn_master(cfg)
         err = bytearray()

@@ -1,3 +1,19 @@
+shunt (2.33.2) stable; urgency=medium
+
+  * Remote access can dial the server at a different address per road:
+    remote_access.hosts, e.g. {"amnezia": "10.8.0.1"}, set from the
+    collapsed "Другой адрес сервера для отдельных путей" block on the card.
+    With the cascade's Riga entry as the server, its public address is the
+    amnezia and trusttunnel tunnels' own endpoint, which the fail-closed
+    rule rejects inside those namespaces, so remote access could only come
+    up via AdGuard or the house path. The address inside the tunnel works.
+  * Each value is validated like the shared address; an entry that does not
+    validate is never written into ssh_config, and the pinned host key must
+    still match (HostKeyAlias). Changing an address restarts the session;
+    saving the same values does not.
+
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 27 Nov 2026 20:00:00 +0300
+
 shunt (2.33.0) stable; urgency=medium
 
   * Remote access to the gateway's own sshd, off unless switched on under

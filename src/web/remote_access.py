@@ -52,6 +52,12 @@ DEFAULTS = {
     "user": "shunt-gw",
     "remote_port": 2222,
     "via": AUTO,
+    # Per-road server address, for a road on which the public one cannot be
+    # reached: through a cascade whose own entry is that server, its public
+    # address is the tunnel's endpoint and the namespace's fail-closed rule
+    # refuses it, but its address inside the tunnel answers. Keyed by road
+    # (an egress id or "house"); a road not listed uses "host".
+    "hosts": {},
 }
 
 PROBE_INTERVAL = 60      # s between end-to-end checks while up
@@ -75,7 +81,26 @@ def config(settings: dict) -> dict:
     raw = settings.get("remote_access")
     if isinstance(raw, dict):
         out.update({k: raw[k] for k in DEFAULTS if k in raw})
+    hosts = out.get("hosts")
+    out["hosts"] = dict(hosts) if isinstance(hosts, dict) else {}
     return out
+
+
+def host_for(cfg: dict, road: str) -> str:
+    """The server address to dial on this road: its override, or the shared
+    one. An override that would not pass validate() (a hand-edited settings
+    file) is ignored rather than written into ssh_config."""
+    alt = (cfg.get("hosts") or {}).get(road)
+    if isinstance(alt, str) and alt and _valid_host(alt):
+        return alt
+    return cfg.get("host") or ""
+
+
+def for_road(cfg: dict, road: str) -> dict:
+    """cfg with "host" set to the address for this road. The pinned host key
+    still has to match: HostKeyAlias files it under one name whatever the
+    address, so an override changes where the ssh dials, not whom it trusts."""
+    return dict(cfg, host=host_for(cfg, road))
 
 
 _HOST_CHARS_RE = re.compile(r"^[A-Za-z0-9.:-]+$")
@@ -132,6 +157,29 @@ def validate(data: dict) -> tuple[dict, list[str]]:
             clean["via"] = via
         else:
             errors.append("Неизвестный путь")
+    if "hosts" in data:
+        raw = data.get("hosts")
+        if raw is None:
+            raw = {}
+        if not isinstance(raw, dict):
+            errors.append("Адреса для путей: ожидается список путь → адрес")
+        else:
+            hosts: dict = {}
+            before = len(errors)
+            for road, value in raw.items():
+                road = str(road).strip()
+                value = str(value or "").strip()
+                if road == AUTO or not _VIA_RE.match(road):
+                    errors.append("Адрес для пути: неизвестный путь")
+                elif not value:
+                    continue          # empty: the road uses the shared address
+                elif not _valid_host(value):
+                    errors.append(f"Адрес сервера для пути {road}: имя или IP-адрес, "
+                                  "без порта и пробелов")
+                else:
+                    hosts[road] = value
+            if len(errors) == before:     # one bad entry refuses the whole map
+                clean["hosts"] = hosts
     if "enabled" in data:
         clean["enabled"] = bool(data["enabled"])
     return clean, errors
