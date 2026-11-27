@@ -14,7 +14,7 @@ shunt (2.33.1) stable; urgency=medium
     the same rule. Fail-closed is unchanged: the bridge still cannot leave
     through the veth when its tunnel is down.
 
- -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 27 Nov 2026 18:00:00 +0300
+ -- Boris Kaganovich <bkaganovich@gmail.com>  Fri, 27 Nov 2026 19:00:00 +0300
 
 shunt (2.32.13) stable; urgency=medium
 
